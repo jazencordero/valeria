@@ -1,6 +1,6 @@
 // Reads her assignments (mod_assign_get_assignments) and where her hand-in
 // stands for one of them (mod_assign_get_submission_status).
-// Cut: no group assignments, no rubrics, no feedback files.
+// Cut: no rubrics, no feedback files. Of group assignments only the group's hand-in state is read.
 
 import { z } from "zod";
 import { callMoodle, type MoodleConn } from "../client";
@@ -152,27 +152,28 @@ const SubmissionFile = z.object({
   filesize: z.number().int().nonnegative(),
 });
 
+const Submission = z.object({
+  status: z.enum(["new", "draft", "submitted", "reopened"]),
+  timemodified: seconds,
+  plugins: z
+    .array(
+      z.object({
+        type: z.string(),
+        fileareas: z.array(z.object({ area: z.string(), files: z.array(SubmissionFile).optional() })).optional(),
+      }),
+    )
+    .optional(),
+});
+
 const StatusAnswer = z.object({
   // Missing when she cannot submit to this assignment at all.
   lastattempt: z
     .object({
-      // Missing when nothing was ever started. Group hand-ins come as `teamsubmission` (cut).
-      submission: z
-        .object({
-          status: z.enum(["new", "draft", "submitted", "reopened"]),
-          timemodified: seconds,
-          plugins: z
-            .array(
-              z.object({
-                type: z.string(),
-                fileareas: z
-                  .array(z.object({ area: z.string(), files: z.array(SubmissionFile).optional() }))
-                  .optional(),
-              }),
-            )
-            .optional(),
-        })
-        .optional(),
+      // Missing when nothing was ever started.
+      submission: Submission.optional(),
+      // The group's hand-in, on a group assignment (5 of her 24 on MyCourses). When it is
+      // there it is the one that counts: her own `submission` then stays "new".
+      teamsubmission: Submission.nullish(),
       graded: z.boolean().optional(),
       gradingstatus: z.string().optional(),
       canedit: z.boolean(),
@@ -203,11 +204,12 @@ export type SubmissionStatus = {
 // - status "submitted"                                     -> submitted
 // submittedAt is the submission's timemodified when its status is "submitted":
 // Moodle keeps no separate hand-in time, and a submitted hand-in can no longer change.
+// On a group assignment all of this is read from the group's `teamsubmission` instead.
 export async function getSubmissionStatus(conn: MoodleConn, assignId: number): Promise<SubmissionStatus> {
   const raw = await callMoodle(conn, FN_STATUS, { assignid: assignId });
   const a = parseAnswer(FN_STATUS, StatusAnswer, raw);
   const last = a.lastattempt;
-  const sub = last?.submission;
+  const sub = last?.teamsubmission ?? last?.submission;
   const canEdit = last?.canedit ?? false;
   if (!sub) {
     return { state: a.feedback ? "graded" : "none", submittedAt: null, files: [], canEdit };

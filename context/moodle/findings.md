@@ -47,3 +47,25 @@ So the QR code is the way in. Pasting a key is only a fallback for people who al
 ## Scrubbing
 
 Every saved answer went through `scripts/moodle/lib/scrub.mjs`. After the sitting a gap was found and fixed: calendar action URLs carried her session key (`sesskey=`) 13 times. The scrubber now redacts `sesskey=` and any `…key=` URL parameter, and the saved answers were scrubbed again.
+
+## Differences from the docs
+
+Found by running the readers against the shape-only copies of her real answers (`tests/fixtures/moodle/`, M1-40). The tests are the `*.real.test.ts` files beside each reader in `src/server/moodle/read/`.
+
+Fixed:
+
+- **Course names start with the code.** MyCourses full names read `ISM-E1005 - Forecasting Methods, Contact teaching, 31.8.2026-12.10.2026`; the docs' samples have no code in front. `getCourses` now drops a leading `<code> - ` (also `–` or `:`), since the code is stored apart. The teaching mode and dates after the name stay, as before.
+- **Group assignments.** 5 of her 24 assignments are group assignments (`teamsubmission: 1`, all in FAKE-E9002). For these Moodle puts the group's hand-in in `lastattempt.teamsubmission` and leaves her own `submission` as "new", so she would have shown as not handed in. `getSubmissionStatus` now reads `teamsubmission` when it is there. (Her saved status answer is for an individual assignment; the group case is tested with that answer reshaped as the docs describe.)
+
+Checked, no change needed:
+
+- **Short names** are `<code>_aalto-cur-P-<uuid>`, not `<code> - <name>`. The code reader already stops at the `_`; all 6 codes come out right (ISM-E1005, 37E00200, ISM-E3003, ISM-E2004, FAKE-E9001, FAKE-E9002).
+- **Dates** are Unix seconds, and 0 means "not set" (`cutoffdate` and `allowsubmissionsfromdate` are 0 on many). Every `duedate` is set. Times are UTC; no timezone field is sent in site info, courses or assignments, so local times must come from the school.
+- **"Needs a Submit press"** is only `submissiondrafts`, at the top level of each assignment, never in `configs`. It is 0 on all 24.
+- **`requiresubmissionstatement` is 1 on 3** assignments (all in 37E00200). The readers do not read it. It may matter for hand-in: the hand-in test (M0-08) should try one of these.
+- **Max files and size** come from `configs` (`assignsubmission` / `file` / `maxfilesubmissions`, `maxsubmissionsizebytes`) as text, as documented. Max files is 1 on 19, 2 on 1, 4 on 2, 20 on 2. The size limit is 419,430,400 bytes (400 MB, the site limit) on all 24. `filetypeslist` is also there (".pdf", "spreadsheet", "document,.pdf", or empty) and is not read yet.
+- **Brief attachments** (`introattachments`) have the documented shape, with `filepath`, `timemodified`, `isexternalfile` and `icon` extra. 24 files across the assignments; URLs carry no key.
+- **The `warnings` array** in `mod_assign_get_assignments` holds one entry: `item: module`, `warningcode: "1"`, "No access rights in module context". It names one module she cannot open; that module is simply not in the list. The reader ignores `warnings` and parses fine.
+- **Hidden flags.** Every course has `visible: 1` and `hidden: false`; assignments carry no visible flag. Nothing to change.
+- **Site info** matches the docs: `release` is there, `uploadfiles` is 1 (a number, not a boolean), `usermaxuploadfilesize` is 419,430,400.
+- **Submission status** sends `timestarted` and `extensionduedate` as `null`. The reader does not read them, so it parses.

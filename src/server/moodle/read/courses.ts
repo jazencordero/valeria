@@ -32,12 +32,27 @@ export function extractCode(text: string): string | null {
   return CODE.exec(text)?.[0] ?? null;
 }
 
+/**
+ * The course name without a leading "<code> - ". MyCourses starts every full name with the code
+ * ("ISM-E1005 - Forecasting Methods, Contact teaching, 31.8.2026-12.10.2026"); the code is kept
+ * apart in `code`, so the name does not repeat it. Anything else is left as Moodle sent it.
+ */
+export function nameWithoutCode(fullname: string, code: string | null): string {
+  if (!code || !fullname.startsWith(code)) return fullname;
+  const rest = /^\s*[-\u2013\u2014:]\s*(\S[\s\S]*)$/.exec(fullname.slice(code.length));
+  return rest ? rest[1] : fullname;
+}
+
 export async function getCourses(conn: MoodleConn, userId: number): Promise<Course[]> {
   const raw = await callMoodle(conn, FN, { userid: userId });
-  return parseAnswer(FN, CoursesAnswer, raw).map((c) => ({
-    moodleId: c.id,
-    code: extractCode(c.shortname) ?? extractCode(c.fullname),
-    name: c.fullname,
-    shortName: c.shortname,
-  }));
+  return parseAnswer(FN, CoursesAnswer, raw).map((c) => {
+    // MyCourses short names are "<code>_aalto-cur-P-<uuid>"; the code is the part before "_".
+    const code = extractCode(c.shortname) ?? extractCode(c.fullname);
+    return {
+      moodleId: c.id,
+      code,
+      name: nameWithoutCode(c.fullname, code),
+      shortName: c.shortname,
+    };
+  });
 }
