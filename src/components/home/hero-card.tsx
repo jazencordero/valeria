@@ -16,7 +16,7 @@ import { dueLabel, minutesLabel, timeLeft, type DateInput } from "@/lib/dates";
 export type HeroCardProps = {
   title: string;
   course: string;
-  /** Course code, for example ISM-E1005. */
+  /** Course code, for example ISM-E1005. Empty hides it. */
   code: string;
   dueAt: DateInput;
   /** The current time; passed in so the card stays pure. */
@@ -74,7 +74,13 @@ export function HeroCard({
         {title}
       </h3>
       <p className="mt-1 text-[15px] text-ink-2">
-        {course} · <span className="mono-in">{code}</span>
+        {course}
+        {code ? (
+          <>
+            {" · "}
+            <span className="mono-in">{code}</span>
+          </>
+        ) : null}
       </p>
       {hasEstimate && (
         <p className="mt-2 text-[13px] text-ink-3">{estimateLine(estimateMin, estimateNote)}</p>
