@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SCHOOLS, allowedSiteUrls } from "@/lib/schools";
 import { ensureSessionFor, newToken } from "@/server/auth/session";
 import { unseal } from "@/server/crypto/seal";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
@@ -31,7 +32,9 @@ const moodleCalls = () => vi.mocked(getSiteInfo).mock.calls.length;
 // Made-up values for tests only. The fake Moodle accepts DEMO_KEY and nothing else.
 const FAKE_SECRET = "test-only-seal-secret-not-real";
 const BAD_KEY = "not-a-real-key-0000";
-const AALTO = ALLOWED_SITES[0];
+const AALTO = SCHOOLS.aalto.siteUrl;
+// Made up: LUT has no site in schools.ts yet (M8-18), so any LUT address is refused.
+const LUT_GUESS = "https://moodle.lut.fi";
 // The sample site info answers with this Moodle user id.
 const SAMPLE_MOODLE_USER_ID = 4242;
 
@@ -54,7 +57,21 @@ async function anonymousUser() {
   return user.id;
 }
 
+describe("ALLOWED_SITES", () => {
+  it("comes from schools.ts: only schools that are enabled and have a site", () => {
+    expect(ALLOWED_SITES).toEqual(allowedSiteUrls());
+    expect(ALLOWED_SITES).toEqual([AALTO]);
+    expect(SCHOOLS.lut.enabled).toBe(false);
+  });
+});
+
 describe("allowedSite", () => {
+  it("refuses LUT and unknown sites while LUT is not enabled", () => {
+    expect(allowedSite(LUT_GUESS)).toBeNull();
+    expect(allowedSite("https://moodle.example.edu")).toBeNull();
+    expect(allowedSite("")).toBeNull();
+  });
+
   it("accepts only MyCourses over https, ignoring a trailing slash", () => {
     expect(allowedSite("https://mycourses.aalto.fi")).toBe(AALTO);
     expect(allowedSite("https://mycourses.aalto.fi/")).toBe(AALTO);
@@ -121,6 +138,23 @@ describe("connectWithKey", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(await t.db.select().from(moodleConnections)).toHaveLength(0);
       expect(await t.db.select().from(identities)).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("refuses a LUT site without calling Moodle, since LUT cannot connect yet", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const userId = await anonymousUser();
+      expect(await connectWithKey(userId, LUT_GUESS, DEMO_KEY, t.db)).toEqual({
+        ok: false,
+        reason: "site_not_allowed",
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(moodleCalls()).toBe(0);
+      expect(await t.db.select().from(moodleConnections)).toHaveLength(0);
     } finally {
       vi.unstubAllGlobals();
     }

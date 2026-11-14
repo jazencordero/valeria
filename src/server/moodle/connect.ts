@@ -1,5 +1,6 @@
 /*
- * Connecting MyCourses with a key she pastes (M1-13).
+ * Connecting her school's Moodle with a key she pastes (M1-13). Which sites
+ * may be connected comes from `@/lib/schools` (M5-01).
  *
  * `connectWithKey` checks the key with `getSiteInfo`, seals it, and stores one
  * `moodle_connections` row per user plus the identity
@@ -27,6 +28,7 @@
  * try that day, not the calendar day.
  */
 import { and, eq, ne } from "drizzle-orm";
+import { allowedSiteUrls } from "@/lib/schools";
 import { mergeUsers } from "@/server/auth/session";
 import { seal, unseal } from "@/server/crypto/seal";
 import { db as defaultDb, type Db } from "@/server/db/client";
@@ -36,9 +38,13 @@ import { allow } from "@/server/throttle";
 import { KeyRejected, type MoodleConn } from "./client";
 import { getSiteInfo } from "./read/site";
 
-/** The only Moodle sites a key may be connected to, for now. */
-export const ALLOWED_SITES = ["https://mycourses.aalto.fi"] as const;
-export type AllowedSite = (typeof ALLOWED_SITES)[number];
+/**
+ * The only Moodle sites a key may be connected to: the `siteUrl` of every
+ * school in `@/lib/schools` that is `enabled` and has one (M5-01). Today that
+ * is MyCourses alone; LUT is listed there but cannot connect until M8-18.
+ */
+export const ALLOWED_SITES: readonly string[] = Object.freeze(allowedSiteUrls());
+export type AllowedSite = string;
 
 export const MOODLE_IDENTITY_KIND = "moodle";
 
