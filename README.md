@@ -2,6 +2,8 @@
 
 Know if you'll be ready. Start studying in 10 seconds.
 
+Live: https://valeria-theta.vercel.app
+
 ## Run it
 
 ```bash

@@ -46,7 +46,7 @@ export type Pick = { exam: Exam; topic: Topic; reason: string };
 /**
  * "I have N minutes": pick the most valuable topic to work on right now.
  * Urgency = hours left on the topic / days until its exam.
- * Topics already in progress get a small boost, because re-entering warm context is cheaper.
+ * Topics already in progress get a strong boost (2.5x), because re-entering warm context is cheaper.
  */
 export function pickNext(state: AppState): Pick | null {
   let best: { pick: Pick; score: number } | null = null;
@@ -56,7 +56,7 @@ export function pickNext(state: AppState): Pick | null {
     for (const topic of exam.topics) {
       if (topic.status === "ready") continue;
       let score = hoursLeft(topic) / days;
-      if (topic.status === "learning") score *= 1.25;
+      if (topic.status === "learning") score *= 2.5;
       if (!best || score > best.score) {
         const reason =
           topic.status === "learning"

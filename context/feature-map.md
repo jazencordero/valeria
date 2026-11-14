@@ -1,5 +1,6 @@
 # Feature map
 
+Live app: https://valeria-theta.vercel.app
 Visual version (Whiteboard): https://claude.ai/artifact/TdfMS2wFZcSp412JfGvw9b
 This file is the source of truth. Keep the board roughly in sync when big things move.
 

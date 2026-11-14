@@ -50,12 +50,12 @@ export default function Home() {
         <p className="text-sm uppercase tracking-widest text-stone-400">Got a moment?</p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <span className="text-2xl font-medium">I have</span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {[15, 25, 45, 90].map((m) => (
               <button
                 key={m}
                 onClick={() => setMinutes(m)}
-                className={`rounded-full px-4 py-2 text-lg transition ${
+                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-base transition sm:px-4 sm:py-2 sm:text-lg ${
                   minutes === m ? "bg-amber-300 text-stone-900" : "bg-stone-800 text-stone-300 hover:bg-stone-700"
                 }`}
               >
@@ -87,7 +87,7 @@ export default function Home() {
         />
       )}
 
-      <section className="mb-6 flex items-center justify-between">
+      <section className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg font-semibold text-stone-900">Your exams</h2>
         <label className="flex items-center gap-2 text-sm text-stone-500">
           Free study hours per week
