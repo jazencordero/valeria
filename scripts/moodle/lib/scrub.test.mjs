@@ -233,3 +233,20 @@ test("the personal key lists are exported", () => {
   assert.ok(USER_ID_KEYS.includes("userid"));
   assert.ok(NAME_KEYS.includes("firstname"));
 });
+
+test("an email address inside any text is replaced, the same one the same way", () => {
+  const s = createScrubber();
+  const out = s({
+    summary: "<p>Questions: matti.meikalainen@aalto.fi or the course staff.</p>",
+    intro: "Send it to matti.meikalainen@aalto.fi before Friday",
+  });
+  assert.ok(!JSON.stringify(out).includes("meikalainen"));
+  assert.equal(out.summary, "<p>Questions: user1@example.invalid or the course staff.</p>");
+  assert.equal(out.intro, "Send it to user1@example.invalid before Friday");
+});
+
+test("a known name is swept out of a file name joined with underscores", () => {
+  const s = createScrubber();
+  const out = s({ firstname: "Ann", lastname: "Lee", filename: "Ann_Lee_essay.pdf" });
+  assert.equal(out.filename, "First1_Last1_essay.pdf");
+});

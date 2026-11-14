@@ -69,6 +69,8 @@ const S = {
 const FAKE_USER_ID_BASE = 900000;
 const TOKEN_IN_TEXT = /\b(wstoken|privatetoken|token)=([^&#"'\s]+)/gi;
 const USERID_IN_URL = /([?&](?:userid|user|id_user)=)(\d+)/gi;
+// Any email address in any text (a teacher's address in a course summary, say).
+const EMAIL_IN_TEXT = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu;
 
 // ---- Scrubber -------------------------------------------------------------------------
 
@@ -112,7 +114,8 @@ export function createScrubber() {
   function scrubText(s) {
     return s
       .replace(TOKEN_IN_TEXT, (_, k) => `${k}=REDACTED`)
-      .replace(USERID_IN_URL, (_, k, id) => `${k}${fakeUserId(id)}`);
+      .replace(USERID_IN_URL, (_, k, id) => `${k}${fakeUserId(id)}`)
+      .replace(EMAIL_IN_TEXT, (m) => fakeFor("email", m, (n) => `user${n}@example.invalid`));
   }
 
   function scrubValue(key, value, inPerson) {
@@ -172,8 +175,9 @@ export function createScrubber() {
   }
 
   // Whole words only, so a first name "Ann" does not turn "Annual Report" into "First1ual Report".
+  // An underscore ends a word here: file names like "Ann_Lee_essay.pdf" are common.
   const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const wordRe = (s) => new RegExp(`(?<![\\p{L}\\p{N}_])${escape(s)}(?![\\p{L}\\p{N}_])`, "gu");
+  const wordRe = (s) => new RegExp(`(?<![\\p{L}\\p{N}])${escape(s)}(?![\\p{L}\\p{N}])`, "gu");
 
   /** Return a scrubbed deep copy of a parsed Moodle answer (object, array or JSON string). */
   return function scrub(json) {
