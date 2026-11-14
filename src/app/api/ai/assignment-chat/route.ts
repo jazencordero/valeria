@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { aiRoute } from "@/server/ai/doorway";
-import { HISTORY_BUDGET_CHARS, READ_PAGES_MAX, buildContext } from "@/server/chat/context";
+import { HISTORY_BUDGET_CHARS, READ_PAGES_MAX, buildContext, type ChatTools } from "@/server/chat/context";
 import {
   ChatNotFound,
   appendMessage,
@@ -20,9 +20,12 @@ import {
  * 2. Her message is stored.
  * 3. The context is built again on every request (the course's AI policy can change mid-chat).
  * 4. The last 20 messages, cut to the history budget, go to the large model. Where the course
- *    allows AI the model may call `search_material` and `read_pages`, for up to 4 rounds.
+ *    allows AI the model may call `search_material`, `read_pages` and `write_draft` (M2-19),
+ *    for up to 4 rounds.
  * 5. When the reply has streamed to its end, ONE assistant message is stored: its text, plus a
- *    `source` part for each different `[file, p. N]` in it.
+ *    `source` part for each different `[file, p. N]` in it, plus one `draft` part if
+ *    `write_draft` saved a draft during this request. There is one draft per assignment, so
+ *    two calls in one request still give one part, and the draft holds the later text.
  *
  * What is stored when things go wrong:
  * - Every provider busy before the stream starts: the doorway answers 503 with the busy
@@ -30,7 +33,10 @@ import {
  * - The stream fails part-way (a provider error after the first words, or between tool rounds):
  *   the browser gets an `error` part with a fixed sentence, and nothing is stored for the
  *   assistant. Half an answer is never kept. Her message stays, so she can ask again.
- * - The model ends without any text (it used all its rounds on tools): nothing is stored.
+ * - The model ends without any text (it used all its rounds on tools): nothing is stored,
+ *   unless it saved a draft: then the message is the `draft` part alone, so the card shows.
+ * - A draft was saved and the stream then failed: the draft stays saved (the latest wins), but
+ *   no message points at it. She can ask again.
  * - She closes the tab mid-reply: the reply is still read to its end here and stored.
  *
  * One request is one row in `ai_calls` however many tool rounds it takes, so "40 an hour" counts
@@ -84,11 +90,36 @@ function historyFor(messages: ChatMessage[], budget: number): Turn[] {
 
 const CITATION = /\[([^[\]\n]{1,300}?,\s*p\.\s*\d+)\]/g;
 
-/** The reply as stored parts: the text, then one `source` per different `[file, p. N]` in it. */
-function replyParts(text: string): ChatPart[] {
-  const labels = new Set<string>();
-  for (const match of text.matchAll(CITATION)) labels.add(match[1].replace(/\s+/g, " ").trim());
-  return [{ type: "text", text }, ...[...labels].map((label): ChatPart => ({ type: "source", label }))];
+/**
+ * The reply as stored parts: the text, one `source` per different `[file, p. N]` in it, and the
+ * draft saved in this request, if any. Empty when there is neither text nor a draft.
+ */
+function replyParts(text: string, draftId: string | undefined): ChatPart[] {
+  const parts: ChatPart[] = [];
+  if (text) {
+    const labels = new Set<string>();
+    for (const match of text.matchAll(CITATION)) labels.add(match[1].replace(/\s+/g, " ").trim());
+    parts.push({ type: "text", text }, ...[...labels].map((label): ChatPart => ({ type: "source", label })));
+  }
+  if (draftId) parts.push({ type: "draft", draftId });
+  return parts;
+}
+
+/** The same tools, with `write_draft` reporting the id of each draft it saves. */
+function noticingDrafts(tools: ChatTools, onSaved: (draftId: string) => void): ChatTools {
+  const write = tools.write_draft;
+  if (!write) return tools;
+  return {
+    ...tools,
+    write_draft: {
+      ...write,
+      async execute(input) {
+        const output = await write.execute(input);
+        if ("draftId" in output) onSaved(output.draftId);
+        return output;
+      },
+    },
+  };
 }
 
 export const POST = aiRoute(
@@ -115,19 +146,24 @@ export const POST = aiRoute(
 
     // The end of the stream can be reported more than once; the reply is stored once.
     let saved = false;
+    // The draft `write_draft` saved in this request, if it did.
+    let draftId: string | undefined;
+    const tools = noticingDrafts(context.tools, (id) => {
+      draftId = id;
+    });
     const { result } = await ai.streamChat({
       system: context.system,
       messages,
       job: "assignment-chat",
-      tools: context.tools,
+      tools,
       maxToolRounds: TOOL_ROUNDS,
       onEnd: async ({ text }) => {
         if (saved) return;
         saved = true;
-        const reply = text.trim();
-        if (!reply) return;
+        const parts = replyParts(text.trim(), draftId);
+        if (parts.length === 0) return;
         try {
-          await appendMessage(user.id, chatId, "assistant", replyParts(reply));
+          await appendMessage(user.id, chatId, "assistant", parts);
         } catch {
           // A database error can carry the row it tried to write, so it is not printed.
           console.error("assignment-chat: the reply could not be stored");

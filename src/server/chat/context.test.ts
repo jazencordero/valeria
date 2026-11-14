@@ -3,12 +3,15 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { courseFiles, courses, filePages } from "@/server/db/schema/courses";
 import { users } from "@/server/db/schema/users";
-import { assignments } from "@/server/db/schema/work";
+import { assignments, drafts } from "@/server/db/schema/work";
+import { DRAFT_MAX_CHARS, getDraft, saveDraft } from "@/server/drafts/store";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import {
   BRIEF_ATTACHMENT_MAX,
   buildContext,
   cleanBrief,
+  CONCLUSION_PLACEHOLDER,
+  DRAFT_NOT_ALLOWED_ERROR,
   HISTORY_BUDGET_CHARS,
   NOT_SHARED_ERROR,
   READ_PAGES_MAX,
@@ -116,7 +119,7 @@ describe("buildContext, course allows AI", () => {
     expect(ctx.system).toContain("You draft with her, never for her");
     expect(ctx.system).not.toContain("Do not write hand-in text");
     // The tools, in the shape the AI SDK takes.
-    expect(Object.keys(ctx.tools).sort()).toEqual(["read_pages", "search_material"]);
+    expect(Object.keys(ctx.tools).sort()).toEqual(["read_pages", "search_material", "write_draft"]);
     for (const tool of Object.values(ctx.tools)) {
       expect(typeof tool.description).toBe("string");
       expect(typeof tool.inputSchema.safeParse).toBe("function");
@@ -124,6 +127,68 @@ describe("buildContext, course allows AI", () => {
     }
     expect(ctx.tools.read_pages!.inputSchema.safeParse({ fileId: brief.id, from: 0 }).success).toBe(false);
     expect(ctx.tools.search_material!.inputSchema.safeParse({}).success).toBe(false);
+    expect(ctx.tools.write_draft!.inputSchema.safeParse({ title: "T" }).success).toBe(false);
+    expect(ctx.tools.write_draft!.inputSchema.safeParse({ title: "T", markdown: "## A\n\ntext" }).success).toBe(true);
+  });
+
+  it("tells the model when and how to write a draft", async () => {
+    const { user, assignment } = await seed("allowed");
+    const { system } = await buildContext(user.id, assignment.id, opts());
+
+    expect(system).toContain("Call write_draft only when she asks you for a draft");
+    expect(system).toContain("Base every section of a draft on what she said in this chat");
+    expect(system).toContain("Leave the conclusion for her to write");
+    expect(system).toContain(CONCLUSION_PLACEHOLDER);
+    expect(system).toContain("Aalto requires her to say where she used AI");
+    expect(system).toContain("She may not hand in AI-written text as her own");
+    // No draft yet, so none is shown.
+    expect(system).not.toContain("Her current draft");
+  });
+
+  it("write_draft saves the draft, the latest wins, and the next prompt shows it", async () => {
+    const { user, assignment } = await seed("allowed");
+    const { tools } = await buildContext(user.id, assignment.id, opts());
+
+    const first = await tools.write_draft!.execute({ title: "Essay 1", markdown: "## Intro\n\nfirst version" });
+    if ("error" in first) throw new Error(first.error);
+    expect(first).toEqual({ saved: true, draftId: first.draftId, title: "Essay 1" });
+    const second = await tools.write_draft!.execute({ title: "Essay 1b", markdown: "## Intro\n\nsecond DRAFT-MARK" });
+    if ("error" in second) throw new Error(second.error);
+    expect(second.draftId).toBe(first.draftId);
+
+    expect(await t.db.select().from(drafts)).toHaveLength(1);
+    expect(await getDraft(user.id, assignment.id, t.db)).toMatchObject({
+      id: first.draftId,
+      title: "Essay 1b",
+      contentMd: "## Intro\n\nsecond DRAFT-MARK",
+    });
+
+    const next = await buildContext(user.id, assignment.id, opts());
+    expect(next.system).toContain('Her current draft, saved with write_draft, titled "Essay 1b"');
+    expect(next.system).toContain("second DRAFT-MARK");
+    expect(next.system).not.toContain("first version");
+
+    // A text over the limit is refused with a sentence, and the saved draft stays.
+    const tooLong = await tools.write_draft!.execute({ title: "T", markdown: "x".repeat(DRAFT_MAX_CHARS + 1) });
+    expect(tooLong).toHaveProperty("error");
+    expect(await getDraft(user.id, assignment.id, t.db)).toMatchObject({ title: "Essay 1b" });
+  });
+
+  it("stays under the budget with a full-length draft, a long brief and a big file", async () => {
+    const { user, course, assignment } = await seed("allowed");
+    await file(user.id, course.id, assignment.id, "Reader.pdf", Array.from({ length: 30 }, (_, i) => `p${i} ` + "lorem ".repeat(500)));
+    await t.db
+      .update(assignments)
+      .set({ introHtml: `<p>${"A very long brief sentence. ".repeat(2000)}</p>` })
+      .where(eq(assignments.id, assignment.id));
+    const text = "## Intro\n\n" + "d".repeat(DRAFT_MAX_CHARS - 30) + " DRAFT-END";
+    await saveDraft(user.id, assignment.id, { title: "Essay 1", contentMd: text }, t.db);
+
+    const ctx = await buildContext(user.id, assignment.id, opts());
+    expect(ctx.system.length).toBeLessThanOrEqual(SYSTEM_BUDGET_CHARS);
+    // The draft is whole; the attachment gave way.
+    expect(ctx.system).toContain("DRAFT-END");
+    expect(ctx.system).toContain("Assignment brief (start only)");
   });
 
   it("stays under the budget with a 200-page file attached", async () => {
@@ -216,6 +281,20 @@ describe("buildContext, course does not allow AI or has not said", () => {
     expect(ctx.system).toContain("Do not write hand-in text");
     expect(ctx.system).toContain("Explain concepts and give feedback");
     expect(ctx.system).not.toContain("search_material");
+    expect(ctx.system).not.toContain("write_draft");
+  });
+
+  it.each(["not_allowed", "unknown"] as const)("'%s': write_draft is not offered and an old draft is not sent", async (policy) => {
+    const { user, assignment } = await seed(policy);
+    // A draft from when the course still allowed AI.
+    await saveDraft(user.id, assignment.id, { title: "Old", contentMd: "## Intro\n\nOLD-DRAFT-MARK" }, t.db);
+
+    const ctx = await buildContext(user.id, assignment.id, opts());
+
+    expect(ctx.tools.write_draft).toBeUndefined();
+    expect(ctx.tools).toEqual({});
+    expect(ctx.system).not.toContain("write_draft");
+    expect(ctx.system).not.toContain("OLD-DRAFT-MARK");
   });
 
   it("'unknown': no brief text and no tools, and says she has not said yet", async () => {
@@ -234,6 +313,7 @@ describe("buildContext, course does not allow AI or has not said", () => {
     expect(ctx.system).toContain("Do not guess what the brief or any file says");
     expect(ctx.system).toContain("give feedback on text she writes or pastes herself");
     expect(ctx.system).not.toContain("Do not write hand-in text");
+    expect(ctx.system).not.toContain("write_draft");
     expect(ctx.system.length).toBeLessThanOrEqual(SYSTEM_BUDGET_CHARS);
   });
 });
@@ -259,6 +339,40 @@ describe("ownership", () => {
 
     expect(await tools.read_pages!.execute({ fileId: theirs.id, from: 1 })).toHaveProperty("error");
     expect(await tools.search_material!.execute({ query: "plasmolysis" })).toEqual({ hits: [] });
+  });
+
+  it("write_draft only ever writes her own assignment's draft", async () => {
+    const a = await seed("allowed", "Student A");
+    const b = await seed("allowed", "Student B");
+    await saveDraft(b.user.id, b.assignment.id, { title: "Theirs", contentMd: "their text" }, t.db);
+
+    const { tools } = await buildContext(a.user.id, a.assignment.id, opts());
+    const out = await tools.write_draft!.execute({ title: "Mine", markdown: "## Intro\n\nmy text" });
+    expect(out).toHaveProperty("draftId");
+
+    expect(await getDraft(b.user.id, b.assignment.id, t.db)).toMatchObject({ title: "Theirs", contentMd: "their text" });
+    expect(await getDraft(a.user.id, a.assignment.id, t.db)).toMatchObject({ title: "Mine" });
+    // Student A's prompt never shows Student B's draft.
+    expect((await buildContext(a.user.id, a.assignment.id, opts())).system).not.toContain("their text");
+  });
+
+  it("write_draft checks again when it runs: a changed policy or a lost assignment saves nothing", async () => {
+    const { user, course, assignment } = await seed("allowed");
+    const { tools } = await buildContext(user.id, assignment.id, opts());
+    const input = { title: "Essay 1", markdown: "## Intro\n\ntext" };
+
+    for (const policy of ["not_allowed", "unknown"] as const) {
+      await t.db.update(courses).set({ aiPolicy: policy }).where(eq(courses.id, course.id));
+      expect(await tools.write_draft!.execute(input)).toEqual({ error: DRAFT_NOT_ALLOWED_ERROR });
+    }
+    expect(await t.db.select().from(drafts)).toHaveLength(0);
+
+    await t.db.update(courses).set({ aiPolicy: "allowed" }).where(eq(courses.id, course.id));
+    expect(await tools.write_draft!.execute(input)).toHaveProperty("draftId");
+
+    await t.db.delete(assignments).where(eq(assignments.id, assignment.id));
+    expect(await tools.write_draft!.execute(input)).toEqual({ error: DRAFT_NOT_ALLOWED_ERROR });
+    expect(await t.db.select().from(drafts)).toHaveLength(0);
   });
 
   it("the tools check again when they run: a changed policy or a lost assignment stops them", async () => {

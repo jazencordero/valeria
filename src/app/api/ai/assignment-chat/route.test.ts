@@ -5,7 +5,7 @@ import { ensureSessionFor, SESSION_COOKIE } from "@/server/auth/session";
 import type { Db } from "@/server/db/client";
 import { courseFiles, courses, filePages } from "@/server/db/schema/courses";
 import { aiCalls } from "@/server/db/schema/system";
-import { assignments, chatMessages, chats } from "@/server/db/schema/work";
+import { assignments, chatMessages, chats, drafts } from "@/server/db/schema/work";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { appendMessage, getOrCreateChat } from "@/server/chat/store";
 import { startFakeAi, type FakeAi } from "../../../../../tests/fake-ai/server";
@@ -218,10 +218,10 @@ describe("POST /api/ai/assignment-chat", () => {
     expect(res.status).toBe(200);
     const parts = await chunks(res);
 
-    // Round one offered both tools; round two carried the tool's answer back to the model.
+    // Round one offered the three tools; round two carried the tool's answer back to the model.
     expect(ai.calls).toHaveLength(2);
     const offered = (ai.calls[0].body.tools as { function: { name: string } }[]).map((tool) => tool.function.name);
-    expect(offered.sort()).toEqual(["read_pages", "search_material"]);
+    expect(offered.sort()).toEqual(["read_pages", "search_material", "write_draft"]);
     const toolMessage = sentMessages(1).find((m) => m.role === "tool");
     expect(toolMessage).toBeDefined();
     const raw = typeof toolMessage!.content === "string" ? toolMessage!.content : JSON.stringify(toolMessage!.content);
@@ -248,6 +248,108 @@ describe("POST /api/ai/assignment-chat", () => {
     ]);
     // Two HTTP rounds, one request: one row.
     expect(await t.db.select().from(aiCalls)).toHaveLength(1);
+    // No draft was asked for: none stored, and no draft part above.
+    expect(await t.db.select().from(drafts)).toHaveLength(0);
+  });
+
+  it("a write_draft call stores the draft, and the saved message carries one draft part", async () => {
+    const s = await student("allowed", "ALPHA");
+    const other = await student("allowed", "BRAVO");
+    const markdown = "## Summary\n\nDRAFT-TEXT-55e0 Chloroplasts make sugar.\n\n## Conclusion\n\n[Your conclusion goes here.]";
+    ai.queue("groq", { rawBody: toolCallStream("write_draft", { title: "Essay 1", markdown }) });
+    ai.queue("groq", { text: "Your draft is saved. The conclusion is yours to write." });
+
+    const res = await POST(post({ assignmentId: s.assignment.id, text: "Please draft it from my notes." }, s.cookie));
+    expect(res.status).toBe(200);
+    const parts = await chunks(res);
+
+    // The draft is stored, for her and this assignment only.
+    const rows = await t.db.select().from(drafts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      userId: s.user.id,
+      assignmentId: s.assignment.id,
+      title: "Essay 1",
+      contentMd: markdown,
+    });
+    expect(rows[0].userId).not.toBe(other.user.id);
+
+    // The browser and the model both got the draft's id back, not an error.
+    const output = parts.find((p) => p.type === "tool-output-available");
+    expect(output!.output).toEqual({ saved: true, draftId: rows[0].id, title: "Essay 1" });
+    const toolMessage = sentMessages(1).find((m) => m.role === "tool");
+    expect(JSON.stringify(toolMessage!.content)).toContain(rows[0].id);
+
+    await vi.waitFor(async () => expect(await stored()).toHaveLength(2));
+    await new Promise((r) => setTimeout(r, 200));
+    const messages = await stored();
+    expect(messages.map((row) => row.role)).toEqual(["user", "assistant"]);
+    expect(messages[1].parts).toEqual([
+      { type: "text", text: "Your draft is saved. The conclusion is yours to write." },
+      { type: "draft", draftId: rows[0].id },
+    ]);
+
+    // The draft text is never printed.
+    const printed = JSON.stringify(logs.map((args) => args.map(String)));
+    expect(printed).not.toContain("DRAFT-TEXT-55e0");
+
+    // Next turn: the model is shown the saved draft, so she can ask for changes.
+    ai.queue("groq", { text: "Which part should change?" });
+    await chunks(await POST(post({ assignmentId: s.assignment.id, text: "Can you shorten it?" }, s.cookie)));
+    expect(String(sentMessages(2)[0].content)).toContain("DRAFT-TEXT-55e0");
+  });
+
+  it("two write_draft calls in one request: the latest text wins and there is one draft part", async () => {
+    const s = await student("allowed", "ALPHA");
+    ai.queue("groq", { rawBody: toolCallStream("write_draft", { title: "First try", markdown: "## One\n\nfirst" }) });
+    ai.queue("groq", { rawBody: toolCallStream("write_draft", { title: "Second try", markdown: "## Two\n\nsecond" }) });
+    ai.queue("groq", { text: "Saved [Lecture 3.pdf, p. 1]." });
+
+    await chunks(await POST(post({ assignmentId: s.assignment.id, text: "Draft it, please." }, s.cookie)));
+
+    const rows = await t.db.select().from(drafts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ title: "Second try", contentMd: "## Two\n\nsecond" });
+
+    await vi.waitFor(async () => expect(await stored()).toHaveLength(2));
+    expect((await stored())[1].parts).toEqual([
+      { type: "text", text: "Saved [Lecture 3.pdf, p. 1]." },
+      { type: "source", label: "Lecture 3.pdf, p. 1" },
+      { type: "draft", draftId: rows[0].id },
+    ]);
+  });
+
+  it("a draft saved by a reply that never wrote any text is still stored as a draft part", async () => {
+    const s = await student("allowed", "ALPHA");
+    ai.setDefault("groq", { rawBody: toolCallStream("write_draft", { title: "Essay 1", markdown: "## One\n\ntext" }) });
+
+    await chunks(await POST(post({ assignmentId: s.assignment.id, text: "Draft it, please." }, s.cookie)));
+
+    const rows = await t.db.select().from(drafts);
+    expect(rows).toHaveLength(1);
+    await vi.waitFor(async () => expect(await stored()).toHaveLength(2));
+    expect((await stored())[1].parts).toEqual([{ type: "draft", draftId: rows[0].id }]);
+  });
+
+  it("write_draft saves nothing once the course stops allowing AI mid-request", async () => {
+    const s = await student("allowed", "ALPHA");
+    ai.queue("groq", {
+      rawBody: toolCallStream("write_draft", { title: "Essay 1", markdown: "## One\n\ntext" }),
+      delayMs: 400,
+    });
+    ai.queue("groq", { text: "I could not save a draft for this course." });
+
+    const pending = POST(post({ assignmentId: s.assignment.id, text: "Draft it, please." }, s.cookie));
+    // The context was built while the course allowed AI; the policy changes before the tool runs.
+    await vi.waitFor(() => expect(ai.calls).toHaveLength(1));
+    await t.db.update(courses).set({ aiPolicy: "not_allowed" });
+    const parts = await chunks(await pending);
+
+    const output = parts.find((p) => p.type === "tool-output-available");
+    expect(output!.output).toHaveProperty("error");
+    expect(await t.db.select().from(drafts)).toHaveLength(0);
+    await vi.waitFor(async () => expect(await stored()).toHaveLength(2));
+    expect((await stored())[1].parts).toEqual([{ type: "text", text: "I could not save a draft for this course." }]);
   });
 
   it("stops after 4 tool rounds", async () => {
@@ -334,8 +436,10 @@ describe("POST /api/ai/assignment-chat", () => {
     await chunks(res);
 
     expect(ai.calls).toHaveLength(1);
+    // No tools at all, so no write_draft either.
     expect(ai.calls[0].body.tools).toBeUndefined();
     expect(ai.calls[0].body.tool_choice).toBeUndefined();
+    expect(JSON.stringify(ai.calls[0].body)).not.toContain("write_draft");
     const system = sentMessages(0)[0];
     expect(system.role).toBe("system");
     expect(system.content).not.toContain("BRIEF-TEXT-91aa");
