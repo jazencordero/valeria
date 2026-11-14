@@ -9,6 +9,9 @@
  * Her user and courses are read per request (cookie), so the side nav is
  * streamed inside Suspense; the fallback is the same side nav without her
  * courses or chip. The tab bar needs only the path.
+ *
+ * A demo user (M1-37, `users.settings.demo`) gets a thin "Demo data" line at
+ * the top of the page area, with "Restart demo" (GET /demo?reset=1).
  */
 import { asc, and, eq } from "drizzle-orm";
 import { connection } from "next/server";
@@ -47,6 +50,22 @@ async function SideNavForUser() {
   return <SideNav courses={rows} user={chip} />;
 }
 
+async function DemoBanner() {
+  await connection();
+  const user = await signedInUser();
+  // Same check as `isDemo` in @/server/demo/seed, written out so the shell does not load the seed code.
+  if (user.settings?.demo !== true) return null;
+  return (
+    <p className="sticky top-0 z-10 m-0 flex items-center justify-center gap-3 border-b border-line bg-butter px-4 py-1 text-[12px] font-medium text-ink">
+      <span>Demo data</span>
+      {/* A route handler, not a page: a plain link, so no prefetch runs the reset. */}
+      <a href="/demo?reset=1" className="text-ink-2 underline underline-offset-2">
+        Restart demo
+      </a>
+    </p>
+  );
+}
+
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="grid h-dvh grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-surface min-[700px]:grid-cols-[auto_minmax(0,1fr)] min-[700px]:grid-rows-[minmax(0,1fr)] min-[700px]:bg-paper">
@@ -54,6 +73,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <SideNavForUser />
       </Suspense>
       <main className="relative min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain bg-surface [container-type:inline-size]">
+        <Suspense fallback={null}>
+          <DemoBanner />
+        </Suspense>
         {children}
       </main>
       <Suspense fallback={<TabBarView pathname={null} />}>
