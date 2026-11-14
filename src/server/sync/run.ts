@@ -44,6 +44,8 @@
  *   so the caller stops; the next time she opens the app it tries again.
  * - Anything else is a bug and is thrown.
  * A finished sync sets `last_sync_at`, status 'ok' and clears `last_error`.
+ * It also adds one `sync-files` job for her (deduped per user), which lists
+ * her course files in the background (./files). An unfinished call adds none.
  *
  * Cut: no lock. Two calls at the same moment (two tabs) both do the same
  * slice; the rows are still written once, Moodle is asked twice.
@@ -52,11 +54,13 @@ import { eq, sql } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { MOODLE_STATUSES, moodleConnections } from "@/server/db/schema/moodle";
 import { users } from "@/server/db/schema/users";
+import { enqueue } from "@/server/jobs/queue";
 import { KeyRejected, MoodleError } from "@/server/moodle/client";
 import { getAssignments, getSubmissionStatus, type Assignment } from "@/server/moodle/read/assignments";
 import { getCourses } from "@/server/moodle/read/courses";
 import { syncAssignments, type SyncAssignmentsDeps } from "./assignments";
 import { NotConnected, syncCourses, type SyncCoursesDeps } from "./courses";
+import { SYNC_FILES_KIND } from "./files";
 
 /** No new step, so no new Moodle call, starts after this much of one call. */
 export const BUDGET_MS = 8_000;
@@ -198,6 +202,12 @@ export async function syncNow(
       }
       mayStop = true;
     }
+
+    // Her course files are listed in the background (./files, M2-08): one
+    // `sync-files` job per user, so a sync that finishes while the last job
+    // still waits adds nothing. Added before the sync is marked finished: if
+    // this fails, the cursor is still there and the next call tries again.
+    await enqueue(SYNC_FILES_KIND, {}, { userId, dedupeKey: userId, db: database, now: () => new Date(deps.now()) });
 
     await database
       .update(moodleConnections)

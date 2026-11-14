@@ -6,6 +6,7 @@ import { seal } from "@/server/crypto/seal";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { courses } from "@/server/db/schema/courses";
 import { moodleConnections } from "@/server/db/schema/moodle";
+import { jobs } from "@/server/db/schema/system";
 import { users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
 import { MoodleDown } from "@/server/moodle/client";
@@ -13,6 +14,7 @@ import { ALLOWED_SITES, connectWithKey } from "@/server/moodle/connect";
 import { DEMO_KEY } from "@/server/moodle/fake-inline";
 import { getAssignments, getSubmissionStatus, type Assignment } from "@/server/moodle/read/assignments";
 import { getCourses } from "@/server/moodle/read/courses";
+import { SYNC_FILES_KIND } from "./files";
 import { BUDGET_MS, CURSOR_KEY, CURSOR_MAX_AGE_MS, FRESH_MS, SLICE, cursorFrom, syncNow, type SyncNowDeps } from "./run";
 
 // Made-up values for tests only. The fake Moodle accepts DEMO_KEY and nothing else.
@@ -121,6 +123,10 @@ async function assignmentIds(userId: string) {
 
 async function courseCount(userId: string) {
   return (await t.db.select({ id: courses.id }).from(courses).where(eq(courses.userId, userId))).length;
+}
+
+async function syncFilesJobs() {
+  return t.db.select().from(jobs).where(eq(jobs.kind, SYNC_FILES_KIND)).orderBy(asc(jobs.createdAt));
 }
 
 const range = (from: number, count: number) => Array.from({ length: count }, (_, i) => from + i);
@@ -295,6 +301,58 @@ describe("syncNow", () => {
     expect((await settingsOf(userId)).moodleCalls).toEqual({ day: "2026-11-14", count: 7 });
     expect((await syncNow(userId, {}, t.db, deps)).more).toBe(false);
     expect(await settingsOf(userId)).toEqual({ moodleCalls: { day: "2026-11-14", count: 7 } });
+  }, SLOW);
+
+  it("adds one sync-files job for her when a sync finishes, and none while a step is unfinished", async () => {
+    const userId = await connectedUser();
+    const { deps, state } = fakeMoodle({ callMs: 2_000, assignments: 20 });
+
+    // Time runs out with assignments left: no job yet.
+    expect((await syncNow(userId, {}, t.db, deps)).more).toBe(true);
+    expect(await syncFilesJobs()).toEqual([]);
+
+    state.clock += 1_000;
+    expect((await syncNow(userId, {}, t.db, deps)).more).toBe(false);
+    const queued = await syncFilesJobs();
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({ userId, status: "queued", payload: { _dedupeKey: userId } });
+    // Due at once, on the sync's own clock.
+    expect(queued[0].runAfter.getTime()).toBe(state.clock);
+
+    // Another finished sync while that job still waits: still one job.
+    state.clock += MINUTE;
+    expect((await syncNow(userId, { force: true }, t.db, deps)).more).toBe(true);
+    expect((await syncNow(userId, { force: true }, t.db, deps)).more).toBe(false);
+    expect(await syncFilesJobs()).toEqual(queued);
+
+    // A call that asks Moodle nothing adds nothing; once the job has run, the next finished sync adds a new one.
+    await t.db.update(jobs).set({ status: "done" }).where(eq(jobs.kind, SYNC_FILES_KIND));
+    expect((await syncNow(userId, {}, t.db, deps)).ran).toBe(false);
+    expect(await syncFilesJobs()).toHaveLength(1);
+    state.clock += FRESH_MS;
+    expect((await syncNow(userId, {}, t.db, deps)).more).toBe(true);
+    expect(await syncFilesJobs()).toHaveLength(1);
+    expect((await syncNow(userId, {}, t.db, deps)).more).toBe(false);
+    expect((await syncFilesJobs()).map((j) => j.status)).toEqual(["done", "queued"]);
+  }, SLOW);
+
+  it("adds no sync-files job when Moodle is down or rejects the key", async () => {
+    const userId = await connectedUser();
+    const { deps, state } = fakeMoodle({ assignments: 2 * SLICE });
+    state.downFor.add(9000);
+
+    expect(await syncNow(userId, {}, t.db, deps)).toMatchObject({ ran: true, more: false });
+    expect((await connectionOf(userId)).lastSyncAt).toBeNull();
+    expect(await syncFilesJobs()).toEqual([]);
+
+    await t.db
+      .update(moodleConnections)
+      .set({ tokenSealed: seal("a-key-moodle-no-longer-takes") })
+      .where(eq(moodleConnections.userId, userId));
+    state.downFor.clear();
+    expect((await syncNow(userId, { force: true }, t.db, deps)).status).toBe("expired");
+    expect(await syncFilesJobs()).toEqual([]);
+
   }, SLOW);
 
   it("answers not_connected, without asking Moodle, for a user with no connection", async () => {
