@@ -132,6 +132,9 @@ export async function startFakeMoodle(opts: { dir?: string; token?: string; host
       if (!res.headersSent) json(res, 500, { error: String(err), errorcode: "fakeerror" });
     });
   });
+  // Node closes idle keep-alive sockets after 5 s, and fetch may reuse one at that moment
+  // ("other side closed"). Slow suites idle that long between calls, so keep sockets longer.
+  server.keepAliveTimeout = 60_000;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, host, () => resolve());

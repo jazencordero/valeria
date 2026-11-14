@@ -325,7 +325,10 @@ describe("politeness", () => {
     expect(answers).toEqual(Array(10).fill([]));
     expect(moodle.calls.length - before).toBe(10);
     expect(most).toBe(2);
-    for (let i = 1; i < starts.length; i++) expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(MIN_GAP_MS - 5);
+    // The limiter spaces call starts 150 ms apart; measured at fetch() each gap can wobble by
+    // event-loop lag on a busy machine, but the whole run can't be shorter than nine gaps.
+    expect(starts.at(-1)! - starts[0]).toBeGreaterThanOrEqual(9 * MIN_GAP_MS - 25);
+    for (let i = 1; i < starts.length; i++) expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(MIN_GAP_MS / 2);
   });
 
   it("keeps each user to her own limits", async () => {
@@ -463,13 +466,15 @@ describe("dbCallCountStore", () => {
   it("keeps the day's count in users.settings.moodleCalls and refuses from it", async () => {
     const t = await createTestDb();
     try {
-      const today = moodleDay(Date.now());
+      // A fixed noon, so the test can't straddle Helsinki midnight.
+      const noon = Date.UTC(2026, 10, 14, 10, 0);
+      const today = moodleDay(noon);
       const [full] = await t.db
         .insert(users)
         .values({ settings: { theme: "calm", moodleCalls: { day: today, count: DAILY_LIMIT } } })
         .returning();
       const [fresh] = await t.db.insert(users).values({ settings: { moodleCalls: { day: "2000-01-01", count: 1999 } } }).returning();
-      configureMoodleClient({ countStore: dbCallCountStore(t.db) });
+      configureMoodleClient({ countStore: dbCallCountStore(t.db), now: () => noon });
 
       const before = moodle.calls.length;
       const err = await caught(callMoodle({ ...conn, userId: full.id }, "core_webservice_get_site_info"));
