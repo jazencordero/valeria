@@ -42,7 +42,7 @@ export const PERSON_EXTRA_KEYS = ["idnumber", "phone1", "phone2", "address", "ci
 export const FREE_TEXT_KEYS = ["feedback", "feedbacktext", "feedbackcomments", "commenttext"];
 
 /** Secrets. Also any `token=` / `wstoken=` / `privatetoken=` / `sesskey=` / `…key=` inside any string. */
-export const SECRET_KEYS = ["token", "wstoken", "privatetoken", "userprivateaccesskey", "sesskey"];
+export const SECRET_KEYS = ["token", "wstoken", "privatetoken", "userprivateaccesskey", "sesskey", "useridnumber"];
 
 /** Keys whose object value (or array of objects) is a person. */
 export const PERSON_CONTAINER_KEYS = ["user", "users", "participant", "participants", "members", "contacts", "author", "teachers", "students", "enrolledusers", "userfrom", "userto"];

@@ -265,3 +265,11 @@ test("session keys and other key= URL parameters are redacted", () => {
   assert.ok(out.html.includes("&amp;sesskey=REDACTED"));
   assert.equal(out.sesskey, "REDACTED");
 });
+
+test("the student number in a grade report is redacted", () => {
+  const s = createScrubber();
+  const out = s({ usergrades: [{ courseid: 3, userid: 42, userfullname: "Ann Lee", useridnumber: "123456789" }] });
+  assert.ok(!JSON.stringify(out).includes("123456789"));
+  assert.equal(out.usergrades[0].useridnumber, "REDACTED");
+  assert.equal(out.usergrades[0].courseid, 3);
+});
