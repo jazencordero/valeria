@@ -350,6 +350,28 @@ describe("confirmHandin", () => {
     expect((await confirmHandin(her, (await review()).code, PDF, opts())).ok).toBe(true);
   });
 
+  it("when Moodle goes quiet on the submit, believes the read-back instead of saying nothing was sent", async () => {
+    // The submit answer is lost, but Moodle did take it.
+    moodle.override("mod_assign_submit_for_grading", { status: 502, body: {} });
+    expect((await confirmHandin(her, (await review()).code, PDF, opts())).ok).toBe(true);
+    expect((await assignmentRow()).state).toBe("submitted");
+  });
+
+  it("when Moodle goes quiet on the submit and still shows a draft, says to check, not that nothing was sent", async () => {
+    moodle.override("mod_assign_submit_for_grading", { status: 502, body: {} });
+    moodleShows([{ filename: PDF.name, filesize: PDF.bytes.byteLength }], "draft");
+    expect(await confirmHandin(her, (await review()).code, PDF, opts())).toEqual({ ok: false, reason: "not_shown" });
+    expect((await assignmentRow()).state).toBe("open");
+  });
+
+  it("when Moodle goes quiet on the save and shows no file of hers, it is `moodle_down`", async () => {
+    moodle.override("mod_assign_save_submission", { status: 502, body: {} });
+    moodleShows([]);
+    expect(await confirmHandin(her, (await review()).code, PDF, opts())).toEqual({ ok: false, reason: "moodle_down" });
+    expect(fns()).toEqual(["upload", "mod_assign_save_submission", "mod_assign_get_submission_status"]);
+    expect((await assignmentRow()).state).toBe("open");
+  });
+
   it("is `refused` with Moodle's message when Moodle refuses the save, and makes no submit call", async () => {
     moodle.override("mod_assign_save_submission", {
       body: [{ item: String(ASSIGN), itemid: ASSIGN, warningcode: "couldnotsavesubmission", message: "Could not save submission" }],

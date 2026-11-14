@@ -39,6 +39,11 @@
  *   limit) and an answer we cannot read -> `moodle_down`; any other Moodle
  *   error or warning (bad key, function not allowed, "could not save") ->
  *   `refused` with Moodle's message.
+ * - If Moodle goes quiet during the save or the submit (not the upload), that
+ *   call may still have gone through, so step 4 runs anyway: Moodle lists the
+ *   hand-in -> success; the save left no file of ours -> `moodle_down`
+ *   (nothing was sent); anything else (a saved draft whose submit is unknown,
+ *   or no readable answer) -> `not_shown`, so she checks MyCourses.
  * - Step 4 failing for any reason (Moodle down while reading, odd answer) is
  *   `not_shown`, not `moodle_down`: the writes went through, so she must
  *   check MyCourses rather than be invited to hand in again.
@@ -182,13 +187,22 @@ export async function confirmHandin(
   const tap = made.tap;
 
   // 3. The writes.
-  let draftItemId: number;
+  let draftItemId = 0;
+  // Set when Moodle went quiet during the save or the submit: that call may
+  // still have gone through, so "nothing was sent" is not ours to say yet.
+  let wentQuiet: "save" | "submit" | null = null;
+  let step: "upload" | "save" | "submit" = "upload";
   try {
     draftItemId = await uploadDraftFile(conn, tap, { name: fileName, bytes: file.bytes });
+    step = "save";
     await saveSubmission(conn, tap, a.moodleId, draftItemId);
+    step = "submit";
     if (a.needsSubmitButton) await submitForGrading(conn, tap, a.moodleId);
   } catch (err) {
-    return fromMoodleError(err);
+    const failure = fromMoodleError(err);
+    // A failed upload leaves nothing in her assignment, and a refusal is Moodle's clear no.
+    if (step === "upload" || failure.reason !== "moodle_down") return failure;
+    wentQuiet = step;
   }
 
   // 4. Believe Moodle, not our requests.
@@ -198,7 +212,12 @@ export async function confirmHandin(
   } catch {
     return { ok: false, reason: "not_shown" };
   }
-  if (!listed(status, fileName, size)) return { ok: false, reason: "not_shown" };
+  if (!listed(status, fileName, size)) {
+    // The save never reached her assignment: truly nothing was sent.
+    const ours = status.files.some((f) => f.size === size);
+    if (wentQuiet === "save" && !ours) return { ok: false, reason: "moodle_down" };
+    return { ok: false, reason: "not_shown" };
+  }
 
   // 5. Our record.
   const submittedAt = status.submittedAt ?? now;
