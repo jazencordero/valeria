@@ -78,6 +78,84 @@ function courseContents(courseid) {
   ];
 }
 
+// ---- Lecture PDFs (M0-14), only with startMock({ lectures: true }) --------------------
+// Adds two courses (CS-C3120 with lecture PDFs, CS-C3100 so "CS-C31" is ambiguous), their
+// contents and token downloads from /webservice/pluginfile.php. Without the option every
+// answer above is unchanged.
+
+export const LECTURE_COURSES = [
+  { id: 303, shortname: "CS-C3120", fullname: "Human-Computer Interaction", visible: 1, startdate: 1788220800, enddate: 1796083200 },
+  { id: 304, shortname: "CS-C3100", fullname: "Computer Graphics", visible: 1, startdate: 1788220800, enddate: 1796083200 },
+];
+
+const tinyPdf = (title) =>
+  Buffer.from(`%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n% ${title}\ntrailer << /Root 1 0 R >>\n%%EOF\n`, "utf8");
+
+const PF = "/webservice/pluginfile.php";
+/** Files the mock serves, by path. */
+export const LECTURE_FILES = {
+  [`${PF}/31/mod_resource/content/1/overview.pdf`]: tinyPdf("Course overview"),
+  [`${PF}/32/mod_resource/content/1/lecture1.pdf`]: tinyPdf("Lecture 1: what is HCI"),
+  [`${PF}/33/mod_folder/content/0/ex1.pdf`]: tinyPdf("Exercise 1"),
+  [`${PF}/33/mod_folder/content/0/ex2.PDF`]: tinyPdf("Exercise 2, a longer one"),
+  [`${PF}/33/mod_folder/content/0/notes.docx`]: Buffer.from("not a pdf"),
+  [`${PF}/34/mod_resource/content/1/draft.pdf`]: tinyPdf("Hidden draft"),
+  [`${PF}/36/mod_resource/content/1/lecture3.pdf`]: tinyPdf("Lecture 3"),
+};
+
+const lectureFile = (path, mimetype, extra = {}) => ({
+  type: "file",
+  filename: path.split("/").pop(),
+  filepath: "/",
+  filesize: LECTURE_FILES[path]?.length ?? 0,
+  mimetype,
+  fileurl: path,
+  timemodified: 1788307200,
+  ...extra,
+});
+
+function lectureContents(courseid) {
+  if (Number(courseid) !== 303) return Number(courseid) === 304 ? [] : undefined;
+  return [
+    {
+      id: 30, section: 0, name: "General",
+      modules: [
+        { id: 7001, name: "Course overview", modname: "resource", uservisible: true, contents: [lectureFile(`${PF}/31/mod_resource/content/1/overview.pdf`, "application/pdf")] },
+        { id: 7002, name: "Course page", modname: "url", uservisible: true, contents: [{ type: "url", filename: "Course page", fileurl: "https://example.org" }] },
+      ],
+    },
+    {
+      id: 31, section: 1, name: "Week 1",
+      modules: [
+        { id: 7003, name: "Lecture 1: What is HCI?", modname: "resource", uservisible: true, contents: [lectureFile(`${PF}/32/mod_resource/content/1/lecture1.pdf`, "application/pdf")] },
+        {
+          id: 7004, name: "Exercise sheets", modname: "folder", uservisible: true,
+          contents: [
+            lectureFile(`${PF}/33/mod_folder/content/0/ex1.pdf`, "application/pdf"),
+            lectureFile(`${PF}/33/mod_folder/content/0/notes.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            lectureFile(`${PF}/33/mod_folder/content/0/ex2.PDF`, ""),
+          ],
+        },
+        { id: 7005, name: "Hidden draft", modname: "resource", uservisible: false, contents: [lectureFile(`${PF}/34/mod_resource/content/1/draft.pdf`, "application/pdf")] },
+      ],
+    },
+    {
+      id: 32, section: 2, name: "Week 2",
+      modules: [
+        // Says 40 MB; never served at that size. The script must skip it on filesize alone.
+        { id: 7006, name: "Lecture 2 full recording slides", modname: "resource", uservisible: true, contents: [lectureFile(`${PF}/35/mod_resource/content/1/lecture2.pdf`, "application/pdf", { filesize: 40 * 1024 * 1024 })] },
+        { id: 7007, name: "Lecture 3", modname: "resource", uservisible: true, contents: [lectureFile(`${PF}/36/mod_resource/content/1/lecture3.pdf`, "application/pdf")] },
+      ],
+    },
+  ];
+}
+
+function lectureAnswer(fn, params) {
+  if (fn === "core_enrol_get_users_courses") return [...COURSES, ...LECTURE_COURSES];
+  if (fn === "core_course_get_contents") return lectureContents(params.courseid);
+  return undefined;
+}
+
 // ---- Hand-in test (M0-04), only with startMock({ handin: true }) ----------------------
 // Adds submissiondrafts + configs to assignments and answers the three write/read calls
 // the hand-in test uses. Without the option every answer above is unchanged.
@@ -206,7 +284,8 @@ async function handle(req, res, opts, state) {
     }
     const fn = form.get("wsfunction");
     state.calls.push({ fn, params });
-    const special = opts.handin ? handinAnswer(fn, params, state) : undefined;
+    let special = opts.handin ? handinAnswer(fn, params, state) : undefined;
+    if (special === undefined && opts.lectures) special = lectureAnswer(fn, params);
     return send(res, 200, special !== undefined ? special : restAnswer(fn, params));
   }
 
@@ -221,6 +300,15 @@ async function handle(req, res, opts, state) {
     return send(res, 200, [
       { component: "user", contextid: 5, userid: String(MOCK_USERID), filearea: "draft", filename: file.name, filepath: "/", itemid: 777001, license: "allrightsreserved", author: "Test Student", source: "" },
     ]);
+  }
+
+  if (opts.lectures && req.method === "GET" && path.startsWith(`${PF}/`)) {
+    if (url.searchParams.get("token") !== MOCK_TOKEN) return send(res, 200, { error: "Invalid token", errorcode: "invalidtoken" });
+    state.calls.push({ fn: "download", params: { path } });
+    const bytes = LECTURE_FILES[path];
+    if (!bytes) return send(res, 404, { error: "File not found", errorcode: "filenotfound" });
+    res.writeHead(200, { "content-type": path.endsWith(".docx") ? "application/octet-stream" : "application/pdf", "content-length": bytes.length });
+    return res.end(bytes);
   }
 
   if (req.method === "GET" && path === "/admin/tool/mobile/launch.php") {
@@ -260,11 +348,12 @@ async function handle(req, res, opts, state) {
  * Start the mock. port 0 picks a free port. Resolves to { url, port, close, calls }.
  * `calls` logs every REST call ({ fn, params }) and every upload ({ fn: "upload" }).
  * `handin: true` turns on the hand-in answers (see handinAnswer).
+ * `lectures: true` turns on the lecture PDF courses and downloads (see lectureAnswer).
  */
-export function startMock({ port = 0, host = "127.0.0.1", handin = false } = {}) {
+export function startMock({ port = 0, host = "127.0.0.1", handin = false, lectures = false } = {}) {
   const state = { calls: [], drafts: new Map(), submissions: new Map() };
   const server = createServer((req, res) => {
-    handle(req, res, { handin }, state).catch((err) => send(res, 500, { error: String(err?.message || err), errorcode: "mockerror" }));
+    handle(req, res, { handin, lectures }, state).catch((err) => send(res, 500, { error: String(err?.message || err), errorcode: "mockerror" }));
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);
