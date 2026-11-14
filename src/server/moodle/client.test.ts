@@ -46,9 +46,9 @@ afterEach(() => {
 });
 
 /** A fake clock: every wait is instant, moves the clock on, and is remembered. */
-function instantSleep(): number[] {
+function instantSleep(start: number = Date.now()): number[] {
   const waits: number[] = [];
-  let t = Date.now();
+  let t = start;
   configureMoodleClient({
     now: () => t,
     sleep: async (ms) => {
@@ -414,7 +414,9 @@ describe("politeness", () => {
   });
 
   it("counts 2,000 calls in memory, then refuses", async () => {
-    instantSleep();
+    // A fixed midday start: 2,000 calls 150 ms apart take five minutes on the fake
+    // clock, which crossed Helsinki midnight (and reset the count) when run after 23:55.
+    instantSleep(Date.UTC(2026, 10, 14, 10, 0));
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json([]));
     const her = { ...conn, userId: "u-memory" };
     for (let i = 0; i < DAILY_LIMIT; i++) await callMoodle(her, "core_course_get_categories");
