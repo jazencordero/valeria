@@ -78,6 +78,87 @@ function courseContents(courseid) {
   ];
 }
 
+// ---- Hand-in test (M0-04), only with startMock({ handin: true }) ----------------------
+// Adds submissiondrafts + configs to assignments and answers the three write/read calls
+// the hand-in test uses. Without the option every answer above is unchanged.
+
+const fileCfg = (enabled) => [
+  { plugin: "file", subtype: "assignsubmission", name: "enabled", value: enabled ? "1" : "0" },
+  { plugin: "file", subtype: "assignsubmission", name: "maxfilesubmissions", value: "1" },
+  { plugin: "file", subtype: "assignsubmission", name: "maxsubmissionsizebytes", value: "1048576" },
+  { plugin: "onlinetext", subtype: "assignsubmission", name: "enabled", value: enabled ? "0" : "1" },
+];
+
+// 9001: separate Submit button. 9002: saving counts as handing in. 9003: online text only.
+const HANDIN_DETAILS = {
+  9001: { submissiondrafts: 1, requiresubmissionstatement: 1, configs: fileCfg(true) },
+  9002: { submissiondrafts: 0, requiresubmissionstatement: 0, configs: fileCfg(true) },
+  9003: { submissiondrafts: 1, requiresubmissionstatement: 0, configs: fileCfg(false) },
+};
+
+function handinAssignments() {
+  return {
+    ...ASSIGNMENTS,
+    courses: ASSIGNMENTS.courses.map((c) => ({
+      ...c,
+      assignments: c.assignments.map((a) => ({ ...a, ...HANDIN_DETAILS[a.id] })),
+    })),
+  };
+}
+
+function handinAnswer(fn, params, state) {
+  switch (fn) {
+    case "mod_assign_get_assignments":
+      return handinAssignments();
+    case "mod_assign_save_submission": {
+      const id = Number(params.assignmentid);
+      if (!HANDIN_DETAILS[id]) return wsError("invalidrecord", "Can't find data record in database table assign.", "dml_missing_record_exception");
+      const itemid = params["plugindata[files_filemanager]"];
+      const draft = state.drafts.get(String(itemid));
+      if (!draft) return [{ item: "", itemid: id, warningcode: "couldnotsavesubmission", message: "No files in the draft area." }];
+      state.submissions.set(id, { status: HANDIN_DETAILS[id].submissiondrafts ? "draft" : "submitted", files: [draft] });
+      return [];
+    }
+    case "mod_assign_get_submission_status": {
+      const id = Number(params.assignid);
+      if (!HANDIN_DETAILS[id]) return wsError("invalidrecord", "Can't find data record in database table assign.", "dml_missing_record_exception");
+      const sub = state.submissions.get(id) || { status: "new", files: [] };
+      return {
+        lastattempt: {
+          submission: {
+            id: 880000 + id,
+            userid: MOCK_USERID,
+            status: sub.status,
+            plugins: [
+              {
+                type: "file",
+                name: "File submissions",
+                fileareas: [{ area: "submission_files", files: sub.files.map((f) => ({ filename: f.filename, filepath: "/", filesize: f.filesize })) }],
+              },
+            ],
+          },
+          submissionsenabled: true,
+          caneditowner: true,
+          cansubmit: sub.status === "draft",
+        },
+        warnings: [],
+      };
+    }
+    case "mod_assign_submit_for_grading": {
+      const id = Number(params.assignmentid);
+      const sub = state.submissions.get(id);
+      if (!sub) return [{ item: "", itemid: id, warningcode: "couldnotsubmitforgrading", message: "Nothing to submit." }];
+      if (HANDIN_DETAILS[id].requiresubmissionstatement && params.acceptsubmissionstatement !== "1") {
+        return [{ item: "", itemid: id, warningcode: "couldnotsubmitforgrading", message: "You must accept the submission statement." }];
+      }
+      sub.status = "submitted";
+      return [];
+    }
+    default:
+      return undefined;
+  }
+}
+
 function wsError(errorcode, message, exception = "moodle_exception") {
   return { exception, errorcode, message };
 }
@@ -111,7 +192,7 @@ function send(res, status, body, headers = {}) {
   res.end(typeof body === "string" ? body : JSON.stringify(body));
 }
 
-async function handle(req, res) {
+async function handle(req, res, opts, state) {
   const url = new URL(req.url, "http://mock.local");
   const path = url.pathname;
 
@@ -123,7 +204,10 @@ async function handle(req, res) {
     for (const [k, v] of form) {
       if (k !== "wstoken" && k !== "wsfunction" && k !== "moodlewsrestformat") params[k] = v;
     }
-    return send(res, 200, restAnswer(form.get("wsfunction"), params));
+    const fn = form.get("wsfunction");
+    state.calls.push({ fn, params });
+    const special = opts.handin ? handinAnswer(fn, params, state) : undefined;
+    return send(res, 200, special !== undefined ? special : restAnswer(fn, params));
   }
 
   if (req.method === "POST" && path === "/webservice/upload.php") {
@@ -132,6 +216,8 @@ async function handle(req, res) {
     if (form.get("token") !== MOCK_TOKEN) return send(res, 200, { error: "Invalid token", errorcode: "invalidtoken" });
     const file = form.get("file_1");
     if (!file || typeof file === "string") return send(res, 200, { error: "No file", errorcode: "nofile" });
+    state.calls.push({ fn: "upload", params: { filename: file.name, filesize: file.size } });
+    state.drafts.set("777001", { filename: file.name, filesize: file.size });
     return send(res, 200, [
       { component: "user", contextid: 5, userid: String(MOCK_USERID), filearea: "draft", filename: file.name, filepath: "/", itemid: 777001, license: "allrightsreserved", author: "Test Student", source: "" },
     ]);
@@ -170,10 +256,15 @@ async function handle(req, res) {
   send(res, 404, { error: "Not found", errorcode: "notfound" });
 }
 
-/** Start the mock. port 0 picks a free port. Resolves to { url, port, close }. */
-export function startMock({ port = 0, host = "127.0.0.1" } = {}) {
+/**
+ * Start the mock. port 0 picks a free port. Resolves to { url, port, close, calls }.
+ * `calls` logs every REST call ({ fn, params }) and every upload ({ fn: "upload" }).
+ * `handin: true` turns on the hand-in answers (see handinAnswer).
+ */
+export function startMock({ port = 0, host = "127.0.0.1", handin = false } = {}) {
+  const state = { calls: [], drafts: new Map(), submissions: new Map() };
   const server = createServer((req, res) => {
-    handle(req, res).catch((err) => send(res, 500, { error: String(err?.message || err), errorcode: "mockerror" }));
+    handle(req, res, { handin }, state).catch((err) => send(res, 500, { error: String(err?.message || err), errorcode: "mockerror" }));
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -182,6 +273,7 @@ export function startMock({ port = 0, host = "127.0.0.1" } = {}) {
       resolve({
         url: `http://${host}:${actual}`,
         port: actual,
+        calls: state.calls,
         close: () =>
           new Promise((done) => {
             server.closeAllConnections?.();
