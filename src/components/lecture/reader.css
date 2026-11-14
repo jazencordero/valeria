@@ -1,0 +1,64 @@
+/*
+ * Lecture reader. Source: prototype merged.html CSS 1038-1089.
+ * Everything sits under .lec-reader so the generic prototype names
+ * (.seg, .term, .slide) cannot clash with other screens.
+ */
+.lec-reader{ position: relative; max-width: 680px; margin: 0 auto; min-width: 0; }
+.lec-reader .lec-kicker{ margin-top: 12px; color: var(--ink-3); }
+.lec-reader .lec-h1{ margin-top: 8px; font-size: 34px; line-height: 1.1; overflow-wrap: anywhere; }
+.lec-reader .lec-h1:focus{ outline: none; }
+.lec-reader .lec-meta{ display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 10px; color: var(--ink-2); }
+
+/* File chip: a link to the original, 44 px target around a 32 px pill. */
+.lec-reader .lec-file{ display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; color: var(--ink-2); text-decoration: none; }
+.lec-reader .lec-file-pill{ display: inline-flex; align-items: center; gap: 6px; min-height: 32px; max-width: 100%; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); transition: border-color var(--t-quick, 180ms) ease-out, color var(--t-quick, 180ms) ease-out; }
+.lec-reader .lec-file-pill .mono{ min-width: 0; overflow-wrap: anywhere; }
+.lec-reader .lec-file:hover .lec-file-pill{ border-color: var(--ink-3); color: var(--ink); }
+.lec-reader .lec-file:focus-visible{ outline: none; }
+.lec-reader .lec-file:focus-visible .lec-file-pill{ outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* Read | Slides n | Notes n */
+.lec-reader .lec-seg{ display: inline-flex; max-width: 100%; gap: 2px; margin-top: 20px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); }
+.lec-reader .lec-seg button{ display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px; border: 0; border-radius: 999px; background: none; color: var(--ink-2); font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background-color var(--t-quick, 180ms) ease-out, color var(--t-quick, 180ms) ease-out; }
+.lec-reader .lec-seg button[aria-selected="true"]{ background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-card); }
+.lec-reader .lec-seg button:focus-visible{ outline: 2px solid var(--ink); outline-offset: -2px; }
+.lec-reader .lec-seg .mono{ font-size: 11px; color: var(--ink-3); }
+
+.lec-reader .lec-panel{ margin-top: 4px; }
+
+/* Read */
+.lec-reader .lec-body{ margin-top: 24px; font-size: 17px; line-height: 1.6; }
+.lec-reader .lec-breath{ padding: 18px 20px; border-radius: 18px; background: var(--butter); }
+.lec-reader .lec-breath .mono{ color: var(--ink-2); }
+.lec-reader .lec-breath p + p{ margin-top: 6px; }
+.lec-reader .lec-sec{ margin-top: 40px; }
+.lec-reader .lec-sec h2{ font-size: 24px; line-height: 1.2; }
+.lec-reader .lec-sec p{ margin-top: 12px; }
+.lec-reader .lec-sec ul{ margin-top: 12px; padding-left: 22px; list-style: disc; }
+.lec-reader .lec-sec li + li{ margin-top: 6px; }
+.lec-reader .lec-deflist{ display: grid; gap: 12px; margin: 14px 0 0; }
+.lec-reader .lec-deflist div{ display: grid; gap: 2px; }
+.lec-reader .lec-deflist dt{ font-weight: 600; }
+.lec-reader .lec-deflist dd{ margin: 0; color: var(--ink-2); }
+.lec-reader .lec-terms{ display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 16px; }
+.lec-reader .lec-terms-l{ width: 100%; color: var(--ink-3); }
+.lec-reader .lec-term{ padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; line-height: 1.4; color: var(--ink-2); }
+.lec-reader .lec-sec .lec-src{ margin-top: 10px; color: var(--ink-3); }
+
+.lec-reader .lec-end{ margin-top: 44px; padding-top: 24px; border-top: 1px solid var(--line); }
+.lec-reader .lec-readmark{ min-height: 18px; margin-bottom: 12px; color: var(--ink-3); }
+.lec-reader .lec-actions{ display: grid; gap: 10px; }
+.lec-reader .lec-btn-count{ margin-left: 8px; font-size: 12px; opacity: 0.75; }
+.lec-reader .lec-next{ margin-top: 16px; padding-left: 0; padding-right: 0; }
+
+/* Slides */
+.lec-reader .lec-slide-grid{ display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 24px; padding: 0; list-style: none; }
+.lec-reader .lec-slide{ display: flex; flex-direction: column; gap: 6px; min-width: 0; aspect-ratio: 4 / 3; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); font-size: 13px; line-height: 1.35; overflow: hidden; overflow-wrap: anywhere; }
+.lec-reader .lec-slide .mono{ color: var(--ink-3); }
+.lec-reader .lec-note{ margin-top: 16px; font-size: 13px; color: var(--ink-3); }
+
+/* Notes, not posted, still being written */
+.lec-reader .lec-notes{ margin-top: 24px; }
+.lec-reader .lec-empty{ display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.lec-reader .lec-soon{ margin-top: 24px; font-size: 15px; color: var(--ink-2); }
+.lec-reader .lec-empty p{ max-width: 46ch; }
