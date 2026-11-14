@@ -1,0 +1,171 @@
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgTable,
+  text,
+  unique,
+  uuid,
+} from "drizzle-orm/pg-core";
+import { events } from "./calendar";
+import { courses } from "./courses";
+import { createdAt, id, oneOf, tstz, userId } from "./users";
+
+export const EXAM_KINDS = ["exam", "quiz"] as const;
+export const CARD_TYPES = ["basic", "cloze", "mcq", "match", "explain"] as const;
+export const CARD_ORIGINS = ["ai", "anki", "manual", "note"] as const;
+export const CARD_STATUSES = ["active", "suspended", "flagged"] as const;
+export const SESSION_MODES = ["bite", "tile", "concept", "extra"] as const;
+
+export const exams = pgTable(
+  "exams",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    userId: userId(),
+    courseId: uuid("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    eventId: uuid("event_id").references(() => events.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    kind: text("kind", { enum: EXAM_KINDS }).notNull().default("exam"),
+    at: tstz("at").notNull(),
+    targetPct: integer("target_pct").notNull().default(80),
+  },
+  (t) => [
+    index("exams_user_id_idx").on(t.userId),
+    index("exams_course_id_idx").on(t.courseId),
+    oneOf("exams_kind_check", t.kind, EXAM_KINDS),
+  ],
+);
+
+export const concepts = pgTable(
+  "concepts",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    userId: userId(),
+    examId: uuid("exam_id")
+      .notNull()
+      .references(() => exams.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    lecture: text("lecture"),
+    position: integer("position").notNull().default(0),
+    weight: numeric("weight", { mode: "number" }).notNull().default(1),
+    icon: text("icon"),
+  },
+  (t) => [
+    index("concepts_user_id_idx").on(t.userId),
+    index("concepts_exam_id_idx").on(t.examId),
+  ],
+);
+
+export const cards = pgTable(
+  "cards",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    userId: userId(),
+    examId: uuid("exam_id")
+      .notNull()
+      .references(() => exams.id, { onDelete: "cascade" }),
+    type: text("type", { enum: CARD_TYPES }).notNull(),
+    rung: integer("rung").notNull().default(0),
+    boss: boolean("boss").notNull().default(false),
+    body: jsonb("body").notNull(),
+    why: text("why"),
+    source: text("source"),
+    origin: text("origin", { enum: CARD_ORIGINS }).notNull(),
+    status: text("status", { enum: CARD_STATUSES }).notNull().default("active"),
+    contentHash: text("content_hash").notNull(),
+  },
+  (t) => [
+    index("cards_user_id_idx").on(t.userId),
+    index("cards_exam_id_idx").on(t.examId),
+    unique("cards_user_content_hash_key").on(t.userId, t.contentHash),
+    oneOf("cards_type_check", t.type, CARD_TYPES),
+    oneOf("cards_origin_check", t.origin, CARD_ORIGINS),
+    oneOf("cards_status_check", t.status, CARD_STATUSES),
+  ],
+);
+
+export const cardConcepts = pgTable(
+  "card_concepts",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    cardId: uuid("card_id")
+      .notNull()
+      .references(() => cards.id, { onDelete: "cascade" }),
+    conceptId: uuid("concept_id")
+      .notNull()
+      .references(() => concepts.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    unique("card_concepts_card_concept_key").on(t.cardId, t.conceptId),
+    index("card_concepts_concept_id_idx").on(t.conceptId),
+  ],
+);
+
+export const cardStates = pgTable(
+  "card_states",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    cardId: uuid("card_id")
+      .notNull()
+      .unique()
+      .references(() => cards.id, { onDelete: "cascade" }),
+    fsrs: jsonb("fsrs").notNull(),
+    dueAt: tstz("due_at").notNull().defaultNow(),
+    lapses: integer("lapses").notNull().default(0),
+    lastReviewAt: tstz("last_review_at"),
+  },
+  (t) => [index("card_states_due_at_idx").on(t.dueAt)],
+);
+
+export const studySessions = pgTable(
+  "study_sessions",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    userId: userId(),
+    examId: uuid("exam_id")
+      .notNull()
+      .references(() => exams.id, { onDelete: "cascade" }),
+    mode: text("mode", { enum: SESSION_MODES }).notNull(),
+    startedAt: tstz("started_at").notNull().defaultNow(),
+    endedAt: tstz("ended_at"),
+    summary: jsonb("summary"),
+  },
+  (t) => [
+    index("study_sessions_user_id_idx").on(t.userId),
+    index("study_sessions_exam_id_idx").on(t.examId),
+    oneOf("study_sessions_mode_check", t.mode, SESSION_MODES),
+  ],
+);
+
+export const reviews = pgTable(
+  "reviews",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    userId: userId(),
+    cardId: uuid("card_id")
+      .notNull()
+      .references(() => cards.id, { onDelete: "cascade" }),
+    /** Kept when a session row goes away; the review still counts for FSRS. */
+    sessionId: uuid("session_id").references(() => studySessions.id, { onDelete: "set null" }),
+    grade: integer("grade").notNull(),
+    firstTry: boolean("first_try").notNull(),
+    ms: integer("ms"),
+    at: tstz("at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("reviews_user_id_idx").on(t.userId),
+    index("reviews_card_id_idx").on(t.cardId),
+    index("reviews_session_id_idx").on(t.sessionId),
+  ],
+);
