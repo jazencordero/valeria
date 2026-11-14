@@ -45,6 +45,7 @@ vi.mock("next/cache", () => ({ refresh: vi.fn() }));
 const { HANDIN_CODE_PURPOSE, HANDIN_CODE_TTL_MS, MAX_HANDIN_BYTES, fileHash, handinPayloadHash, prepareHandin } =
   await import("./prepare");
 const { confirmHandin } = await import("./confirm");
+const { handinPausedMessage } = await import("@/server/flags");
 const { confirmHandinAction, prepareHandinAction } = await import("@/app/(app)/assignments/[id]/actions");
 
 // Made-up values for tests only.
@@ -201,6 +202,61 @@ describe("prepareHandin", () => {
     });
 
     expect(await t.db.select().from(confirmCodes)).toEqual([]);
+    expect(moodle.calls).toEqual([]);
+  });
+});
+
+describe("off switch (HANDIN_ENABLED)", () => {
+  it("prepare answers `paused` with the LMS name and the assignment's link, stores no code, calls no Moodle", async () => {
+    const withCmid = await seedAssignment(her, { cmid: 55501 });
+    vi.stubEnv("HANDIN_ENABLED", "off");
+    expect(await prepareHandin(her, withCmid, PDF, opts())).toEqual({
+      ok: false,
+      reason: "paused",
+      lms: "MyCourses",
+      url: `${moodle.url}/mod/assign/view.php?id=55501`,
+    });
+    expect(handinPausedMessage("MyCourses")).toBe("Hand-in from Ready is paused. Hand this one in on MyCourses.");
+
+    // Paused comes before every other check: no file, or not hers, is still `paused`.
+    const [course] = await t.db
+      .select({ moodleId: courses.moodleId })
+      .from(courses)
+      .innerJoin(assignments, eq(assignments.courseId, courses.id))
+      .where(eq(assignments.id, assignmentId));
+    expect(await prepareHandin(her, assignmentId, { name: "x.pdf", bytes: new Uint8Array() }, opts())).toEqual({
+      ok: false,
+      reason: "paused",
+      lms: "MyCourses",
+      url: `${moodle.url}/course/view.php?id=${course.moodleId}`,
+    });
+    const theirs = await seedAssignment(other);
+    expect(await prepareHandin(her, theirs, PDF, opts())).toEqual({ ok: false, reason: "paused", lms: "MyCourses", url: null });
+
+    expect(await t.db.select().from(confirmCodes)).toEqual([]);
+    expect(moodle.calls).toEqual([]);
+  });
+
+  it("confirm of a review made before the switch went off makes no Moodle write call, and the code still works once on", async () => {
+    const r = await review();
+    vi.stubEnv("HANDIN_ENABLED", "false");
+    expect(await confirmHandin(her, r.code, PDF, opts())).toMatchObject({ ok: false, reason: "refused" });
+    expect(moodle.calls).toEqual([]);
+    const [code] = await t.db.select().from(confirmCodes).where(eq(confirmCodes.id, r.code));
+    expect(code.usedAt).toBeNull();
+    expect((await assignmentRow()).state).toBe("open");
+
+    vi.stubEnv("HANDIN_ENABLED", "on");
+    expect((await confirmHandin(her, r.code, PDF, opts())).ok).toBe(true);
+    expect(fns()).toContain("mod_assign_save_submission");
+  });
+
+  it("the sheet's action passes `paused` through", async () => {
+    vi.stubEnv("HANDIN_ENABLED", "0");
+    signedIn.userId = her;
+    const form = new FormData();
+    form.append("file", new File([PDF.bytes as BlobPart], PDF.name, { type: "application/pdf" }));
+    expect(await prepareHandinAction(assignmentId, form)).toMatchObject({ ok: false, reason: "paused", lms: "MyCourses" });
     expect(moodle.calls).toEqual([]);
   });
 });

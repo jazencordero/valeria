@@ -24,14 +24,32 @@
  *   line exactly then. (Moodle's own statement setting is not synced.)
  * - `earlyBy` is the `earlyBy` wording with "now" as the hand-in time; null
  *   when the assignment has no due date.
+ *
+ * Off switch (M1-43): when `handinEnabled()` is false (`HANDIN_ENABLED`, see
+ * `@/server/flags`), `prepareHandin` answers `paused` first, before checking
+ * the file or storing a code, and never calls Moodle. It returns the reason,
+ * the LMS name and the link to the assignment there (`PausedRefusal`), not
+ * the sentence: the sheet builds it with `handinPausedMessage(lms)` ("Hand-in
+ * from Ready is paused. Hand this one in on <LMS name>."), so the copy lives
+ * in one place. The one database read it does is her assignment, for the link
+ * (`/mod/assign/view.php?id=<cmid>`, or the course page when the cmid is not
+ * synced; null when the assignment is not hers).
+ * `handinBlocked` also answers `paused`, and `./confirm` runs it before using
+ * up the code, so a review made just before the switch went off cannot hand
+ * in either: confirm refuses with zero Moodle calls (as `refused`, its
+ * "no longer takes a hand-in here" message, since confirm.ts has no `paused`
+ * reason of its own yet).
  */
 import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { earlyBy } from "@/lib/dates";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
+import { moodleConnections } from "@/server/db/schema/moodle";
 import { confirmCodes } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
+import { handinEnabled } from "@/server/flags";
+import { ALLOWED_SITES } from "@/server/moodle/connect";
 
 /** `confirm_codes.purpose` for a hand-in (the same value her-tap checks). */
 export const HANDIN_CODE_PURPOSE = "handin" as const;
@@ -69,9 +87,30 @@ export type PrepareRefusal =
   /** Over 4 MB, or over the assignment's own limit. */
   | "too_big"
   /** No file, an empty file, or a file without a usable name. */
-  | "no_file";
+  | "no_file"
+  /** Hand-in from Ready is switched off (`HANDIN_ENABLED`). */
+  | "paused";
 
-export type PrepareResult = { ok: true; review: HandinReview } | { ok: false; reason: PrepareRefusal };
+/**
+ * The LMS name the paused sentence names. Until a school list exists (the
+ * `lms` name per school), the one allowed site is MyCourses.
+ */
+export const LMS_NAME = "MyCourses";
+
+/** What the sheet needs for "Hand-in from Ready is paused. Hand this one in on <lms>." and its link. */
+export type PausedRefusal = {
+  ok: false;
+  reason: "paused";
+  /** The LMS name for the sentence (`handinPausedMessage(lms)`). */
+  lms: string;
+  /** The assignment on the LMS, or null when it is not one of hers. */
+  url: string | null;
+};
+
+export type PrepareResult =
+  | { ok: true; review: HandinReview }
+  | { ok: false; reason: Exclude<PrepareRefusal, "paused"> }
+  | PausedRefusal;
 
 export type HandinOptions = { now?: Date; db?: Db };
 
@@ -102,8 +141,10 @@ export function cleanFileName(name: string): string | null {
 export type HandinAssignment = {
   id: string;
   moodleId: number;
+  cmid: number | null;
   name: string;
   courseName: string;
+  courseMoodleId: number;
   dueAt: Date | null;
   cutoffAt: Date | null;
   opensAt: Date | null;
@@ -116,8 +157,10 @@ export type HandinAssignment = {
 const handinColumns = {
   id: assignments.id,
   moodleId: assignments.moodleId,
+  cmid: assignments.cmid,
   name: assignments.name,
   courseName: courses.name,
+  courseMoodleId: courses.moodleId,
   dueAt: assignments.dueAt,
   cutoffAt: assignments.cutoffAt,
   opensAt: assignments.opensAt,
@@ -142,12 +185,14 @@ export async function herAssignments(userId: string, database: Db, assignmentId?
     );
 }
 
-/** Why this assignment cannot take this file now, or null when it can. */
+/** Why this assignment cannot take this file now, or null when it can. `paused` first, while the switch is off. */
 export function handinBlocked(
   a: HandinAssignment,
   file: { bytes: number },
   now: Date,
+  enabled: boolean = handinEnabled(),
 ): Exclude<PrepareRefusal, "not_found" | "no_file"> | null {
+  if (!enabled) return "paused";
   if (a.state !== "open" && a.state !== "draft") return "closed";
   if (a.opensAt && a.opensAt.getTime() > now.getTime()) return "closed";
   if (a.cutoffAt && a.cutoffAt.getTime() <= now.getTime()) return "closed";
@@ -161,6 +206,26 @@ export function handinTo(a: Pick<HandinAssignment, "courseName" | "name">): stri
   return `${a.courseName} › ${a.name}`;
 }
 
+/** The assignment on her LMS: its own page when the cmid is synced, else its course page. */
+export async function lmsAssignmentUrl(
+  userId: string,
+  a: Pick<HandinAssignment, "cmid" | "courseMoodleId">,
+  database: Db,
+): Promise<string> {
+  const [conn] = await database
+    .select({ siteUrl: moodleConnections.siteUrl })
+    .from(moodleConnections)
+    .where(eq(moodleConnections.userId, userId))
+    .limit(1);
+  const site = (conn?.siteUrl ?? ALLOWED_SITES[0]).replace(/\/+$/, "");
+  return a.cmid !== null ? `${site}/mod/assign/view.php?id=${a.cmid}` : `${site}/course/view.php?id=${a.courseMoodleId}`;
+}
+
+async function paused(userId: string, assignmentId: string, database: Db): Promise<PausedRefusal> {
+  const [a] = UUID.test(userId) && UUID.test(assignmentId) ? await herAssignments(userId, database, assignmentId) : [];
+  return { ok: false, reason: "paused", lms: LMS_NAME, url: a ? await lmsAssignmentUrl(userId, a, database) : null };
+}
+
 export async function prepareHandin(
   userId: string,
   assignmentId: string,
@@ -169,6 +234,8 @@ export async function prepareHandin(
 ): Promise<PrepareResult> {
   const now = options.now ?? new Date();
   const database = options.db ?? defaultDb;
+  // The off switch comes before every other check, and never reaches Moodle.
+  if (!handinEnabled()) return paused(userId, assignmentId, database);
   if (!UUID.test(userId) || !UUID.test(assignmentId)) return { ok: false, reason: "not_found" };
 
   const [a] = await herAssignments(userId, database, assignmentId);
@@ -178,8 +245,9 @@ export async function prepareHandin(
   if (!fileName || file.bytes.byteLength === 0) return { ok: false, reason: "no_file" };
   const size = file.bytes.byteLength;
 
-  const blocked = handinBlocked(a, { bytes: size }, now);
-  if (blocked) return { ok: false, reason: blocked };
+  // The switch was checked above; `paused` cannot come back here.
+  const blocked = handinBlocked(a, { bytes: size }, now, true);
+  if (blocked && blocked !== "paused") return { ok: false, reason: blocked };
 
   const expiresAt = new Date(now.getTime() + HANDIN_CODE_TTL_MS);
   const [row] = await database

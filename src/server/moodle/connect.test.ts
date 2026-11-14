@@ -6,8 +6,27 @@ import { unseal } from "@/server/crypto/seal";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import { identities, sessions, users } from "@/server/db/schema/users";
+import { resetThrottle } from "@/server/throttle";
 import { DEMO_KEY } from "./fake-inline";
-import { ALLOWED_SITES, allowedSite, can, connectWithKey, disconnect, getConnection } from "./connect";
+import { getSiteInfo } from "./read/site";
+import {
+  ALLOWED_SITES,
+  CONNECT_TRIES_PER_DAY,
+  CONNECT_TRIES_PER_MINUTE,
+  TOO_MANY_TRIES,
+  allowedSite,
+  can,
+  connectWithKey,
+  disconnect,
+  getConnection,
+} from "./connect";
+
+// The real site check, wrapped so the tests can count the calls that reach Moodle.
+vi.mock("./read/site", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./read/site")>();
+  return { ...real, getSiteInfo: vi.fn(real.getSiteInfo) };
+});
+const moodleCalls = () => vi.mocked(getSiteInfo).mock.calls.length;
 
 // Made-up values for tests only. The fake Moodle accepts DEMO_KEY and nothing else.
 const FAKE_SECRET = "test-only-seal-secret-not-real";
@@ -20,10 +39,13 @@ let t: TestDb;
 beforeEach(async () => {
   vi.stubEnv("MOODLE_FAKE", "1");
   vi.stubEnv("KEY_SEAL_SECRET", FAKE_SECRET);
+  vi.mocked(getSiteInfo).mockClear();
+  resetThrottle();
   t = await createTestDb();
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.useRealTimers();
   await t.close();
 });
 
@@ -146,6 +168,84 @@ describe("connectWithKey", () => {
     expect(connections).toHaveLength(1);
     expect(connections[0].userId).toBe(phone);
     expect(await t.db.select().from(identities)).toHaveLength(1);
+  });
+});
+
+describe("connectWithKey, brake on key guessing", () => {
+  const T0 = new Date("2026-11-14T10:00:00Z");
+  const SEC = 1000;
+  const at = (ms: number) => vi.setSystemTime(new Date(T0.getTime() + ms));
+  const TOO_MANY = { ok: false, reason: "too_many", message: TOO_MANY_TRIES };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    at(0);
+  });
+
+  it("refuses the sixth try within a minute without calling Moodle, even with a good key", async () => {
+    expect(CONNECT_TRIES_PER_MINUTE).toBe(5);
+    const userId = await anonymousUser();
+    for (let i = 0; i < 5; i++) {
+      expect(await connectWithKey(userId, AALTO, BAD_KEY, t.db)).toEqual({ ok: false, reason: "rejected" });
+    }
+    expect(moodleCalls()).toBe(5);
+
+    at(59 * SEC);
+    expect(await connectWithKey(userId, AALTO, DEMO_KEY, t.db)).toEqual(TOO_MANY);
+    expect(moodleCalls()).toBe(5);
+    expect(await t.db.select().from(moodleConnections)).toHaveLength(0);
+    expect(await t.db.select().from(identities)).toHaveLength(0);
+  });
+
+  it("lets her try again once the minute is over", async () => {
+    const userId = await anonymousUser();
+    for (let i = 0; i < 5; i++) await connectWithKey(userId, AALTO, BAD_KEY, t.db);
+    expect(await connectWithKey(userId, AALTO, DEMO_KEY, t.db)).toEqual(TOO_MANY);
+
+    at(60 * SEC);
+    expect(await connectWithKey(userId, AALTO, DEMO_KEY, t.db)).toEqual({ ok: true, userId, merged: false });
+    expect(moodleCalls()).toBe(6);
+  });
+
+  it("counts a good key as a try", async () => {
+    const userId = await anonymousUser();
+    for (let i = 0; i < 5; i++) expect((await connectWithKey(userId, AALTO, DEMO_KEY, t.db)).ok).toBe(true);
+    expect(await connectWithKey(userId, AALTO, DEMO_KEY, t.db)).toEqual(TOO_MANY);
+  });
+
+  it("does not count a site that is not allowed", async () => {
+    const userId = await anonymousUser();
+    for (let i = 0; i < 6; i++) {
+      expect((await connectWithKey(userId, "https://moodle.example.edu", DEMO_KEY, t.db)).ok).toBe(false);
+    }
+    expect((await connectWithKey(userId, AALTO, DEMO_KEY, t.db)).ok).toBe(true);
+  });
+
+  it("allows 30 tries a day, then refuses until 24 hours after the first", async () => {
+    expect(CONNECT_TRIES_PER_DAY).toBe(30);
+    const userId = await anonymousUser();
+    for (let i = 0; i < 30; i++) {
+      at(Math.floor(i / 5) * 61 * SEC);
+      expect(await connectWithKey(userId, AALTO, BAD_KEY, t.db), `try ${i + 1}`).toEqual({ ok: false, reason: "rejected" });
+    }
+    expect(moodleCalls()).toBe(30);
+
+    at(7 * 61 * SEC);
+    expect(await connectWithKey(userId, AALTO, DEMO_KEY, t.db)).toEqual(TOO_MANY);
+    at(23 * 60 * 60 * SEC);
+    expect(await connectWithKey(userId, AALTO, DEMO_KEY, t.db)).toEqual(TOO_MANY);
+    expect(moodleCalls()).toBe(30);
+
+    at(24 * 60 * 60 * SEC);
+    expect(await connectWithKey(userId, AALTO, DEMO_KEY, t.db)).toEqual({ ok: true, userId, merged: false });
+  });
+
+  it("counts per visitor: another visitor is not slowed down", async () => {
+    const one = await anonymousUser();
+    const two = await anonymousUser();
+    for (let i = 0; i < 5; i++) await connectWithKey(one, AALTO, BAD_KEY, t.db);
+    expect(await connectWithKey(one, AALTO, DEMO_KEY, t.db)).toEqual(TOO_MANY);
+    expect(await connectWithKey(two, AALTO, DEMO_KEY, t.db)).toEqual({ ok: true, userId: two, merged: false });
   });
 });
 

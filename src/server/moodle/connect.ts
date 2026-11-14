@@ -13,6 +13,18 @@
  *
  * Every function takes the `Db` last (default: the app database) so tests can
  * run against `createTestDb()`.
+ *
+ * Brake on key guessing (M1-43): one visitor (the session's user) gets at most
+ * `CONNECT_TRIES_PER_MINUTE` tries a minute and `CONNECT_TRIES_PER_DAY` a day
+ * (`allow` in `@/server/throttle`, counted in `users.settings`). Over either,
+ * the answer is `too_many` with `TOO_MANY_TRIES`, and Moodle is not called.
+ * Every try that would reach Moodle counts, a good key too: the count happens
+ * before the Moodle call (so the sixth try costs Moodle nothing, and two tries
+ * at once cannot both slip under the limit), and a real visitor connects once
+ * or twice, far below either limit. A site that is
+ * not allowed is refused before the count (no Moodle call, nothing to guess).
+ * The day limit uses the same sentence; the window is 24 hours from her first
+ * try that day, not the calendar day.
  */
 import { and, eq, ne } from "drizzle-orm";
 import { mergeUsers } from "@/server/auth/session";
@@ -20,6 +32,7 @@ import { seal, unseal } from "@/server/crypto/seal";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import { identities } from "@/server/db/schema/users";
+import { allow } from "@/server/throttle";
 import { KeyRejected, type MoodleConn } from "./client";
 import { getSiteInfo } from "./read/site";
 
@@ -28,6 +41,12 @@ export const ALLOWED_SITES = ["https://mycourses.aalto.fi"] as const;
 export type AllowedSite = (typeof ALLOWED_SITES)[number];
 
 export const MOODLE_IDENTITY_KIND = "moodle";
+
+/** Key tries per visitor (M1-43). */
+export const CONNECT_TRIES_PER_MINUTE = 5;
+export const CONNECT_TRIES_PER_DAY = 30;
+/** What she sees when over either limit. */
+export const TOO_MANY_TRIES = "Too many tries. Wait a minute.";
 
 /** The allowed site `siteUrl` names (a trailing slash is ignored), or null. */
 export function allowedSite(siteUrl: string): AllowedSite | null {
@@ -51,12 +70,19 @@ export type ConnectResult =
        * people's coursework never end up in one account.
        */
       reason: "rejected" | "site_not_allowed" | "other_account";
+    }
+  | {
+      ok: false;
+      /** Over 5 tries a minute or 30 a day for this visitor. Moodle was not called. */
+      reason: "too_many";
+      message: typeof TOO_MANY_TRIES;
     };
 
 /**
  * Checks `key` against `siteUrl` and, if Moodle accepts it, stores it sealed
  * for `userId`. A rejected key, a site not in `ALLOWED_SITES`, or a key for a
- * different Moodle user than this account already has, stores nothing. Other Moodle errors (down, unexpected answer) are thrown.
+ * different Moodle user than this account already has, stores nothing; over the
+ * try limits it also calls nothing (`too_many`). Other Moodle errors (down, unexpected answer) are thrown.
  */
 export async function connectWithKey(
   userId: string,
@@ -66,6 +92,12 @@ export async function connectWithKey(
 ): Promise<ConnectResult> {
   const site = allowedSite(siteUrl);
   if (!site) return { ok: false, reason: "site_not_allowed" };
+
+  const counted = { userId, db: database };
+  const ok =
+    (await allow("connect:minute", { max: CONNECT_TRIES_PER_MINUTE, perSeconds: 60 }, counted)) &&
+    (await allow("connect:day", { max: CONNECT_TRIES_PER_DAY, perSeconds: 24 * 60 * 60 }, counted));
+  if (!ok) return { ok: false, reason: "too_many", message: TOO_MANY_TRIES };
 
   let info;
   try {
