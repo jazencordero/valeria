@@ -169,6 +169,8 @@ async function exchangeQrKey(site: string, key: string, userid: number, timeoutM
       method: "POST",
       headers: { "content-type": "application/json", "user-agent": QR_USER_AGENT },
       body: JSON.stringify([{ index: 0, methodname: QR_LOGIN_FN, args: { qrloginkey: key, userid } }]),
+      // Never follow a redirect: it would send her QR key wherever it points.
+      redirect: "manual",
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
@@ -178,7 +180,7 @@ async function exchangeQrKey(site: string, key: string, userid: number, timeoutM
     }
     throw new MoodleDown("Could not reach Moodle", { errorcode: "network" });
   }
-  if (res.status >= 500) {
+  if (res.status >= 500 || (res.status >= 300 && res.status < 400)) {
     await res.body?.cancel().catch(() => {});
     throw new MoodleDown(`Moodle answered HTTP ${res.status}`, { errorcode: `http_${res.status}`, status: res.status });
   }
