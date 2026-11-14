@@ -42,3 +42,8 @@ next-env.d.ts
 
 # graphify (rebuilt locally, see README)
 graphify-out/
+
+# local data, test output
+.data/
+test-results/
+playwright-report/
