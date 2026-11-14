@@ -1,0 +1,317 @@
+[
+  {
+    "id": 8101,
+    "name": "General",
+    "visible": 1,
+    "summary": "<p>Welcome to the course.</p>",
+    "summaryformat": 1,
+    "section": 0,
+    "hiddenbynumsections": 0,
+    "uservisible": true,
+    "modules": [
+      {
+        "id": 7001,
+        "url": "https://moodle.example.edu/mod/forum/view.php?id=7001",
+        "name": "Announcements",
+        "instance": 4001,
+        "contextid": 62001,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://moodle.example.edu/theme/image.php/boost/forum/1/monologo",
+        "modname": "forum",
+        "modplural": "Forums",
+        "indent": 0,
+        "noviewlink": false
+      },
+      {
+        "id": 7002,
+        "url": "https://moodle.example.edu/mod/url/view.php?id=7002",
+        "name": "Course textbook (online)",
+        "instance": 4002,
+        "contextid": 62002,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://moodle.example.edu/theme/image.php/boost/url/1/monologo",
+        "modname": "url",
+        "modplural": "URLs",
+        "indent": 0,
+        "noviewlink": false,
+        "contents": [
+          {
+            "type": "url",
+            "filename": "Course textbook (online)",
+            "filepath": null,
+            "filesize": 0,
+            "fileurl": "https://textbook.example.org/forecasting",
+            "timecreated": null,
+            "timemodified": 1788336000,
+            "sortorder": null,
+            "userid": null,
+            "author": null,
+            "license": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 8102,
+    "name": "Week 1: Introduction",
+    "visible": 1,
+    "summary": "",
+    "summaryformat": 1,
+    "section": 1,
+    "hiddenbynumsections": 0,
+    "uservisible": true,
+    "modules": [
+      {
+        "id": 7101,
+        "url": "https://moodle.example.edu/mod/resource/view.php?id=7101",
+        "name": "Lecture 1: Why forecast?",
+        "instance": 4101,
+        "contextid": 62101,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://moodle.example.edu/theme/image.php/boost/core/1/f/pdf",
+        "modname": "resource",
+        "modplural": "Files",
+        "indent": 0,
+        "noviewlink": false,
+        "contents": [
+          {
+            "type": "file",
+            "filename": "lecture-01-why-forecast.pdf",
+            "filepath": "/",
+            "filesize": 2483112,
+            "fileurl": "https://moodle.example.edu/webservice/pluginfile.php/62101/mod_resource/content/1/lecture-01-why-forecast.pdf?forcedownload=1",
+            "timecreated": 1788336000,
+            "timemodified": 1788336000,
+            "sortorder": 1,
+            "mimetype": "application/pdf",
+            "isexternalfile": false,
+            "userid": 900,
+            "author": "Course staff",
+            "license": "allrightsreserved"
+          }
+        ]
+      },
+      {
+        "id": 7102,
+        "url": "https://moodle.example.edu/mod/page/view.php?id=7102",
+        "name": "Reading guide",
+        "instance": 4102,
+        "contextid": 62102,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://moodle.example.edu/theme/image.php/boost/page/1/monologo",
+        "modname": "page",
+        "modplural": "Pages",
+        "indent": 0,
+        "noviewlink": false,
+        "contents": [
+          {
+            "type": "file",
+            "filename": "index.html",
+            "filepath": "/",
+            "filesize": 0,
+            "fileurl": "https://moodle.example.edu/webservice/pluginfile.php/62102/mod_page/content/index.html",
+            "timecreated": null,
+            "timemodified": 1788336000,
+            "sortorder": 1,
+            "userid": null,
+            "author": null,
+            "license": null
+          }
+        ]
+      },
+      {
+        "id": 7103,
+        "url": "https://moodle.example.edu/mod/quiz/view.php?id=7103",
+        "name": "Warm-up quiz",
+        "instance": 4103,
+        "contextid": 62103,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://moodle.example.edu/theme/image.php/boost/quiz/1/monologo",
+        "modname": "quiz",
+        "modplural": "Quizzes",
+        "indent": 0,
+        "noviewlink": false
+      },
+      {
+        "id": 7104,
+        "url": null,
+        "name": "Bring a laptop to the exercise session.",
+        "instance": 4104,
+        "contextid": 62104,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://moodle.example.edu/theme/image.php/boost/label/1/monologo",
+        "modname": "label",
+        "modplural": "Text and media areas",
+        "indent": 0,
+        "noviewlink": true,
+        "description": "<p>Bring a laptop to the exercise session.</p>"
+      }
+    ]
+  },
+  {
+    "id": 8103,
+    "name": "Week 2: Smoothing",
+    "visible": 1,
+    "summary": "",
+    "summaryformat": 1,
+    "section": 2,
+    "hiddenbynumsections": 0,
+    "uservisible": true,
+    "modules": [
+      {
+        "id": 7201,
+        "url": "https://moodle.example.edu/mod/resource/view.php?id=7201",
+        "name": "Lecture 2: Exponential smoothing",
+        "instance": 4201,
+        "contextid": 62201,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://moodle.example.edu/theme/image.php/boost/core/1/f/pdf",
+        "modname": "resource",
+        "modplural": "Files",
+        "indent": 0,
+        "noviewlink": false,
+        "contents": [
+          {
+            "type": "file",
+            "filename": "lecture-02-exponential-smoothing.pdf",
+            "filepath": "/",
+            "filesize": 3150775,
+            "fileurl": "https://moodle.example.edu/webservice/pluginfile.php/62201/mod_resource/content/2/lecture-02-exponential-smoothing.pdf?forcedownload=1",
+            "timecreated": 1788870600,
+            "timemodified": 1788940800,
+            "sortorder": 1,
+            "mimetype": "application/pdf",
+            "isexternalfile": false,
+            "userid": 900,
+            "author": "Course staff",
+            "license": "allrightsreserved"
+          }
+        ]
+      },
+      {
+        "id": 7202,
+        "url": "https://moodle.example.edu/mod/resource/view.php?id=7202",
+        "name": "Weekly sales data",
+        "instance": 4202,
+        "contextid": 62202,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://moodle.example.edu/theme/image.php/boost/core/1/f/spreadsheet",
+        "modname": "resource",
+        "modplural": "Files",
+        "indent": 0,
+        "noviewlink": false,
+        "contents": [
+          {
+            "type": "file",
+            "filename": "weekly-sales.csv",
+            "filepath": "/",
+            "filesize": 18432,
+            "fileurl": "https://moodle.example.edu/webservice/pluginfile.php/62202/mod_resource/content/1/weekly-sales.csv?forcedownload=1",
+            "timecreated": 1788870600,
+            "timemodified": 1788870600,
+            "sortorder": 1,
+            "mimetype": "text/csv",
+            "isexternalfile": false,
+            "userid": 900,
+            "author": "Course staff",
+            "license": "allrightsreserved"
+          }
+        ]
+      },
+      {
+        "id": 7203,
+        "url": "https://moodle.example.edu/mod/folder/view.php?id=7203",
+        "name": "Exercise set 1",
+        "instance": 4203,
+        "contextid": 62203,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://moodle.example.edu/theme/image.php/boost/folder/1/monologo",
+        "modname": "folder",
+        "modplural": "Folders",
+        "indent": 0,
+        "noviewlink": false,
+        "contents": [
+          {
+            "type": "file",
+            "filename": "exercises-1.pdf",
+            "filepath": "/",
+            "filesize": 412880,
+            "fileurl": "https://moodle.example.edu/webservice/pluginfile.php/62203/mod_folder/content/0/exercises-1.pdf?forcedownload=1",
+            "timecreated": 1789031700,
+            "timemodified": 1789031700,
+            "sortorder": 0,
+            "mimetype": "application/pdf",
+            "isexternalfile": false,
+            "userid": 900,
+            "author": "Course staff",
+            "license": "allrightsreserved"
+          },
+          {
+            "type": "file",
+            "filename": "smoothing-template.xlsx",
+            "filepath": "/templates/",
+            "filesize": 25611,
+            "fileurl": "https://moodle.example.edu/webservice/pluginfile.php/62203/mod_folder/content/0/templates/smoothing-template.xlsx?forcedownload=1",
+            "timecreated": 1789032000,
+            "timemodified": 1789032000,
+            "sortorder": 0,
+            "mimetype": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "isexternalfile": false,
+            "userid": 900,
+            "author": "Course staff",
+            "license": "allrightsreserved"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 8104,
+    "name": "Assignments",
+    "visible": 1,
+    "summary": "",
+    "summaryformat": 1,
+    "section": 3,
+    "hiddenbynumsections": 0,
+    "uservisible": true,
+    "modules": [
+      {
+        "id": 5101,
+        "url": "https://moodle.example.edu/mod/assign/view.php?id=5101",
+        "name": "Assignment 3",
+        "instance": 2101,
+        "contextid": 61101,
+        "visible": 1,
+        "uservisible": true,
+        "visibleoncoursepage": 1,
+        "modicon": "https://moodle.example.edu/theme/image.php/boost/assign/1/monologo",
+        "modname": "assign",
+        "modplural": "Assignments",
+        "indent": 0,
+        "noviewlink": false,
+        "dates": [
+          { "label": "Due:", "timestamp": 1790665200, "dataid": "duedate" }
+        ]
+      }
+    ]
+  }
+]
