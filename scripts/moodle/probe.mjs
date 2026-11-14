@@ -10,14 +10,28 @@
 // Non-interactive key: MOODLE_KEY env var, or piped on stdin. The key stays in memory only:
 // it is never printed, logged or written to a file.
 //
+// Other ways to get the key (ticket M0-05), one at a time:
+//   --launch-url [--passport <p>] [--scheme <s>]
+//                 print the browser launch address and its passport, then stop
+//   --redirect [--passport <p>]
+//                 read the pasted `moodlemobile://token=...` address (hidden, or stdin),
+//                 decode the key from it, then run the probe. With --passport (the one
+//                 --launch-url printed) it checks Moodle's signature, md5(site + passport).
+//   --qr          read the text the "View QR code" QR holds (hidden, or stdin), swap it
+//                 for a key, then run the probe. The site comes from the QR text.
+// With --mock these work against the mock; if nothing is pasted, they use the mock's own
+// QR text or launch redirect.
+//
 // Writes <out>/probe-report.md and scrubbed answers to <out>/fixtures/*.json.
 // Raw answers are never written.
 
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { call, MoodleError } from "./lib/ws.mjs";
 import { createScrubber } from "./lib/scrub.mjs";
+import { decodeLaunchRedirect, exchangeQr, launchUrl, parseQr } from "./lib/keys.mjs";
 
 export const DEFAULT_SITE = "https://mycourses.aalto.fi";
 export const DEFAULT_OUT = "context/moodle";
@@ -36,17 +50,31 @@ export const CHECK_FUNCTIONS = [
 
 // ---- Input --------------------------------------------------------------------------
 
-export function parseArgs(argv) {
-  const opts = { mock: false, site: null, out: DEFAULT_OUT, help: false };
+/**
+ * Read the command line. `keyFlags: true` (the probe) also accepts --qr, --redirect,
+ * --launch-url, --passport and --scheme; handin-test.mjs shares this without them.
+ */
+export function parseArgs(argv, { keyFlags = false } = {}) {
+  const opts = { mock: false, site: null, out: DEFAULT_OUT, help: false, mode: null, passport: null, scheme: "moodlemobile" };
+  const modes = { "--qr": "qr", "--redirect": "redirect", "--launch-url": "launch-url" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--mock") opts.mock = true;
     else if (a === "--site") opts.site = argv[++i];
     else if (a === "--out") opts.out = argv[++i];
     else if (a === "-h" || a === "--help") opts.help = true;
+    else if (keyFlags && modes[a]) {
+      if (opts.mode && opts.mode !== modes[a]) throw new Error("Use only one of --qr, --redirect and --launch-url");
+      opts.mode = modes[a];
+    } else if (keyFlags && a === "--passport") opts.passport = argv[++i];
+    else if (keyFlags && a === "--scheme") opts.scheme = argv[++i];
     else throw new Error(`Unknown option: ${a}`);
   }
   if (opts.site === undefined || opts.out === undefined) throw new Error("--site and --out need a value");
+  if (opts.passport === undefined || !opts.scheme) throw new Error("--passport and --scheme need a value");
+  if (opts.passport && opts.mode !== "redirect" && opts.mode !== "launch-url") {
+    throw new Error("--passport goes with --launch-url or --redirect");
+  }
   return opts;
 }
 
@@ -104,8 +132,118 @@ async function readAllStdin() {
 
 async function getKey() {
   if (process.env.MOODLE_KEY) return process.env.MOODLE_KEY.trim();
-  if (process.stdin.isTTY) return askHidden("Key (hidden): ");
-  return readAllStdin();
+  return readSecret("Key (hidden): ");
+}
+
+/** One secret line: hidden on a terminal, else everything piped on stdin. */
+function readSecret(question) {
+  return process.stdin.isTTY ? askHidden(question) : readAllStdin();
+}
+
+// ---- Getting the key without the Security keys page -----------------------------------
+
+const siteBase = (site) => String(site).replace(/\/+$/, "");
+
+/** A fresh random passport for the launch address. Not a secret. */
+export function newPassport() {
+  return randomBytes(8).toString("hex");
+}
+
+/**
+ * Does the launch redirect's signature match this site and passport?
+ * Moodle's launch.php signs md5(wwwroot + passport); like the Moodle app, http and https
+ * are both accepted. With `mock`, the mock's own scheme (`mocksig` + passport) counts too.
+ */
+export function signatureMatches(signature, site, passport, { mock = false } = {}) {
+  const b = siteBase(site);
+  const sites = new Set([b, b.replace(/^https:/i, "http:"), b.replace(/^http:/i, "https:")]);
+  const expected = [...sites].map((x) => createHash("md5").update(x + passport).digest("hex"));
+  if (mock) expected.push(`mocksig${passport}`);
+  return expected.includes(String(signature).trim());
+}
+
+/**
+ * Pull `token=...` out of whatever was pasted (the bare address, or a whole console line
+ * such as "Failed to launch 'moodlemobile://token=...' ..."). Returns `token=<base64>`.
+ */
+export function cleanRedirect(text) {
+  const m = /token=([A-Za-z0-9+/=%_-]+)/.exec(String(text));
+  if (!m) throw new Error("That is not a moodlemobile://token=... address");
+  return `token=${m[1]}`;
+}
+
+/** Say what a QR login error means, without the key. */
+function qrHint(err) {
+  const code = err instanceof MoodleError ? err.errorcode : null;
+  const hints = {
+    invalidkey: "the QR code has expired or was used already. Show a new QR code and paste again.",
+    qrcodedisabled: "this site does not allow QR login. Try the launch link (--launch-url).",
+    apprequired: "the site wants the Moodle app. Try the launch link (--launch-url).",
+  };
+  return `QR login failed (${code || "network_error"}): ${hints[code] || "try the launch link (--launch-url) or Security keys."}`;
+}
+
+async function keyFromQr(opts, mockSite) {
+  let text = await readSecret("QR text (hidden): ");
+  if (!text && mockSite) {
+    const m = await import("./mock.mjs");
+    text = `moodlemobile://${mockSite}?qrlogin=${m.MOCK_QR_KEY}&userid=${m.MOCK_USERID}`;
+  }
+  if (!text) throw new Error("No QR text given");
+  const qr = parseQr(text);
+  text = null;
+  const site = mockSite || qr.site;
+  if (!mockSite && opts.site && siteBase(opts.site) !== qr.site) {
+    process.stderr.write(`Note: the QR code is for ${qr.site}, not ${opts.site}. Using ${qr.site}.\n`);
+  }
+  try {
+    const { token } = await exchangeQr(site, qr.key, qr.userid);
+    return { site, token };
+  } catch (err) {
+    throw new Error(qrHint(err));
+  }
+}
+
+async function keyFromRedirect(opts, site, mockSite) {
+  let text = await readSecret("Redirect address (hidden): ");
+  let passport = opts.passport;
+  if (!text && mockSite) {
+    // Nothing pasted: ask the mock's launch.php for its redirect, as the browser would.
+    passport = passport || newPassport();
+    const res = await fetch(launchUrl(mockSite, passport, opts.scheme), { redirect: "manual" });
+    text = res.headers.get("location") || "";
+  }
+  if (!text) throw new Error("No redirect address given");
+  const { signature, token } = decodeLaunchRedirect(cleanRedirect(text));
+  text = null;
+  if (!passport) {
+    process.stderr.write("Signature not checked: add --passport <the one --launch-url printed> to check it.\n");
+  } else if (signatureMatches(signature, site, passport, { mock: Boolean(mockSite) })) {
+    process.stderr.write("Signature matches this site and passport.\n");
+  } else {
+    process.stderr.write(
+      "Warning: the signature does not match this site and passport. The address may come from another launch or site. Continuing; the probe only reads.\n",
+    );
+  }
+  return token;
+}
+
+async function printLaunchUrl(opts, site, mockSite) {
+  const passport = opts.passport || newPassport();
+  const url = launchUrl(site, passport, opts.scheme);
+  const out = process.stdout;
+  out.write("Open this address in a browser with the developer tools open (Network tab, keep the log):\n");
+  out.write(`${url}\n`);
+  out.write(`Passport: ${passport}\n`);
+  out.write(`After she signs in, copy the ${opts.scheme}://token=... address and run:\n`);
+  out.write(`  node scripts/moodle/probe.mjs --redirect --passport ${passport}\n`);
+  if (mockSite) {
+    const res = await fetch(url, { redirect: "manual" });
+    const ok = res.status === 303 && (res.headers.get("location") || "").startsWith(`${opts.scheme}://token=`);
+    out.write(ok ? "Mock: the address answers with a token redirect. This mock stops when the command ends.\n" : "Mock: the address did not redirect.\n");
+    return ok ? 0 : 1;
+  }
+  return 0;
 }
 
 // ---- Shape of an answer --------------------------------------------------------------
@@ -366,28 +504,40 @@ async function writeOutputs(outDir, result, site) {
 
 // ---- CLI -----------------------------------------------------------------------------
 
+const USAGE = `Usage: node scripts/moodle/probe.mjs [--site <url>] [--out <dir>] [--mock]
+       node scripts/moodle/probe.mjs --qr [--out <dir>] [--mock]
+       node scripts/moodle/probe.mjs --launch-url [--site <url>] [--passport <p>] [--scheme <s>] [--mock]
+       node scripts/moodle/probe.mjs --redirect [--passport <p>] [--site <url>] [--out <dir>] [--mock]
+`;
+
 async function main(argv) {
-  const opts = parseArgs(argv);
+  const opts = parseArgs(argv, { keyFlags: true });
   if (opts.help) {
-    process.stdout.write("Usage: node scripts/moodle/probe.mjs [--site <url>] [--out <dir>] [--mock]\n");
+    process.stdout.write(USAGE);
     return 0;
   }
   let mock = null;
   let site = opts.site;
   let token;
-  if (opts.mock) {
-    const m = await import("./mock.mjs");
-    if (!site) {
-      mock = await m.startMock({ port: 0 });
-      site = mock.url;
-    }
-    token = m.MOCK_TOKEN;
-  } else {
-    if (!site) site = process.stdin.isTTY ? (await ask(`Site [${DEFAULT_SITE}]: `)) || DEFAULT_SITE : DEFAULT_SITE;
-    token = await getKey();
-    if (!token) throw new Error("No key given");
-  }
   try {
+    if (opts.mock) {
+      const m = await import("./mock.mjs");
+      if (!site) {
+        mock = await m.startMock({ port: 0 });
+        site = mock.url;
+      }
+      if (opts.mode === "launch-url") return await printLaunchUrl(opts, site, site);
+      if (opts.mode === "qr") ({ token } = await keyFromQr(opts, site));
+      else if (opts.mode === "redirect") token = await keyFromRedirect(opts, site, site);
+      else token = m.MOCK_TOKEN;
+    } else if (opts.mode === "qr") {
+      ({ site, token } = await keyFromQr(opts, null));
+    } else {
+      if (!site) site = process.stdin.isTTY ? (await ask(`Site [${DEFAULT_SITE}]: `)) || DEFAULT_SITE : DEFAULT_SITE;
+      if (opts.mode === "launch-url") return await printLaunchUrl(opts, site, null);
+      token = opts.mode === "redirect" ? await keyFromRedirect(opts, site, null) : await getKey();
+    }
+    if (!token) throw new Error("No key given");
     const result = await probe(site, token);
     const reportPath = await writeOutputs(resolve(opts.out), result, site);
     const worked = result.rows.filter((r) => r.ok).length;

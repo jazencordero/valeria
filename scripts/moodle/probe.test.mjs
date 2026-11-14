@@ -5,8 +5,10 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startMock, MOCK_TOKEN, MOCK_PRIVATE_TOKEN } from "./mock.mjs";
-import { CHECK_FUNCTIONS } from "./probe.mjs";
+import { createHash } from "node:crypto";
+import { startMock, MOCK_TOKEN, MOCK_PRIVATE_TOKEN, MOCK_QR_KEY, MOCK_USERID } from "./mock.mjs";
+import { CHECK_FUNCTIONS, cleanRedirect, parseArgs, signatureMatches } from "./probe.mjs";
+import { launchUrl } from "./lib/keys.mjs";
 
 const PROBE = fileURLToPath(new URL("./probe.mjs", import.meta.url));
 // The mock's personal values (see SITE_INFO in mock.mjs). None may reach a fixture.
@@ -113,4 +115,110 @@ test("a wrong key is recorded as invalidtoken and exits non-zero", async () => {
   const report = await readFile(join(out, "probe-report.md"), "utf8");
   assert.ok(callRows(report)[0].includes("invalidtoken"));
   assert.ok(!report.includes("wrongkey"));
+});
+
+// ---- M0-05: --qr, --redirect, --launch-url -------------------------------------------
+
+const SECRETS = [MOCK_TOKEN, MOCK_PRIVATE_TOKEN, MOCK_QR_KEY];
+function neverPrinted(r, label) {
+  for (const bad of SECRETS) assert.ok(!r.stdout.includes(bad) && !r.stderr.includes(bad), `${label}: ${bad} never printed`);
+}
+
+async function mockRedirect(passport) {
+  const res = await fetch(launchUrl(mock.url, passport), { redirect: "manual" });
+  return res.headers.get("location");
+}
+
+test("parseArgs: the key flags are the probe's only, one at a time", () => {
+  assert.throws(() => parseArgs(["--qr"]), /Unknown option/, "handin-test does not take --qr");
+  assert.equal(parseArgs(["--qr"], { keyFlags: true }).mode, "qr");
+  assert.equal(parseArgs(["--launch-url", "--passport", "p"], { keyFlags: true }).passport, "p");
+  assert.equal(parseArgs(["--launch-url"], { keyFlags: true }).scheme, "moodlemobile");
+  assert.throws(() => parseArgs(["--qr", "--redirect"], { keyFlags: true }), /only one/);
+  assert.throws(() => parseArgs(["--qr", "--passport", "p"], { keyFlags: true }), /--passport goes with/);
+  assert.throws(() => parseArgs(["--redirect", "--passport"], { keyFlags: true }), /need a value/);
+});
+
+test("signatureMatches checks md5(site + passport), http or https, and the mock's scheme only with mock", () => {
+  const sig = createHash("md5").update("https://mycourses.example.org" + "p1").digest("hex");
+  assert.ok(signatureMatches(sig, "https://mycourses.example.org/", "p1"));
+  assert.ok(signatureMatches(sig, "http://mycourses.example.org", "p1"));
+  assert.ok(!signatureMatches(sig, "https://mycourses.example.org", "p2"));
+  assert.ok(!signatureMatches("mocksigp1", "https://x.example.org", "p1"));
+  assert.ok(signatureMatches("mocksigp1", "https://x.example.org", "p1", { mock: true }));
+});
+
+test("cleanRedirect finds the token part in a pasted console line", () => {
+  assert.equal(cleanRedirect("Failed to launch 'moodlemobile://token=QUJD==' because..."), "token=QUJD==");
+  assert.throws(() => cleanRedirect("https://example.org/"), /not a moodlemobile/);
+});
+
+test("--launch-url prints the address and passport, exits 0", async () => {
+  const r = await run(["--launch-url", "--site", mock.url, "--passport", "pp1"]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(r.stdout.includes(launchUrl(mock.url, "pp1")), "prints the launch address");
+  assert.ok(r.stdout.includes("Passport: pp1"));
+  assert.ok(r.stdout.includes("--redirect --passport pp1"), "says the next command");
+  const mine = await run(["--launch-url", "--mock", "--scheme", "myapp"]);
+  assert.equal(mine.code, 0, mine.stderr);
+  assert.match(mine.stdout, /urlscheme=myapp/);
+  assert.match(mine.stdout, /Passport: [0-9a-f]{16}\n/, "a random passport when none is given");
+  assert.match(mine.stdout, /answers with a token redirect/, "the mock link was checked");
+  neverPrinted(mine, "launch-url");
+});
+
+test("--qr swaps the pasted QR text for a key and runs the probe; site comes from the QR", async () => {
+  const out = await tempOut();
+  const qr = `moodlemobile://${mock.url}?qrlogin=${MOCK_QR_KEY}&userid=${MOCK_USERID}`;
+  const r = await run(["--qr", "--out", out], { input: `${qr}\n` });
+  assert.equal(r.code, 0, r.stderr);
+  neverPrinted(r, "qr");
+  const { rows } = await checkOutputs(out);
+  assert.ok(rows[0].includes("worked"));
+  const report = await readFile(join(out, "probe-report.md"), "utf8");
+  assert.ok(!report.includes(MOCK_QR_KEY), "QR key not in the report");
+});
+
+test("--qr --mock works with nothing pasted, and a used or wrong QR key exits 2 without printing it", async () => {
+  const out = await tempOut();
+  const r = await run(["--qr", "--mock", "--out", out]);
+  assert.equal(r.code, 0, r.stderr);
+  await checkOutputs(out);
+  const bad = await run(["--qr", "--out", out], { input: `moodlemobile://${mock.url}?qrlogin=wrongqrkey9&userid=${MOCK_USERID}\n` });
+  assert.equal(bad.code, 2);
+  assert.match(bad.stderr, /invalidkey.*new QR code/);
+  assert.ok(!bad.stderr.includes("wrongqrkey9"), "the key is not echoed");
+  const junk = await run(["--qr", "--out", out], { input: "hello\n" });
+  assert.equal(junk.code, 2);
+});
+
+test("--redirect decodes the pasted address, checks the signature with --passport, runs the probe", async () => {
+  const out = await tempOut();
+  const redirect = await mockRedirect("pp2");
+  const r = await run(["--redirect", "--mock", "--site", mock.url, "--passport", "pp2", "--out", out], {
+    input: `Failed to launch '${redirect}' because the scheme does not have a registered handler.\n`,
+  });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stderr, /Signature matches/);
+  neverPrinted(r, "redirect");
+  await checkOutputs(out);
+
+  const wrong = await run(["--redirect", "--mock", "--site", mock.url, "--passport", "other", "--out", out], { input: `${redirect}\n` });
+  assert.equal(wrong.code, 0, "a mismatch warns but the read-only probe still runs");
+  assert.match(wrong.stderr, /does not match/);
+
+  const none = await run(["--redirect", "--site", mock.url, "--out", out], { input: `${redirect}\n` });
+  assert.equal(none.code, 0, none.stderr);
+  assert.match(none.stderr, /Signature not checked/);
+  neverPrinted(none, "redirect without passport");
+});
+
+test("--redirect --mock works with nothing pasted; a bad paste exits 2", async () => {
+  const out = await tempOut();
+  const r = await run(["--redirect", "--mock", "--out", out]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stderr, /Signature matches/);
+  await checkOutputs(out);
+  const bad = await run(["--redirect", "--site", mock.url, "--out", out], { input: "https://example.org/\n" });
+  assert.equal(bad.code, 2);
 });
