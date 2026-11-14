@@ -1,36 +1,30 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ready
 
-## Getting Started
+Know if you'll be ready. Start studying in 10 seconds.
 
-First, run the development server:
+## Run it
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Work on it with Claude Code
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open Claude Code in this folder and use:
 
-## Learn More
+| Command | What it does |
+|---|---|
+| `/start` | Catches up on where we left off and suggests the next thing |
+| `/build <feature>` | Builds one feature on its own branch, ready for a preview link |
+| `/notes <what happened>` | Records what you saw when someone used the app |
+| `/think <question>` | Sends a hard question to the deep-thinker (Fable) |
+| `/wrap` | Updates the log and feature map at the end of a session |
 
-To learn more about Next.js, take a look at the following resources:
+Or just chat. `CLAUDE.md` and the `context/` folder give every session the full picture.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## The loop
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Pick a feature from `context/feature-map.md` → build it on a branch → send the Vercel preview link to a tester → watch them use it → `/notes` → merge → `/wrap`.
