@@ -1,6 +1,34 @@
 @import "tailwindcss";
+@import "../styles/tokens.css";
+
+/* Map the prototype tokens into Tailwind. `inline` keeps the var() so dark mode switches live. */
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-wash: var(--accent-wash);
+  --color-butter: var(--butter);
+  --color-mint: var(--mint);
+  --color-sky: var(--sky);
+  --color-due: var(--due);
+
+  --font-display: var(--display);
+  --font-sans: var(--font);
+  --font-mono: var(--mono);
+
+  --transition-duration-quick: var(--t-quick);
+  --transition-duration-base: var(--t-base);
+  --transition-duration-slow: var(--t-slow);
+
+  --ease-out: var(--e-out);
+  --ease-inout: var(--e-inout);
+  --ease-reward: var(--e-reward);
+}
 
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  color: #1c1917;
+  background: var(--color-surface);
 }
