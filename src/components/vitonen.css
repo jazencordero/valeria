@@ -1,0 +1,59 @@
+/*
+ * Vitonen, the talking cap. Source: prototype main-flow.html CSS 206-241
+ * (cap parts, state loops) and 550-584 (blink, wince, swing reactions).
+ * Colours come from the --cap-* tokens in src/styles/tokens.css.
+ */
+.cap-slot{ display: inline-block; line-height: 0; flex: none; }
+.cap{ display: block; overflow: visible; }
+.cap g, .cap path{ transform-box: view-box; }
+.cap-crown{ fill: var(--cap-white); stroke: var(--cap-line); stroke-width: 1.6; stroke-linejoin: round; }
+.cap-crease{ fill: none; stroke: var(--ink-3); stroke-width: 1.2; stroke-linecap: round; opacity: 0.55; }
+.cap-band, .cap-visor{ fill: var(--cap-band); }
+.cap-tuft{ fill: var(--cap-tassel); }
+.cap-gloss{ fill: var(--cap-white); opacity: 0.4; }
+.cap-rose{ fill: var(--cap-gold); }
+.cap-rose-c{ fill: none; stroke: var(--cap-band); stroke-width: 1; opacity: 0.45; }
+.cap-cord{ fill: none; stroke: var(--cap-tassel); stroke-width: 2.2; stroke-linecap: round; }
+.cap-eye{ fill: var(--cap-eye); transform-box: fill-box; transform-origin: center; }
+.cap-mouth{ fill: none; stroke: var(--cap-eye); stroke-width: 2.2; stroke-linecap: round; }
+.cap-mouth-o{ fill: var(--cap-eye); opacity: 0; }
+.cap-body{ transform-origin: 60px 70px; }
+.cap-hang{ transform-origin: 101px 36px; }
+.cap.tiny .cap-eye, .cap.tiny .cap-mouth, .cap.tiny .cap-mouth-o, .cap.tiny .cap-rose, .cap.tiny .cap-rose-c, .cap.tiny .cap-crease, .cap.tiny .cap-gloss{ display: none; }
+.cap.tiny .cap-crown{ stroke-width: 5; }
+.cap.tiny .cap-cord{ stroke-width: 5; }
+.cap.talking .cap-hang{ animation: cap-swing 0.8s ease-in-out infinite; }
+.cap.idle .cap-body{ animation: cap-bob 4s ease-in-out infinite; }
+.cap.idle .cap-eye{ animation: cap-blink 4s infinite; }
+.cap.idle .cap-hang{ animation: cap-sway 4s ease-in-out infinite; }
+.cap.thinking .cap-body{ animation: cap-think 1.6s ease-in-out infinite; }
+.cap.thinking .cap-hang{ animation: cap-swing 0.8s ease-in-out infinite; }
+.cap.talking .cap-mouth{ animation: talk-a 0.26s steps(1) infinite; }
+.cap.talking .cap-mouth-o{ animation: talk-b 0.26s steps(1) infinite; }
+@keyframes cap-bob{ 0%, 100%{ transform: translateY(0); } 50%{ transform: translateY(-3px); } }
+@keyframes cap-blink{ 0%, 92%, 100%{ transform: scaleY(1); } 95%{ transform: scaleY(0.1); } }
+@keyframes cap-sway{ 0%, 100%{ transform: rotate(-3deg); } 50%{ transform: rotate(3deg); } }
+@keyframes cap-think{ 0%, 100%{ transform: rotate(-6deg); } 50%{ transform: rotate(6deg); } }
+@keyframes cap-swing{ 0%, 100%{ transform: rotate(-14deg); } 50%{ transform: rotate(14deg); } }
+@keyframes talk-a{ 0%{ opacity: 1; } 50%{ opacity: 0; } }
+@keyframes talk-b{ 0%{ opacity: 0; } 50%{ opacity: 1; } }
+
+/* Reactions (one-shot classes). */
+.cap.blink .cap-eye{ animation: cap-blink-once 0.3s ease-in-out 1 !important; }
+@keyframes cap-blink-once{ 0%, 100%{ transform: scaleY(1); } 50%{ transform: scaleY(0.1); } }
+.cap .cap-wince{ display: none; fill: none; stroke: var(--cap-eye); stroke-width: 2.6; stroke-linecap: round; }
+.cap.wince .cap-eye{ display: none; }
+.cap.wince .cap-wince{ display: inline; }
+.cap.tiny.wince .cap-wince{ display: none; }
+.cap.swing .cap-hang{ animation: cap-whip 0.55s cubic-bezier(.2,.8,.2,1) 1 !important; }
+@keyframes cap-whip{ 0%{ transform: rotate(0deg); } 30%{ transform: rotate(22deg); } 60%{ transform: rotate(-12deg); } 100%{ transform: rotate(0deg); } }
+.cap{ transform-origin: 50% 75%; }
+.cap .cap-eye{ translate: var(--look, 0px) 0; transition: translate 220ms var(--e-out); }
+
+/* Calm: nothing moves. The component also drops its loop and reaction
+   classes; these rules cover the first paint and the test switch. */
+.cap.calm, .cap.calm *{ animation: none !important; transition: none !important; }
+:root[data-fast] .cap, :root[data-fast] .cap *{ animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce){
+  .cap, .cap *{ animation: none !important; transition: none !important; }
+}
