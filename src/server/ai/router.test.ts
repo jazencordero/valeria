@@ -286,6 +286,58 @@ describe("streamChat", () => {
     ai.queue("openrouter", { status: 429 });
     await expect(router().streamChat(input)).rejects.toBeInstanceOf(AiBusy);
   });
+
+  // M2-14: plain tools, tool rounds and onEnd.
+  const toolCall = (name: string, args: unknown) => {
+    const chunk = (delta: unknown, finish: string | null) =>
+      `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 0, model: "fake", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+    const call = { index: 0, id: "call_1", type: "function", function: { name, arguments: JSON.stringify(args) } };
+    return chunk({ role: "assistant", content: null, tool_calls: [call] }, null) + chunk({}, "tool_calls") + "data: [DONE]\n\n";
+  };
+  const lookUp = () => ({
+    description: "Looks a word up.",
+    inputSchema: z.object({ word: z.string() }),
+    execute: vi.fn(async ({ word }: { word: string }) => ({ meaning: `${word} means TOOL-RESULT-42` })),
+  });
+
+  it("runs a plain tool, sends its answer back, and calls onEnd once with the whole text", async () => {
+    ai.queue("groq", { rawBody: toolCall("look_up", { word: "stroma" }) }, { text: "It is the fluid." });
+    const look_up = lookUp();
+    const onEnd = vi.fn();
+    const { result } = await router().streamChat({ ...input, tools: { look_up, skipped: undefined }, maxToolRounds: 2, onEnd });
+
+    expect(await result.text).toBe("It is the fluid.");
+    expect(look_up.execute).toHaveBeenCalledTimes(1);
+    expect(look_up.execute.mock.calls[0][0]).toEqual({ word: "stroma" });
+    expect(ai.calls).toHaveLength(2);
+    expect((ai.calls[0].body.tools as { function: { name: string } }[]).map((x) => x.function.name)).toEqual(["look_up"]);
+    expect(JSON.stringify(ai.calls[1].body.messages)).toContain("TOOL-RESULT-42");
+    await vi.waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1));
+    expect(onEnd).toHaveBeenCalledWith({ text: "It is the fluid." });
+    await vi.waitFor(async () => expect(await rows()).toHaveLength(1));
+  });
+
+  it("without maxToolRounds a tool call is not followed up, and no tools means none are sent", async () => {
+    ai.queue("groq", { rawBody: toolCall("look_up", { word: "stroma" }) });
+    const first = await router().streamChat({ ...input, tools: { look_up: lookUp() } });
+    await first.result.consumeStream();
+    expect(ai.calls).toHaveLength(1);
+
+    ai.queue("groq", { text: "plain" });
+    const second = await router().streamChat({ ...input, tools: {} });
+    expect(await second.result.text).toBe("plain");
+    expect(ai.calls[1].body.tools).toBeUndefined();
+  });
+
+  it("does not call onEnd when the stream fails between tool rounds", async () => {
+    ai.queue("groq", { rawBody: toolCall("look_up", { word: "stroma" }) }, { status: 500 });
+    const onEnd = vi.fn();
+    const { result } = await router().streamChat({ ...input, tools: { look_up: lookUp() }, maxToolRounds: 2, onEnd });
+    await result.consumeStream({ onError: () => {} });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(onEnd).not.toHaveBeenCalled();
+    expect(ai.calls).toHaveLength(2);
+  });
 });
 
 describe("privacy", () => {

@@ -20,11 +20,24 @@
  * - One `ai_calls` row per HTTP attempt (provider, model, job, ok, ms, user). Prompts, answers
  *   and keys are never logged, and thrown errors never carry the request body.
  *
+ * - `streamChat` also takes plain tool definitions (`{ description, inputSchema, execute }`), wraps
+ *   them for the SDK here, lets the model call them for up to `maxToolRounds` rounds, and calls
+ *   `onEnd` once with the whole reply when the stream ended without an error (M2-14).
+ *
  * `createRouter(deps)` takes the provider table, env, database, clock, fetch and a base URL
  * override, so tests can point it at `tests/fake-ai/server.ts`.
  */
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { APICallError, generateText, streamText, type LanguageModel, type ModelMessage } from "ai";
+import {
+  APICallError,
+  generateText,
+  isStepCount,
+  streamText,
+  tool,
+  type LanguageModel,
+  type ModelMessage,
+  type ToolSet,
+} from "ai";
 import { gt } from "drizzle-orm";
 import { z } from "zod";
 import { db as defaultDb, type Db } from "@/server/db/client";
@@ -88,6 +101,29 @@ export type RunInput = {
   /** What the call is for, stored in `ai_calls.job`. */
   job: string;
   userId?: string | null;
+};
+
+/** A tool as plain data, so files outside `src/server/ai/` can define one without the AI SDK. */
+export type PlainTool = {
+  description: string;
+  inputSchema: z.ZodType;
+  // `never`: a tool that takes a narrower input than `unknown` still fits.
+  execute: (input: never) => Promise<unknown>;
+};
+
+/** What `onEnd` gets: the text of every step, in order, joined by a blank line. */
+export type StreamChatEnd = { text: string };
+
+export type StreamChatInput = RunInput & {
+  /** Tools the model may call. Undefined entries are skipped; none means a plain chat. */
+  tools?: Record<string, PlainTool | undefined>;
+  /** How many rounds of tool calls the model gets before it must answer. Default 0. */
+  maxToolRounds?: number;
+  /**
+   * Called once when the whole reply has streamed without an error. Not called when the stream
+   * failed, at the start or part-way. Awaited before the stream closes.
+   */
+  onEnd?: (event: StreamChatEnd) => void | Promise<void>;
 };
 
 export type Picked = { entry: ProviderEntry; provider: ProviderName; model: string };
@@ -242,7 +278,9 @@ export function createRouter(deps: RouterDeps = {}) {
    * not a success (a limit or server error also writes a cool-down); once a provider has
    * answered, the stream is the caller's. The `ai_calls` row is written when the stream ends.
    */
-  async function streamChat(input: RunInput): Promise<StreamChatResult> {
+  async function streamChat(input: StreamChatInput): Promise<StreamChatResult> {
+    const tools = sdkTools(input.tools);
+    const rounds = tools ? Math.max(0, Math.floor(input.maxToolRounds ?? 0)) : 0;
     return withFallback(input, async (c) => {
       const started = performance.now();
       let logged = false;
@@ -273,15 +311,21 @@ export function createRouter(deps: RouterDeps = {}) {
         instructions: input.system,
         messages: input.messages,
         maxRetries: 0,
+        tools,
+        // One step per round of tool calls, plus the step that writes the answer.
+        stopWhen: isStepCount(rounds + 1),
         // Without onError the SDK prints the error, and its error carries the request body.
         onError: async ({ error }) => {
           streamError = error;
           settle({ ended: true });
           await log(false);
         },
-        onEnd: async () => {
+        onEnd: async ({ steps }) => {
           settle({ ended: true });
           await log(true);
+          if (input.onEnd && streamError === undefined) {
+            await input.onEnd({ text: steps.map((step) => step.text).filter(Boolean).join("\n\n") });
+          }
         },
       });
 
@@ -305,6 +349,20 @@ export function createRouter(deps: RouterDeps = {}) {
   }
 
   return { pick, runText, runObject, streamChat };
+}
+
+/** Plain tool definitions as SDK tools, or undefined when there are none. */
+function sdkTools(plain: StreamChatInput["tools"]): ToolSet | undefined {
+  const out: ToolSet = {};
+  for (const [name, def] of Object.entries(plain ?? {})) {
+    if (!def) continue;
+    out[name] = tool({
+      description: def.description,
+      inputSchema: def.inputSchema,
+      execute: (input: unknown) => def.execute(input as never),
+    });
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 function isLimit(status: number | undefined): boolean {

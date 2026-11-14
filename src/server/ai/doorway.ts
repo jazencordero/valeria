@@ -21,7 +21,7 @@
  *
  * The handler gets `ai`: the router's `runText`, `runObject` and `streamChat`, with this route's
  * size and the signed-in user filled in. Screens never import `router.ts` or the AI SDK directly.
- * No streaming helpers here (M2-14 adds the chat route). Prompts and bodies are never logged.
+ * No streaming helpers here: the chat route (M2-14) returns `result.toUIMessageStreamResponse()`. Prompts and bodies are never logged.
  *
  * `createAiRoute(deps)` takes the router, database, clock and user lookup, so tests can run it
  * against `createTestDb()` and `tests/fake-ai/server.ts`.
@@ -33,7 +33,14 @@ import { db as defaultDb, type Db } from "@/server/db/client";
 import { aiCalls } from "@/server/db/schema/system";
 import type { SizeClass } from "./providers.config";
 import * as defaultRouter from "./router";
-import { AiBusy, type RunInput, type RunObjectResult, type RunTextResult, type StreamChatResult } from "./router";
+import {
+  AiBusy,
+  type RunInput,
+  type RunObjectResult,
+  type RunTextResult,
+  type StreamChatInput,
+  type StreamChatResult,
+} from "./router";
 
 export const AI_BUSY_MESSAGE = "AI is busy. Try again in a few minutes.";
 const HOUR_MS = 60 * 60 * 1000;
@@ -41,7 +48,7 @@ const HOUR_MS = 60 * 60 * 1000;
 type Router = {
   runText: (input: RunInput) => Promise<RunTextResult>;
   runObject: <T>(input: RunInput & { schema: z.ZodType<T> }) => Promise<RunObjectResult<T>>;
-  streamChat: (input: RunInput) => Promise<StreamChatResult>;
+  streamChat: (input: StreamChatInput) => Promise<StreamChatResult>;
 };
 
 export type DoorwayDeps = {
@@ -54,11 +61,13 @@ export type DoorwayDeps = {
 
 /** What a handler passes to `ai.*`: the router input without size and user (the doorway fills them). */
 export type AiInput = Omit<RunInput, "size" | "userId"> & { size?: SizeClass };
+/** The same for `ai.streamChat`, which also takes tools, `maxToolRounds` and `onEnd`. */
+export type AiStreamInput = Omit<StreamChatInput, "size" | "userId"> & { size?: SizeClass };
 
 export type DoorwayAi = {
   runText: (input: AiInput) => Promise<RunTextResult>;
   runObject: <T>(input: AiInput & { schema: z.ZodType<T> }) => Promise<RunObjectResult<T>>;
-  streamChat: (input: AiInput) => Promise<StreamChatResult>;
+  streamChat: (input: AiStreamInput) => Promise<StreamChatResult>;
 };
 
 export type AiRouteOptions<S extends z.ZodType> = {
@@ -156,7 +165,7 @@ export function createAiRoute(deps: DoorwayDeps = {}) {
         return json(400, { error: "bad_request", issues });
       }
 
-      const fill = <I extends AiInput>(input: I) => ({ ...input, size: input.size ?? options.size, userId: user.id });
+      const fill = <I extends AiInput | AiStreamInput>(input: I) => ({ ...input, size: input.size ?? options.size, userId: user.id });
       const ai: DoorwayAi = {
         runText: (input) => router().runText(fill(input)),
         runObject: (input) => router().runObject(fill(input)),
