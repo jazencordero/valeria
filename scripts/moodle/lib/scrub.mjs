@@ -41,8 +41,8 @@ export const PERSON_EXTRA_KEYS = ["idnumber", "phone1", "phone2", "address", "ci
 /** Free text written by or about a person (teacher feedback, comments). */
 export const FREE_TEXT_KEYS = ["feedback", "feedbacktext", "feedbackcomments", "commenttext"];
 
-/** Secrets. Also any `token=` / `wstoken=` / `privatetoken=` inside any string. */
-export const SECRET_KEYS = ["token", "wstoken", "privatetoken", "userprivateaccesskey"];
+/** Secrets. Also any `token=` / `wstoken=` / `privatetoken=` / `sesskey=` / `…key=` inside any string. */
+export const SECRET_KEYS = ["token", "wstoken", "privatetoken", "userprivateaccesskey", "sesskey"];
 
 /** Keys whose object value (or array of objects) is a person. */
 export const PERSON_CONTAINER_KEYS = ["user", "users", "participant", "participants", "members", "contacts", "author", "teachers", "students", "enrolledusers", "userfrom", "userto"];
@@ -67,7 +67,8 @@ const S = {
 };
 
 const FAKE_USER_ID_BASE = 900000;
-const TOKEN_IN_TEXT = /\b(wstoken|privatetoken|token)=([^&#"'\s]+)/gi;
+// Session keys (`sesskey=`, in calendar action URLs) and any `…key=` parameter count too.
+const TOKEN_IN_TEXT = /\b(wstoken|privatetoken|token|[a-z]*key)=([^&#"'\s]+)/gi;
 const USERID_IN_URL = /([?&](?:userid|user|id_user)=)(\d+)/gi;
 // Any email address in any text (a teacher's address in a course summary, say).
 const EMAIL_IN_TEXT = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu;

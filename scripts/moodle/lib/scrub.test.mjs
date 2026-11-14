@@ -250,3 +250,18 @@ test("a known name is swept out of a file name joined with underscores", () => {
   const out = s({ firstname: "Ann", lastname: "Lee", filename: "Ann_Lee_essay.pdf" });
   assert.equal(out.filename, "First1_Last1_essay.pdf");
 });
+
+test("session keys and other key= URL parameters are redacted", () => {
+  const s = createScrubber();
+  const out = s({
+    url: "https://mycourses.example.edu/mod/assign/view.php?id=7&action=editsubmission&sesskey=Kv1xTHEabc",
+    html: '<a href="https://x.example/course/view.php?id=3&amp;sesskey=Zz9yQ">x</a>',
+    other: "https://x.example/login?qrloginkey=abc123&userid=5",
+    sesskey: "Kv1xTHEabc",
+  });
+  const text = JSON.stringify(out);
+  assert.ok(!text.includes("Kv1xTHEabc") && !text.includes("Zz9yQ") && !text.includes("abc123"));
+  assert.ok(out.url.endsWith("&sesskey=REDACTED"));
+  assert.ok(out.html.includes("&amp;sesskey=REDACTED"));
+  assert.equal(out.sesskey, "REDACTED");
+});
