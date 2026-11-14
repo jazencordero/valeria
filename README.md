@@ -4,6 +4,19 @@ Know if you'll be ready. Start studying in 10 seconds.
 
 Live: https://valeria-theta.vercel.app
 
+## Set up on your Mac (once)
+
+```bash
+git clone https://github.com/jazencordero/valeria ~/valeria
+cd ~/valeria
+npm install
+graphify install --project   # wires the code graph into Claude Code for this repo
+graphify hook install        # keeps the graph fresh on every commit and checkout
+```
+
+Then open `~/valeria` in Claude Code and send `/graphify .` once to build the graph, then `/start`.
+Graphify lets Claude look up how the code connects from a map instead of grepping files, which uses far fewer tokens.
+
 ## Run it
 
 ```bash
