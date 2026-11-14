@@ -65,6 +65,14 @@ const nextConfig: NextConfig = {
   // under `next dev` that URL breaks ("path" argument ... Received an instance
   // of URL), so load it with Node's own require instead (M1-46).
   serverExternalPackages: ["@electric-sql/pglite"],
+  // Hand-in files (up to 4 MB, M1 Cut) travel through a server action, whose
+  // body is capped at 1 MB by default. 4.5 MB leaves room for the multipart
+  // overhead and matches Vercel's own 4.5 MB request limit (M1-47).
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "4.5mb",
+    },
+  },
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
