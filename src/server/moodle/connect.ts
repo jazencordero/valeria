@@ -14,7 +14,7 @@
  * Every function takes the `Db` last (default: the app database) so tests can
  * run against `createTestDb()`.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { mergeUsers } from "@/server/auth/session";
 import { seal, unseal } from "@/server/crypto/seal";
 import { db as defaultDb, type Db } from "@/server/db/client";
@@ -43,12 +43,20 @@ export type ConnectResult =
       /** True when the caller's user was merged into the user that already had this Moodle identity. */
       merged: boolean;
     }
-  | { ok: false; reason: "rejected" | "site_not_allowed" };
+  | {
+      ok: false;
+      /**
+       * `other_account`: the key is good, but for a different Moodle user than
+       * the one this account is already tied to. Nothing is stored, so two
+       * people's coursework never end up in one account.
+       */
+      reason: "rejected" | "site_not_allowed" | "other_account";
+    };
 
 /**
  * Checks `key` against `siteUrl` and, if Moodle accepts it, stores it sealed
- * for `userId`. A rejected key or a site not in `ALLOWED_SITES` stores
- * nothing. Other Moodle errors (down, unexpected answer) are thrown.
+ * for `userId`. A rejected key, a site not in `ALLOWED_SITES`, or a key for a
+ * different Moodle user than this account already has, stores nothing. Other Moodle errors (down, unexpected answer) are thrown.
  */
 export async function connectWithKey(
   userId: string,
@@ -86,6 +94,23 @@ export async function connectWithKey(
         .limit(1);
       return row?.userId ?? null;
     };
+
+    // One account, one Moodle user per site. Without this, a friend's key pasted
+    // on her device would tie the friend's identity to her account, and the
+    // friend's own device would later be merged into it.
+    const [other] = await tx
+      .select({ id: identities.id })
+      .from(identities)
+      .where(
+        and(
+          eq(identities.userId, userId),
+          eq(identities.kind, MOODLE_IDENTITY_KIND),
+          eq(identities.siteUrl, site),
+          ne(identities.externalId, externalId),
+        ),
+      )
+      .limit(1);
+    if (other) return { ok: false as const, reason: "other_account" as const };
 
     let owner = await findOwner();
     if (!owner) {

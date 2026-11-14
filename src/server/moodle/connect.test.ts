@@ -116,6 +116,17 @@ describe("connectWithKey", () => {
     expect(await t.db.select().from(identities)).toHaveLength(1);
   });
 
+  it("refuses a good key for a different Moodle user than this account already has", async () => {
+    const userId = await anonymousUser();
+    // As if she had connected before as another Moodle user on the same site.
+    await t.db.insert(identities).values({ userId, kind: "moodle", siteUrl: AALTO, externalId: "777" });
+    expect(await connectWithKey(userId, AALTO, DEMO_KEY, t.db)).toEqual({ ok: false, reason: "other_account" });
+    expect(await t.db.select().from(moodleConnections)).toHaveLength(0);
+    const ids = await t.db.select().from(identities);
+    expect(ids.map((i) => i.externalId)).toEqual(["777"]);
+    expect(await t.db.select().from(users)).toHaveLength(1);
+  });
+
   it("merges a second anonymous user with the same Moodle user: one user, both sessions", async () => {
     const phone = await anonymousUser();
     const laptop = await anonymousUser();
