@@ -1,0 +1,60 @@
+{
+  "lastattempt": {
+    "submission": {
+      "id": 88301,
+      "userid": 4242,
+      "attemptnumber": 0,
+      "timecreated": 1794564000,
+      "timemodified": 1794564000,
+      "status": "new",
+      "groupid": 0,
+      "assignment": 7301,
+      "latest": 1,
+      "plugins": [
+        {
+          "type": "file",
+          "name": "File submissions",
+          "fileareas": [
+            {
+              "area": "submission_files",
+              "files": []
+            }
+          ]
+        },
+        {
+          "type": "comments",
+          "name": "Submission comments"
+        }
+      ]
+    },
+    "submissiongroupmemberswhoneedtosubmit": [],
+    "submissionsenabled": true,
+    "locked": false,
+    "graded": false,
+    "canedit": true,
+    "caneditowner": true,
+    "cansubmit": false,
+    "timelimit": 0,
+    "blindmarking": false,
+    "gradingstatus": "notgraded",
+    "usergroups": []
+  },
+  "assignmentdata": {
+    "attachments": {
+      "intro": [
+        {
+          "filename": "case-memo-2.pdf",
+          "filepath": "/",
+          "filesize": 251904,
+          "fileurl": "https://moodle.example.edu/webservice/pluginfile.php/61301/mod_assign/introattachment/0/case-memo-2.pdf",
+          "timemodified": 1793520000,
+          "mimetype": "application/pdf",
+          "isexternalfile": false
+        }
+      ]
+    },
+    "activity": "",
+    "activityformat": 1
+  },
+  "warnings": []
+}

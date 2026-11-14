@@ -1,0 +1,392 @@
+{
+  "courses": [
+    {
+      "id": 3101,
+      "fullname": "Forecasting Methods, Lecture, 1.9.2026-18.12.2026",
+      "shortname": "ISM-E1005 - Forecasting Methods",
+      "timemodified": 1793520000,
+      "assignments": [
+        {
+          "id": 7101,
+          "cmid": 5101,
+          "course": 3101,
+          "name": "Assignment 3",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1794866340,
+          "allowsubmissionsfromdate": 1793520000,
+          "grade": 100,
+          "timemodified": 1793520000,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 1795471140,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": -1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 0,
+          "configs": [
+            {
+              "id": 71010,
+              "assignment": 7101,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "id": 71011,
+              "assignment": 7101,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "id": 71012,
+              "assignment": 7101,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "10485760"
+            },
+            {
+              "id": 71013,
+              "assignment": 7101,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ".pdf"
+            },
+            {
+              "id": 71014,
+              "assignment": 7101,
+              "plugin": "onlinetext",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "0"
+            },
+            {
+              "id": 71015,
+              "assignment": 7101,
+              "plugin": "comments",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "id": 71016,
+              "assignment": 7101,
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "id": 71017,
+              "assignment": 7101,
+              "plugin": "file",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            }
+          ],
+          "intro": "<p>Fit an exponential smoothing model to the attached sales series and compare it with a seasonal naive forecast. Hand in one PDF, at most 4 pages.</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "assignment-3-brief.pdf",
+              "filepath": "/",
+              "filesize": 184320,
+              "fileurl": "https://moodle.example.edu/webservice/pluginfile.php/61101/mod_assign/introattachment/0/assignment-3-brief.pdf",
+              "timemodified": 1793520000,
+              "mimetype": "application/pdf",
+              "isexternalfile": false
+            },
+            {
+              "filename": "sales-series.pdf",
+              "filepath": "/",
+              "filesize": 96256,
+              "fileurl": "https://moodle.example.edu/webservice/pluginfile.php/61101/mod_assign/introattachment/0/sales-series.pdf",
+              "timemodified": 1793520000,
+              "mimetype": "application/pdf",
+              "isexternalfile": false
+            }
+          ],
+          "activity": "",
+          "activityformat": 1,
+          "activityattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        }
+      ]
+    },
+    {
+      "id": 3102,
+      "fullname": "Strategic IT Management, Lecture, 1.9.2026-18.12.2026",
+      "shortname": "37E00200 - Strategic IT Management",
+      "timemodified": 1793520000,
+      "assignments": []
+    },
+    {
+      "id": 3103,
+      "fullname": "Supply Chain Analytics, Lecture, 1.9.2026-18.12.2026",
+      "shortname": "ISM-E3003 - Supply Chain Analytics",
+      "timemodified": 1793520000,
+      "assignments": [
+        {
+          "id": 7301,
+          "cmid": 5301,
+          "course": 3103,
+          "name": "Case memo 2",
+          "nosubmissions": 0,
+          "submissiondrafts": 1,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1794952740,
+          "allowsubmissionsfromdate": 1793606400,
+          "grade": 100,
+          "timemodified": 1793520000,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 1795557540,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": -1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "requiresubmissionstatement": 1,
+          "preventsubmissionnotingroup": 0,
+          "submissionstatement": "This assignment is my own work, except where I have acknowledged the use of the works of other people.",
+          "submissionstatementformat": 1,
+          "configs": [
+            {
+              "id": 73010,
+              "assignment": 7301,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "id": 73011,
+              "assignment": 7301,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "id": 73012,
+              "assignment": 7301,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "10485760"
+            },
+            {
+              "id": 73013,
+              "assignment": 7301,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ".pdf"
+            },
+            {
+              "id": 73014,
+              "assignment": 7301,
+              "plugin": "onlinetext",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "0"
+            },
+            {
+              "id": 73015,
+              "assignment": 7301,
+              "plugin": "comments",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "id": 73016,
+              "assignment": 7301,
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "id": 73017,
+              "assignment": 7301,
+              "plugin": "file",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            }
+          ],
+          "intro": "<p>Read the attached case and write a two-page memo recommending a safety stock policy. Upload your memo, then press Submit to hand it in.</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "case-memo-2.pdf",
+              "filepath": "/",
+              "filesize": 251904,
+              "fileurl": "https://moodle.example.edu/webservice/pluginfile.php/61301/mod_assign/introattachment/0/case-memo-2.pdf",
+              "timemodified": 1793520000,
+              "mimetype": "application/pdf",
+              "isexternalfile": false
+            }
+          ],
+          "activity": "",
+          "activityformat": 1,
+          "activityattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        }
+      ]
+    },
+    {
+      "id": 3104,
+      "fullname": "Digital Service Design, Lecture, 1.9.2026-18.12.2026",
+      "shortname": "ISM-E2004 - Digital Service Design",
+      "timemodified": 1793520000,
+      "assignments": [
+        {
+          "id": 7401,
+          "cmid": 5401,
+          "course": 3104,
+          "name": "Service blueprint",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1795816740,
+          "allowsubmissionsfromdate": 1793692800,
+          "grade": 100,
+          "timemodified": 1793520000,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 1796421540,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": -1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 0,
+          "configs": [
+            {
+              "id": 74010,
+              "assignment": 7401,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "id": 74011,
+              "assignment": 7401,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "id": 74012,
+              "assignment": 7401,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "10485760"
+            },
+            {
+              "id": 74013,
+              "assignment": 7401,
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ".pdf"
+            },
+            {
+              "id": 74014,
+              "assignment": 7401,
+              "plugin": "onlinetext",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "0"
+            },
+            {
+              "id": 74015,
+              "assignment": 7401,
+              "plugin": "comments",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "id": 74016,
+              "assignment": 7401,
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "id": 74017,
+              "assignment": 7401,
+              "plugin": "file",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            }
+          ],
+          "intro": "<p>Draw a service blueprint for the student onboarding service described in the brief. Hand in one PDF.</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "service-blueprint-brief.pdf",
+              "filepath": "/",
+              "filesize": 143360,
+              "fileurl": "https://moodle.example.edu/webservice/pluginfile.php/61401/mod_assign/introattachment/0/service-blueprint-brief.pdf",
+              "timemodified": 1793520000,
+              "mimetype": "application/pdf",
+              "isexternalfile": false
+            }
+          ],
+          "activity": "",
+          "activityformat": 1,
+          "activityattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
