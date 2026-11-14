@@ -7,8 +7,9 @@
 //   node scripts/moodle/probe.mjs --out <dir>      where to write (default context/moodle)
 //   node scripts/moodle/probe.mjs --mock           run against scripts/moodle/mock.mjs
 //                                                  (starts one, or use --site for a running one)
-// Non-interactive key: MOODLE_KEY env var, or piped on stdin. The key stays in memory only:
-// it is never printed, logged or written to a file.
+// Non-interactive key: MOODLE_KEY env var, or piped on stdin. With neither, the key that
+// `node scripts/moodle/session.mjs login` kept in the Keychain for the site (M0-15), else
+// it asks. The key stays in memory only: it is never printed, logged or written to a file.
 //
 // Other ways to get the key (ticket M0-05), one at a time:
 //   --launch-url [--passport <p>] [--scheme <s>]
@@ -32,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { call, MoodleError } from "./lib/ws.mjs";
 import { createScrubber } from "./lib/scrub.mjs";
 import { decodeLaunchRedirect, exchangeQr, launchUrl, parseQr } from "./lib/keys.mjs";
+import * as keychain from "./lib/keychain.mjs";
 
 export const DEFAULT_SITE = "https://mycourses.aalto.fi";
 export const DEFAULT_OUT = "context/moodle";
@@ -130,9 +132,22 @@ async function readAllStdin() {
   return Buffer.concat(chunks).toString("utf8").trim();
 }
 
-async function getKey() {
+/**
+ * MOODLE_KEY, else a piped key, else the key `session.mjs login` kept in the Keychain
+ * for this site (M0-15), else ask for it hidden.
+ */
+async function getKey(site) {
   if (process.env.MOODLE_KEY) return process.env.MOODLE_KEY.trim();
-  return readSecret("Key (hidden): ");
+  if (!process.stdin.isTTY) {
+    const piped = await readAllStdin();
+    if (piped) return piped;
+  }
+  const kept = await keychain.get(site).catch(() => null);
+  if (kept) {
+    process.stderr.write(`Using the key in your Mac's Keychain for ${keychain.normaliseSite(site)}.\n`);
+    return kept;
+  }
+  return process.stdin.isTTY ? askHidden("Key (hidden): ") : "";
 }
 
 /** One secret line: hidden on a terminal, else everything piped on stdin. */
@@ -535,7 +550,7 @@ async function main(argv) {
     } else {
       if (!site) site = process.stdin.isTTY ? (await ask(`Site [${DEFAULT_SITE}]: `)) || DEFAULT_SITE : DEFAULT_SITE;
       if (opts.mode === "launch-url") return await printLaunchUrl(opts, site, null);
-      token = opts.mode === "redirect" ? await keyFromRedirect(opts, site, null) : await getKey();
+      token = opts.mode === "redirect" ? await keyFromRedirect(opts, site, null) : await getKey(site);
     }
     if (!token) throw new Error("No key given");
     const result = await probe(site, token);

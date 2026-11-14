@@ -5,9 +5,11 @@
 // Usage:
 //   pbpaste | node scripts/moodle/fetch-lectures.mjs --qr                       list courses
 //   pbpaste | node scripts/moodle/fetch-lectures.mjs --qr --course CS-C3120 --out ~/ready-lectures
+//   node scripts/moodle/fetch-lectures.mjs --course CS-C3120 --out ~/ready-lectures   after session.mjs login
 // Options:
 //   --qr            read the "View QR code" text (stdin when piped, hidden on a terminal)
-//                   Without --qr: MOODLE_KEY env var, else the key itself (stdin or hidden).
+//                   Without --qr: MOODLE_KEY env var, else a piped key, else the key
+//                   `session.mjs login` kept in the Keychain for the site, else hidden prompt.
 //   --site <url>    site when not using --qr (default https://mycourses.aalto.fi)
 //   --course <text> start of the course short name, any case
 //   --out <dir>     where PDFs go; must be outside this git repository
@@ -22,6 +24,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath } from "node:url";
 import { call, MoodleError } from "./lib/ws.mjs";
 import { exchangeQr, parseQr } from "./lib/keys.mjs";
+import * as keychain from "./lib/keychain.mjs";
 
 export const DEFAULT_SITE = "https://mycourses.aalto.fi";
 export const MAX_BYTES = 30 * 1024 * 1024;
@@ -200,7 +203,15 @@ async function getKey(opts, mockSite) {
     const m = await import("./mock.mjs");
     return { site, token: m.MOCK_TOKEN };
   }
-  const token = process.env.MOODLE_KEY ? process.env.MOODLE_KEY.trim() : await readSecret("Key (hidden): ");
+  // MOODLE_KEY, else a piped key, else the Keychain key from session.mjs login (M0-15),
+  // else ask for it hidden.
+  let token = process.env.MOODLE_KEY ? process.env.MOODLE_KEY.trim() : "";
+  if (!token && !process.stdin.isTTY) token = await readAllStdin();
+  if (!token) {
+    token = (await keychain.get(site).catch(() => null)) || "";
+    if (token) warn(`Using the key in your Mac's Keychain for ${keychain.normaliseSite(site)}.`);
+  }
+  if (!token && process.stdin.isTTY) token = await askHidden("Key (hidden): ");
   remember(token);
   return { site, token };
 }
