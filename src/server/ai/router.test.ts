@@ -170,6 +170,14 @@ describe("runText", () => {
     expect(await rows()).toHaveLength(0);
   });
 
+  it("every OpenRouter model in the config is a ':free' one", () => {
+    // The allow-list is built from the config itself, so this is the check that
+    // a paid OpenRouter model cannot be listed by mistake.
+    const openrouter = Object.values(PROVIDERS).flat().filter((e) => e.provider === "openrouter");
+    expect(openrouter.length).toBeGreaterThan(0);
+    for (const entry of openrouter) expect(entry.model.endsWith(":free"), entry.model).toBe(true);
+  });
+
   it("refuses a paid model even when it sits after a free one", async () => {
     const r = router([GROQ, { ...OPENROUTER, model: "openai/gpt-paid" }]);
     await expect(r.runText(input)).rejects.toBeInstanceOf(NotFree);
