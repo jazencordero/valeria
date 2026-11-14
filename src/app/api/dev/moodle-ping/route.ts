@@ -10,6 +10,10 @@ const TIMEOUT_MS = 10_000;
 export async function GET() {
   await connection(); // always run at request time, never prerender
 
+  // A test tool for preview links only. On the live site anyone could use it
+  // to make our server call MyCourses over and over, outside the client's limits.
+  if (process.env.VERCEL_ENV === "production") return new Response(null, { status: 404 });
+
   const started = performance.now();
   const region = process.env.VERCEL_REGION ?? "local";
   try {
