@@ -60,6 +60,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // PGlite (the local database when DATABASE_URL is unset) loads its WASM and
+  // data files relative to its own module URL. Bundled into Server Components
+  // under `next dev` that URL breaks ("path" argument ... Received an instance
+  // of URL), so load it with Node's own require instead (M1-46).
+  serverExternalPackages: ["@electric-sql/pglite"],
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
