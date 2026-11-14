@@ -1,0 +1,37 @@
+name: Tick
+
+# Once an hour, at minute 7, wake the app's background jobs (M2-06).
+# Needs two repository secrets: CRON_SECRET (the same value as the app's
+# CRON_SECRET environment variable) and APP_URL (the production address,
+# for example https://example.vercel.app).
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call the tick
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ secrets.APP_URL }}
+        run: |
+          if [ -z "$CRON_SECRET" ] || [ -z "$APP_URL" ]; then
+            echo "Add the repository secrets CRON_SECRET and APP_URL." >&2
+            exit 1
+          fi
+          # --fail-with-body: any answer that is not 2xx fails this job, and the answer is still printed.
+          curl --fail-with-body --silent --show-error --max-time 330 \
+            --request POST \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            "${APP_URL%/}/api/cron/tick"
