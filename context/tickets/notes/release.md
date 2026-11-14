@@ -17,7 +17,7 @@ Vercel's rule: the command exiting 1 means build, exiting 0 means skip. A deploy
 ## How work moves
 
 1. **Build branch.** Agents commit ticket by ticket on the builder branch (today `claude/build-bceaea`). Pushing it costs nothing.
-2. **Preview, only when a check needs a real link.** Push the current commit once: `git push origin HEAD:preview/<ticket-id>`. Vercel builds it and posts the link. Batch several checks into one preview where possible. Delete the branch when done: `git push origin --delete preview/<ticket-id>`.
+2. **Preview, only when a check needs a real link.** Push the current commit once: `git push origin HEAD:preview/<ticket-id>`. Vercel builds it and posts the link. Batch several checks into one preview where possible. Vercel makes no new deployment for a commit it has already seen on another branch (even a skipped one), so push a fresh empty commit to the preview branch only: `git push origin "$(git commit-tree HEAD^{tree} -p HEAD -m preview)":refs/heads/preview/<ticket-id>`. Delete the branch when done: `git push origin --delete preview/<ticket-id>`.
 3. **Production.** A merge into `main`, which Jazen approves. Nothing else deploys to production.
 
 ## Before merging to `main`
