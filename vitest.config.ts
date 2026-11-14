@@ -12,7 +12,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     // In-memory PGlite plus migrations can take several seconds when the whole suite runs in parallel.
-    testTimeout: 20_000,
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     include: ["src/**/*.test.{ts,tsx}", "tests/unit/**/*.test.{ts,tsx}", "tests/arch/**/*.test.{ts,tsx}"],
   },
 });
