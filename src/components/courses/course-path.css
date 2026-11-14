@@ -1,0 +1,48 @@
+/*
+ * Course path, drawn (M9-07). Source: prototype merged.html CSS 995-1037
+ * (.cpath, .trail, .stop, .stop-cap, .stop-lbl, .here, .mflag, .flag-ic),
+ * pastel tones from lines 291-293 and 628. Class names carry a cp- prefix so
+ * they cannot clash with other screens' globals.
+ */
+.cpath{ position: relative; margin-top: 12px; }
+.cpath .cp-trail{ position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.cpath .cp-trail path{ fill: none; stroke-linecap: round; }
+.cpath .cp-base{ stroke: var(--line); stroke-width: 3; stroke-dasharray: 2 9; }
+.cpath .cp-done{ stroke: var(--accent); stroke-width: 3.5; stroke-dasharray: 1; stroke-dashoffset: 0; }
+
+.cpath .cp-stop{ position: absolute; z-index: 1; width: 64px; height: 64px; margin: -32px 0 0 -32px; padding: 0; border-radius: 999px; display: grid; place-items: center; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink-2); font-family: var(--mono); font-size: 16px; font-weight: 500; box-shadow: var(--shadow-card); cursor: pointer; }
+.cpath .cp-stop.done{ background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.cpath .cp-stop.done svg.ic{ width: 26px; height: 26px; stroke-width: 2.4; }
+.cpath .cp-stop.soon{ border: 2px dashed var(--ink-3); background: var(--paper); color: var(--ink-3); box-shadow: none; }
+.cpath .cp-stop.cur{ width: 76px; height: 76px; margin: -38px 0 0 -38px; border: 0; color: var(--ink); font-size: 20px; }
+.cpath .cp-stop.cur::before{ content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 3px var(--accent); animation: cp-breathe 2.4s ease-in-out infinite; }
+@keyframes cp-breathe{ 0%, 100%{ transform: scale(1); } 50%{ transform: scale(1.04); } }
+.cpath.calm .cp-stop.cur::before{ animation: none; }
+@media (prefers-reduced-motion: reduce){
+  .cpath .cp-stop.cur::before{ animation: none; }
+}
+
+/* The cap sits above the current stop. scroll-margin-bottom biases
+   scrollIntoView({ block: "center" }) so the stop lands about 40% down. */
+.cpath .cp-cap{ position: absolute; z-index: 2; width: 40px; margin: -72px 0 0 -20px; pointer-events: none; line-height: 0; scroll-margin-bottom: 20vh; }
+
+.cpath .cp-lbl{ position: absolute; right: 0; transform: translateY(-50%); cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
+.cpath .cp-lbl > .mono{ color: var(--ink-3); }
+.cpath .cp-lbl-t{ margin-top: 2px; font-family: var(--display); font-weight: 600; font-size: 17px; line-height: 1.25; font-variation-settings: "SOFT" 100; }
+.cpath .cp-lbl-c{ margin-top: 2px; font-size: 13px; color: var(--ink-2); }
+.cpath .cp-lbl .cp-lbl-m{ margin-top: 4px; color: var(--ink-3); }
+.cpath .cp-lbl:hover .cp-lbl-t{ text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 4px; }
+.cpath .cp-here{ position: relative; display: inline-block; margin-bottom: 6px; padding: 3px 10px; border-radius: 999px; background: var(--btn); color: var(--btn-ink); font-size: 12px; font-weight: 600; }
+
+.cpath .cp-flag{ position: absolute; z-index: 1; display: inline-flex; align-items: center; gap: 8px; max-width: calc(100% - var(--fx, 0px)); min-height: 36px; margin: 0; padding: 6px 14px 6px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); font-size: 13px; line-height: 1.3; text-align: left; margin-top: -18px; }
+.cpath .cp-flag.finish{ margin-top: -26px; min-height: 52px; padding: 10px 18px 10px 10px; border-radius: 18px; font-size: 15px; font-weight: 600; }
+.cpath button.cp-flag{ cursor: pointer; }
+.cpath .cp-flag-ic{ width: 18px; height: 22px; flex: none; overflow: visible; }
+.cpath .cp-flag-ic path{ fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.cpath .cp-flag-ic .fl{ fill: var(--surface); }
+.cpath .cp-flag.finish .cp-flag-ic{ width: 24px; height: 30px; }
+
+.cpath .cp-butter{ background: var(--butter); }
+.cpath .cp-mint{ background: var(--mint); }
+.cpath .cp-sky{ background: var(--sky); }
+.cpath .cp-blush{ background: var(--accent-wash); }
