@@ -5,6 +5,7 @@ import sample from "../../../tests/fixtures/moodle-sample/core_course_get_conten
 import { ensureSessionFor, newToken } from "@/server/auth/session";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { courseFiles, courses } from "@/server/db/schema/courses";
+import { lectures } from "@/server/db/schema/learn";
 import { jobs } from "@/server/db/schema/system";
 import { enqueue } from "@/server/jobs/queue";
 import { MoodleDown, resetMoodleClient } from "@/server/moodle/client";
@@ -204,6 +205,28 @@ describe("syncFiles", () => {
       "cm:7102:lecture-01.pptx": "none",
       "cm:7201:lecture-02.pdf": "done",
     });
+  }, SLOW);
+
+  it("turns the files into her lectures, and a second sync keeps what she has read", async () => {
+    const userId = await connectedUser();
+    const moodle = moodleWith({ [FORECASTING]: twoLectures() });
+    await syncFiles(userId, t.db, moodle.deps);
+
+    const lectureRows = () => t.db.select().from(lectures).where(eq(lectures.userId, userId)).orderBy(asc(lectures.n));
+    const first = await lectureRows();
+    const files = await filesOf(userId);
+    // Lecture 1 is there as PDF and as PowerPoint; the PDF is the lecture's file.
+    expect(first.map((l) => [l.n, l.fileId, l.readAt])).toEqual([
+      [1, files[0].id, null],
+      [2, files[2].id, null],
+    ]);
+
+    const readAt = new Date("2026-11-10T09:00:00Z");
+    await t.db.update(lectures).set({ readAt }).where(eq(lectures.id, first[0].id));
+    await finishExtraction();
+    moodle.pages[FORECASTING][2].modules[0].files[0].size = 2_000_000;
+    expect(await syncFiles(userId, t.db, moodle.deps)).toEqual({ added: 0, updated: 1, queued: 1 });
+    expect(await lectureRows()).toEqual([{ ...first[0], readAt }, first[1]]);
   }, SLOW);
 
   it("queues only PDF, TXT, MD and CSV under 20 MB; the rest is listed with 'none'", async () => {

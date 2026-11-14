@@ -50,6 +50,9 @@
  * - Moodle is read in full before anything is written: a failed read (one
  *   course is enough) changes nothing and throws. All writes are one
  *   transaction.
+ * - Last, inside that same transaction, `syncLectures` (./lectures, M9-03)
+ *   turns the stored files into her lectures, so files and lectures always
+ *   land together. Its counts are not part of the result.
  *
  * Cut: a replaced brief attachment keeps its old text (./assignments does not
  * record a change). Files in hidden courses are not looked at. Text is only
@@ -62,6 +65,7 @@ import { enqueue } from "@/server/jobs/queue";
 import { getConnection } from "@/server/moodle/connect";
 import { getCourseContents } from "@/server/moodle/read/contents";
 import { NotConnected } from "./courses";
+import { syncLectures } from "./lectures";
 
 /** The job kind that runs `syncFiles` for one user. Drained by /api/cron/sync-files. */
 export const SYNC_FILES_KIND = "sync-files";
@@ -205,6 +209,7 @@ export async function syncFiles(
       await queue(row.id);
     }
 
+    await syncLectures(userId, tx);
     return { added, updated, queued };
   });
 }
