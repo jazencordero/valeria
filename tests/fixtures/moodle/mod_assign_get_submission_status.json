@@ -1,0 +1,106 @@
+{
+  "lastattempt": {
+    "submission": {
+      "id": 6355682,
+      "userid": 900005,
+      "attemptnumber": 0,
+      "timecreated": 1788182552,
+      "timemodified": 1792330215,
+      "timestarted": null,
+      "status": "submitted",
+      "groupid": 0,
+      "assignment": 167583,
+      "latest": 1,
+      "plugins": [
+        {
+          "type": "file",
+          "name": "File submissions",
+          "fileareas": [
+            {
+              "area": "submission_files",
+              "files": [
+                {
+                  "filename": "Topic B Report_Topic BA .pdf",
+                  "filepath": "/",
+                  "filesize": 414770,
+                  "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2724416/assignsubmission_file/submission_files/6355682/Topic%20B%20Report_Topic%20BA%20.pdf",
+                  "timemodified": 1792330215,
+                  "mimetype": "application/pdf",
+                  "isexternalfile": false,
+                  "icon": "f/pdf"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "submissiongroupmemberswhoneedtosubmit": [],
+    "submissionsenabled": true,
+    "locked": false,
+    "graded": true,
+    "canedit": true,
+    "caneditowner": true,
+    "cansubmit": false,
+    "extensionduedate": null,
+    "timelimit": 0,
+    "blindmarking": false,
+    "gradingstatus": "graded",
+    "usergroups": [
+      219210,
+      219211,
+      219209
+    ]
+  },
+  "feedback": {
+    "grade": {
+      "id": 4259579,
+      "assignment": 167583,
+      "userid": 900005,
+      "attemptnumber": 0,
+      "timecreated": 1793194649,
+      "timemodified": 1793194653,
+      "grader": 900006,
+      "grade": "100.00000"
+    },
+    "gradefordisplay": "100.00&nbsp;/&nbsp;100.00",
+    "gradeddate": 1793194653,
+    "plugins": [
+      {
+        "type": "comments",
+        "name": "Feedback comments",
+        "fileareas": [
+          {
+            "area": "feedback",
+            "files": []
+          }
+        ],
+        "editorfields": [
+          {
+            "name": "comments",
+            "description": "Feedback comments",
+            "text": "",
+            "format": 0
+          }
+        ]
+      }
+    ]
+  },
+  "assignmentdata": {
+    "attachments": {
+      "intro": [
+        {
+          "filename": "Project Topic G.pdf",
+          "filepath": "/",
+          "filesize": 111862,
+          "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2724416/mod_assign/introattachment/0/Project%20Topic%20G.pdf",
+          "timemodified": 1786604083,
+          "mimetype": "application/pdf",
+          "isexternalfile": false,
+          "icon": "f/pdf"
+        }
+      ]
+    }
+  },
+  "warnings": []
+}

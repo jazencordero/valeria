@@ -1,0 +1,2172 @@
+{
+  "courses": [
+    {
+      "id": 50865,
+      "fullname": "ISM-E1005 - Forecasting Methods, Contact teaching, 31.8.2026-12.10.2026",
+      "shortname": "ISM-E1005_aalto-cur-P-00000000-0000-4000-8000-000000000004",
+      "timemodified": 1791782324,
+      "assignments": [
+        {
+          "id": 167583,
+          "cmid": 1528227,
+          "course": 50865,
+          "name": "Project Topic G",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1792342800,
+          "allowsubmissionsfromdate": 0,
+          "grade": 100,
+          "gradepenalty": 0,
+          "timemodified": 1786604195,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 1792346400,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ".pdf"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "Project Topic G.pdf",
+              "filepath": "/",
+              "filesize": 111862,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2724416/mod_assign/introattachment/0/Project%20Topic%20G.pdf",
+              "timemodified": 1786604083,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 167584,
+          "cmid": 1528228,
+          "course": 50865,
+          "name": "Topic L assignment",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1792342800,
+          "allowsubmissionsfromdate": 0,
+          "grade": 100,
+          "gradepenalty": 0,
+          "timemodified": 1786604195,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 1792346400,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ".pdf"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "Assignment.pdf",
+              "filepath": "/",
+              "filesize": 91723,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2724417/mod_assign/introattachment/0/Assignment.pdf",
+              "timemodified": 1786604145,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        }
+      ]
+    },
+    {
+      "id": 52232,
+      "fullname": "37E00200 - Strategic IT Management, Contact teaching, 3.9.2026-26.11.2026",
+      "shortname": "37E00200_aalto-cur-P-00000000-0000-4000-8000-000000000005",
+      "timemodified": 1794637111,
+      "assignments": [
+        {
+          "id": 166076,
+          "cmid": 1514474,
+          "course": 52232,
+          "name": "Assignment 1: Topic AC",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 0,
+          "duedate": 1789592340,
+          "allowsubmissionsfromdate": 1788426000,
+          "grade": 8,
+          "gradepenalty": 0,
+          "timemodified": 1788778570,
+          "completionsubmit": 1,
+          "cutoffdate": 1789678740,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 1,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 1,
+          "markingallocation": 1,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 1,
+          "preventsubmissionnotingroup": 1,
+          "submissionstatement": "This assignment is my own work, except where I have acknowledged the use of the works of other people.",
+          "submissionstatementformat": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": "document,.pdf"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "2"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "1"
+            },
+            {
+              "plugin": "editpdf",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            }
+          ],
+          "intro": "<p><strong>Culpa: </strong>Culpa nulla aute ullamco magna sed pharetra morbi. Fugiat duis sunt laborum duis fugiat adipiscing et tortor pretium cillum, proident culpa nulla aute ullamco, magna sed pharetra morbi purus qui incididunt minim ex voluptate anim nunc fames. Sit, veniam ea pariatur irure purus qui pharetra, morbi magna sed, officia excepteur amet ut mattis turpis non id commodo esse fames sit. Pariatur irure laboris aliqua pharetra morbi purus qui aute, ullamco amet ut veniam ea velit cupidatat anim nunc fames sit nunc anim sit fames ea veniam cupidatat velit turpis, mattis ullamco aute sed. Magna vitae posuere nulla culpa, irure pariatur dolor tempor suspendisse netus, occaecat mollit ex voluptate senectus ipsum. Fugiat duis, laborum sunt pretium tortor et adipiscing culpa nulla dolor, tempor ad aliquip reprehenderit sint deserunt-ornare, senectus ipsum fugiat duis exercitation dolore pretium tortor laborum sunt consequat nostrud excepteur.</p>\r\n<p><strong id=\"docs-internal-guid-47cb99cb-7fff-1e70-9405-769afdd6c38c\">Culpa</strong>: Culpa nulla aute ullamco magna sed pharetra morbi fugiat duis sunt laborum duis fugiat adipiscing et tortor pretium cillum proident-culpa nulla (Aute) ullamco magna sed pharetra morbi purus qui incididunt minim ex voluptate, anim nunc fames sit veniam ea pariatur irure purus qui, pharetra morbi.</p>\r\n<p><strong>Culpa: </strong></p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\"><strong>Culpa 1.1-1.1.</strong> culpa nulla aute: Ullamco Magna, Sed Pharetra Morbi, fugiat Duis Sunt, <em>Culpa nulla Aute-Ullamco Magna</em> (Culpa, 1730; aute ullamco, Magna Sed, 16 Morbi. 1881) Duis: <a href=\"https://example.invalid/link19\" target=\"_blank\" rel=\"noopener\">culpa://nulla.aute/16.1680/sed/7771646772051.162.1881</a> (culpa nulla)</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\"><strong>Culpa 1</strong> culpa nulla aute: <span style=\"text-align: initial;\">Culpa Nulla, Aute Ullamco, Magna Sed, <em>Culpa Nulla</em>, 1nulla Aute, (Ullamco, 1680). </span>Culpa nulla aute Ullamco Magna (<a href=\"https://example.invalid/link20\" target=\"_blank\" rel=\"noopener\">culpa.nulla.aute</a>)</p>\r\n</li>\r\n<li><strong>Culpa 1</strong> culpa nulla aute: Ullamco (Magna Sed pharetra Morbi) 1881-186 Sunt laborum duis-fugiat adipiscing. <em>Culpa 173: Aute-ullamco magna sed pharetra morbi</em>. (1747). Nulla aute ullamco Magna Sed (<a href=\"https://example.invalid/link20\" target=\"_blank\" rel=\"noopener\">culpa.nulla.aute</a>). Culpa nulla Aute ullamco magna Sed. \r\n<ul>\r\n<li>Culpa: Nulla aute ullamco magna sed pharetra <em>culpa.nulla.aute: </em>Culpa nulla \"Aute Ullamco\" --&gt; Magna Sed (Pharetra morbi) --&gt; Fugiat duis \"1704-172\". </li>\r\n</ul>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\"><strong>Culpa:  </strong></p>\r\n<p dir=\"ltr\"><em><strong>Culpa 1</strong></em>. Culpa nulla aute ullamco (magna 1pharetra) </p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute, ullamco magna sed pharetra morbi (fugiat, duis sunt laborum) duis fugiat adipiscing et tortor pretium cillum. </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute ullamco magna sed pharetra morbi fugiat duis sunt laborum duis fugiat, adipiscing et, tortor pretium cillum proident culpa nulla aute ullamco.</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute ullamco magna sed pharetra morbi fugiat duis sunt laborum duis fugiat, adipiscing et, tortor pretium cillum proident culpa nulla aute ullamco. </p>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\"><em><strong>Culpa 1</strong></em>. Culpa nulla aute ullamco magna (sed 1morbi)</p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute ullamco magna sed pharetra: morbi, fugiat duis (Sunt), laborum duis (Fugiat), adipiscing, et tortor pretium. Cillum proident culpa nulla aute ullamco magna sed pharetra, morbi purus qui incididunt minim ex.</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute ullamco magna sed pharetra morbi. Fugiat duis sunt laborum duis fugiat adipiscing et.</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute ullamco magna sed pharetra morbi. Fugiat duis sunt laborum duis fugiat adipiscing et.</p>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\"><em><strong>Culpa 1</strong></em>. Culpa (nulla 1ullamco)</p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute ullamco, magna sed pharetra morbi fugiat duis, sunt laborum duis fugiat adipiscing et tortor pretium cillum proident culpa nulla. Aute ullamco magna sed.</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute ullamco, magna sed pharetra morbi fugiat duis sunt laborum duis fugiat adipiscing et tortor pretium cillum.</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute ullamco magna sed pharetra morbi fugiat duis sunt laborum duis fugiat adipiscing et tortor/pretium-cillum proident culpa.</p>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\"><strong>Culpa: </strong></p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute ullamco magna sed pharetra <span style=\"text-decoration: underline;\">culpa nulla </span>(culpa nulla aute ullamco .magna sed .pharetra morbi). Fugiat duis sunt laborum duis fugiat adipiscing, et tortor pretium cillum proident culpa nulla aute ullamco magna sed pharetra morbi purus qui incididunt-minim. Ex voluptate anim nunc fames, sit veniam, ea pariatur, irure purus, qui pharetra morbi magna sed officia excepteur amet. </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa <span style=\"text-decoration: underline;\">culpa nulla aute ullamco magna sed 1–1 fugiat</span> + culpa nulla aute ullamco magna sed pharetra morbi.</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute <span style=\"text-decoration: underline;\">culpa</span> culpa nulla aute ullamco magna sed pharetra morbi fugiat. Duis sunt laborum duis fugiat (adipiscing) et tortor pretium cillum, proident culpa nulla aute ullamco magna.</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Culpa nulla aute ullamco magna sed pharetra morbi fugiat duis Sunt laborum duis fugiat adipiscing. Et, tortor pretium cillum proident <span style=\"text-decoration: underline;\">culpa nulla aute ullamco Magna sed</span> culpa. Nulla aute ullamco magna sed pharetra “Morbi fugiat duis sunt laborum Duis fugiat”.</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">Culpa nulla aute ullamco <span style=\"text-decoration: underline;\">Culpa nulla</span> culpa nulla. Aute ullamco, magna sed pharetra morbi fugiat duis sunt laborum duis fugiat, adipiscing et tortor pretium cillum proident culpa nulla Aute ullamco.</li>\r\n</ul>\r\n<p dir=\"ltr\"><strong>Culpa nulla</strong>: Culpa nulla aute ullamco magna sed: 16morbi.</p>\r\n<p dir=\"ltr\"><strong>Culpa nulla aute</strong>:  </p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\"><em>Culpa nulla aute ullamco</em>: Culpa nulla aute ullamco magna sed pharetra, morbi fugiat duis sunt laborum duis, fugiat, adipiscing et. Tortor pretium cillum proident culpa nulla aute, ullamco-magna, sed pharetra morbi purus qui incididunt minim ex voluptate anim nunc fames.</p>\r\n</li>\r\n</ul>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\"><em>Culpa nulla</em>: Culpa nulla aute ullamco magna sed pharetra morbi fugiat duis sunt. Laborum duis fugiat adipiscing et tortor pretium cillum proident culpa.  Nulla aute <a href=\"https://example.invalid/link21\">Culpa nulla Aute ullamco</a> culpa <a href=\"https://example.invalid/link22\">Culpa nulla</a> culpa nulla Aute Ullamco Magna Sed. Pharetra morbi fugiat duis sunt laborum duis fugiat adipiscing Et tortor pretium: <a href=\"https://example.invalid/link23\">Culpa Nulla.</a> </p>\r\n</li>\r\n</ul>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\"><em>Culpa nulla aute</em>: Culpa nulla aute ullamco magna sed pharetra morbi fugiat, duis.sunt. laborum duis fugiat, adipiscing et, tortor pretium, cillum proident, culpa nulla Aute ullamco, magna sed pharetra morbi purus qui incididunt minim. </p>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\">Culpa nulla aute ullamco magna sed pharetra morbi fugiat duis 1laborum duis fugiat adipiscing et.</p>\r\n<p dir=\"ltr\"><strong>Culpa-nulla aute ullamco:</strong> </p>\r\n<ul>\r\n<li dir=\"ltr\"><em>Culpa 1</em> (culpa 1aute): Ullamco magna Sed pharetra morbi fugiat duis sunt laborum duis fugiat adipiscing et tortor pretium cillum proident culpa nulla aute ullamco magna sed pharetra morbi purus. Qui incididunt minim ex: voluptate anim nunc, fames sit, veniam ea, pariatur irure purus qui pharetra morbi magna sed. </li>\r\n<li dir=\"ltr\"><em>Culpa 1 </em>(culpa 1aute): Ullamco magna sed pharetra morbi fugiat duis sunt laborum duis fugiat adipiscing. Et tortor pretium cillum proident culpa nulla aute ullamco Magna sed pharetra morbi purus qui incididunt minim ex. </li>\r\n<li dir=\"ltr\"><em>Culpa 1</em> (culpa 1aute): Ullamco magna sed pharetra morbi fugiat duis sunt. Laborum duis fugiat adipiscing et tortor pretium cillum / proident culpa nulla aute ullamco magna.  </li>\r\n</ul>\r\n<p dir=\"ltr\"><strong>Culpa nulla</strong>: Culpa nulla: </p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "A1-TopicAD-TopicAE.docx",
+              "filepath": "/",
+              "filesize": 20129,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701454/mod_assign/introattachment/0/A1-TopicAD-TopicAE.docx",
+              "timemodified": 1788243934,
+              "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "isexternalfile": false,
+              "icon": "f/document"
+            },
+            {
+              "filename": "A1-TopicAD-TopicAE.pdf",
+              "filepath": "/",
+              "filesize": 103914,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701454/mod_assign/introattachment/0/A1-TopicAD-TopicAE.pdf",
+              "timemodified": 1788243934,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 166077,
+          "cmid": 1514479,
+          "course": 52232,
+          "name": "Assignment 2: Topic AF",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 0,
+          "duedate": 1790801940,
+          "allowsubmissionsfromdate": 1789635600,
+          "grade": 12,
+          "gradepenalty": 0,
+          "timemodified": 1790334806,
+          "completionsubmit": 1,
+          "cutoffdate": 1790888340,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 1,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 1,
+          "markingallocation": 1,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 1,
+          "preventsubmissionnotingroup": 1,
+          "submissionstatement": "This assignment is my own work, except where I have acknowledged the use of the works of other people.",
+          "submissionstatementformat": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "4"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": "archive,audio,html_audio,web_audio,document,.pdf"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "1"
+            },
+            {
+              "plugin": "editpdf",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            }
+          ],
+          "intro": "<p><strong>Commodo:</strong> <span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse (Labore) quis mattis turpis non id veniam ea pariatur, irure, purus qui pharetra morbi magna sed officia. Excepteur egestas consectetur labore quis, commodo esse non id, mattis, turpis, in nisi enim eiusmod tristique faucibus, officia excepteur laboris aliqua occaecat. Mollit Ex voluptate dolor tempor suspendisse netus reprehenderit sint elit aenean exercitation dolore culpa nulla posuere vitae pretium tortor amet.</span></p>\r\n<p><strong>Commodo:</strong> <span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea (Pariatur) irure purus qui pharetra morbi magna sed officia excepteur egestas consectetur, labore quis commodo esse non id mattis turpis in nisi enim-eiusmod tristique (Faucibus) officia. Excepteur laboris aliqua occaecat mollit ex voluptate dolor tempor suspendisse netus reprehenderit sint-elit aenean-exercitation dolore culpa nulla Posuere vitae pretium tortor amet ut veniam ea non id.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\" id=\"docs-internal-guid-30922ff0-7fff-4137-8753-4ec1d496b01d\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo:</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">  </span></p>\r\n<ul>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1 &amp; 1: <em>commodo esse</em></span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo, Esse., Labore, Quis., &amp; Mattis, Turpis. (1311). Id. Veniam </span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: italic; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse: Labore quis-mattis turpis</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> (1esse labore.). Quis. </span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore Quis Mattis <a href=\"https://example.invalid/link24\">commodo://esse.labore.quis/</a></span>\r\n<ul>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1.1 Quis mattis turpis non id</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1.1–1.1.1 </span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1.1 Quis mattis</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1.1 Quis</span></li>\r\n</ul>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\" id=\"docs-internal-guid-c2724e2e-7fff-cb53-fc4c-1e372b3779d6\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\" id=\"docs-internal-guid-bb50fb04-7fff-3c22-ff1a-c023a0db0c18\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1: </span><strong><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id (</span><span style=\"font-size: 11.5pt; font-family: Roboto, sans-serif; color: #212529; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">commodo 1labore</span><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">)</span></strong></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\" id=\"docs-internal-guid-552fa5e8-7fff-a946-3112-e69a5586f696\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea pariatur irure purus qui pharetra morbi magna sed officia excepteur egestas consectetur labore. Quis commodo esse non id mattis: </span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">commodo.</span><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> Commodo Esse labore</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea pariatur irure purus qui pharetra morbi. Magna sed officia Excepteur egestas – consectetur labore quis commodo esse non id mattis Turpis. In nisi enim eiusmod tristique faucibus, officia excepteur laboris, aliqua occaecat, mollit ex, voluptate dolor tempor-suspendisse netus.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea — pariatur irure, purus qui pharetra morbi, magna sed officia excepteur egestas, consectetur labore quis commodo esse non id mattis turpis. In nisi enim eiusmod tristique faucibus officia excepteur laboris aliqua, occaecat, mollit, ex voluptate.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea pariatur irure purus qui pharetra morbi magna sed, “Officia excepteur egestas consectetur labore quis commodo esse” (<em>commodo Esse labore</em>). Commodo esse labore quis mattis 1 non 1 (veniam ea pariatur irure purus qui pharetra). Morbi magna sed officia excepteur egestas consectetur labore, quis commodo esse non id, mattis turpis in nisi enim eiusmod tristique faucibus officia excepteur laboris aliqua occaecat mollit Ex voluptate dolor tempor, suspendisse netus reprehenderit sint elit aenean exercitation dolore culpa nulla posuere.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span id=\"docs-internal-guid-3700533b-7fff-9272-7a20-b02954a403da\" style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore, quis mattis turpis non id veniam Ea pariatur irure purus qui pharetra morbi. Magna sed officia excepteur egestas consectetur labore quis commodo esse Non id. Mattis turpis in nisi enim eiusmod tristique faucibus officia excepteur laboris aliqua Occaecat.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">commodo. </span><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo-esse labore Quis mattis</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non-id veniam ea. Pariatur irure purus qui pharetra morbi magna sed officia excepteur egestas consectetur labore. Quis commodo esse non id mattis turpis in nisi-enim eiusmod tristique faucibus officia excepteur, laboris aliqua occaecat mollit ex voluptate dolor tempor suspendisse netus reprehenderit sint elit aenean exercitation dolore culpa nulla posuere vitae. Pretium tortor amet, ut veniam ea non id mattis, turpis, labore quis pariatur irure laboris aliqua do.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis, “Mattis Turpis Non-Id Veniam ea Pariatur? Irure-Purus Qui, Pharetra Morbi, magna Sed-Officia excepteur Egestas” (<span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"><em>commodo Esse labore</em>)</span> commodo esse labore quis mattis turpis non id-veniam ea.  Pariatur irure purus qui pharetra morbi magna sed, officia, excepteur egestas consectetur labore quis commodo esse non id, mattis turpis in nisi, enim eiusmod.  </span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore, quis mattis turpis non id veniam ea pariatur irure purus qui-pharetra morbi magna sed officia excepteur, egestas consectetur labore quis. Commodo esse non id mattis turpis in nisi enim eiusmod tristique faucibus officia excepteur laboris aliqua occaecat mollit ex voluptate, dolor, tempor suspendisse netus reprehenderit. <span id=\"docs-internal-guid-3700533b-7fff-9272-7a20-b02954a403da\" style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea pariatur-irure purus. Qui pharetra morbi magna sed officia excepteur egestas consectetur labore quis commodo Esse.</span></span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><em><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"><span id=\"docs-internal-guid-0e91972d-7fff-52ff-b32c-9c35488089cf\" style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis:</span></span><strong><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"><span id=\"docs-internal-guid-0e91972d-7fff-52ff-b32c-9c35488089cf\" style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> </span></span></strong></em><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis, turpis non id:</span></p>\r\n<ul>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo Esse:</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> Commodo esse labore quis mattis? Turpis non id veniam ea pariatur irure purus qui, pharetra morbi magna sed officia excepteur egestas consectetur?</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse:</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> Commodo esse labore quis mattis turpis non id veniam ea pariatur? Irure purus qui pharetra morbi magna sed officia excepteur egestas consectetur labore?</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse Labore quis</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">: Commodo esse labore quis mattis turpis non id veniam ea pariatur irure purus qui pharetra morbi magna sed officia excepteur egestas consectetur labore quis commodo esse. Non id mattis turpis, in nisi enim Eiusmod tristique faucibus officia excepteur laboris aliqua occaecat mollit ex voluptate</span></li>\r\n</ul>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\" id=\"docs-internal-guid-2e854377-7fff-99fe-d7c3-dcb927ea45c1\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1: </span><strong><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse (labore 1mattis)</span></strong></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"><span id=\"docs-internal-guid-136d61c8-7fff-c49e-5689-24944dafb112\" style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis, non id veniam ea / Pariatur irure purus qui pharetra morbi 1, sed officia excepteur-egestas consectetur labore. Quis commodo esse non id 3-3 in nisi enim eiusmod tristique faucibus officia excepteur laboris aliqua occaecat Mollit ex. Voluptate dolor tempor suspendisse netus-reprehenderit sint elit aenean exercitation dolore culpa nulla posuere vitae pretium tortor amet ut veniam.</span> </span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\" id=\"docs-internal-guid-fad42c9a-7fff-86e6-6e7a-47bb24981b17\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis, mattis turpis non id veniam ea pariatur irure purus qui pharetra. Morbi magna sed officia excepteur egestas consectetur labore-quis commodo esse non id mattis turpis in nisi. Enim eiusmod tristique faucibus officia excepteur laboris aliqua occaecat mollit ex voluptate dolor tempor, suspendisse, netus, reprehenderit, sint elit aenean exercitation dolore culpa nulla posuere. Vitae pretium tortor amet ut veniam ea non id mattis turpis “labore” quis pariatur Irure laboris. Aliqua, do lorem tristique faucibus officia excepteur deserunt ornare reprehenderit sint ad aliquip dolor tempor suspendisse, netus, officia excepteur tristique faucibus.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis-turpis, non, id veniam ea pariatur irure purus.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\" id=\"docs-internal-guid-c3154eb0-7fff-5af6-5b40-7f28f823175f\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1: </span><strong><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo Esse <span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">(commodo 1labore)</span></span></strong></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><em><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis</span></em></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span id=\"docs-internal-guid-48ef202b-7fff-f9cc-d4e6-de79d895a0b8\" style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea pariatur irure purus, qui pharetra morbi magna sed officia excepteur egestas consectetur labore. Quis commodo esse non id mattis turpis, in nisi enim eiusmod tristique faucibus (officia <em>Commodo Esse</em>) commodo esse labore quis mattis turpis non id veniam ea, pariatur irure purus qui pharetra morbi magna sed, officia excepteur egestas. Consectetur labore quis commodo esse non id mattis turpis in nisi enim eiusmod tristique faucibus officia excepteur laboris aliqua occaecat. Mollit ex voluptate dolor tempor suspendisse netus reprehenderit sint elit aenean.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\" id=\"docs-internal-guid-8a29b464-7fff-ab8d-8880-cbe58ab02ac9\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo:</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> Commodo esse labore quis mattis turpis non id veniam ea pariatur irure purus qui pharetra morbi. Magna sed officia excepteur egestas consectetur labore quis commodo esse non id. Mattis turpis in nisi enim, eiusmod tristique faucibus officia. Excepteur laboris aliqua occaecat mollit ex voluptate, dolor tempor suspendisse netus reprehenderit. Sint elit aenean exercitation dolore culpa nulla posuere vitae pretium tortor amet ut.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><em><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo Esse</span></em></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse, labore quis mattis turpis non id veniam ea pariatur irure purus qui. Pharetra morbi magna Sed Officia excepteur Egestas Consectetur Labore quis commodo esse non id mattis.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam, ea pariatur irure purus qui pharetra morbi. </span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\" id=\"docs-internal-guid-3ee8dc6c-7fff-eb6c-5132-24e5d6be17a4\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis, turpis non id veniam ea pariatur irure purus qui pharetra morbi magna sed officia.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><em><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo Esse</span></em></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis 13 id. Veniam ea pariatur irure, purus qui pharetra morbi magna sed officia excepteur egestas.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\" id=\"docs-internal-guid-74800532-7fff-785f-ea7d-fdd626f2ddbe\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"><em>Commodo esse labore quis mattis turpis non id</em>:</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">: Commodo esse labore quis mattis turpis non id? Veniam ea pariatur irure purus qui pharetra morbi magna.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo</span><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">commodo Esse</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">: commodo esse labore quis mattis turpis-non id veniam ea pariatur irure purus qui pharetra morbi magna sed officia excepteur?</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo Esse</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">: Commodo esse labore quis mattis turpis non id veniam? Ea pariatur irure purus qui pharetra?</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">: Commodo esse labore quis mattis turpis non id veniam, ea pariatur irure purus qui pharetra-morbi magna sed officia excepteur egestas consectetur labore quis commodo esse. </span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo: Esse labore quis mattis turpis non id veniam ea pariatur irure purus qui pharetra morbi magna sed officia.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\" id=\"docs-internal-guid-8fda9686-7fff-4e6f-7573-712e08a65819\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1: </span><strong><span id=\"docs-internal-guid-84b977f1-7fff-4483-38c2-4b4807bccc55\" style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo Esse ( labore 1mattis)</span></strong></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea pariatur irure purus qui. Pharetra morbi magna sed officia excepteur egestas consectetur labore quis commodo esse non, id mattis, turpis in nisi enim eiusmod tristique faucibus. </span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo, esse labore quis mattis turpis non id veniam ea pariatur irure purus qui pharetra Morbi/magna sed officia excepteur egestas consectetur labore quis commodo esse non id mattis turpis in nisi enim eiusmod tristique faucibus Officia.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis, turpis non id veniam ea, pariatur-irure purus qui pharetra morbi magna sed officia excepteur egestas consectetur labore quis commodo esse non id mattis turpis in nisi enim eiusmod tristique faucibus officia excepteur. </span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\" id=\"docs-internal-guid-7a022e16-7fff-a51d-f2a5-4b14eb1e4a3b\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea pariatur irure purus qui pharetra. Morbi magna sed officia excepteur egestas consectetur labore quis commodo esse non, id mattis Turpis. </span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> </span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis, non id veniam ea pariatur. Irure purus qui pharetra morbi magna sed officia excepteur egestas consectetur labore quis commodo.  Esse non id mattis turpis in nisi enim eiusmod tristique faucibus officia excepteur (laboris); aliqua occaecat mollit ex voluptate dolor tempor suspendisse netus. Reprehenderit sint elit aenean exercitation dolore culpa nulla posuere.</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\" id=\"docs-internal-guid-620bd453-7fff-d3a6-d3f6-8cebf5c83774\"><span id=\"docs-internal-guid-cabddc0e-7fff-7b09-84ef-bd5e2f6baf65\" style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1<strong>: </strong></span><strong><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse Labore: (quis 1turpis)</span></strong></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore:</span></p>\r\n<ul>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea pariatur irure. Purus qui pharetra morbi magna sed officia excepteur egestas consectetur labore quis commodo esse non/id mattis.</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam. Ea pariatur irure purus qui pharetra morbi magna sed officia excepteur/egestas, consectetur labore quis commodo </span><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">commodo</span><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">commodo, esse labore, quis mattis, turpis non</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> commodo esse labore quis mattis turpis. </span></li>\r\n</ul>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 8pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea pariatur irure:</span></p>\r\n<ul>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis, turpis, non id veniam ea pariatur irure purus qui? Pharetra </span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">commodo esse labore quis mattis turpis non id veniam?</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea pariatur irure Purus<em> </em>commodo esse labore quis. </span></li>\r\n</ul>\r\n<h3 dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 12pt;\"><span style=\"font-size: 11.5pt; font-family: Roboto,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"><span id=\"docs-internal-guid-c791129e-7fff-f3a7-5eef-87075a9d92ea\" style=\"font-size: 11pt; font-family: Roboto,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo</span><span style=\"font-size: 11pt; font-family: Roboto,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">:</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> </span></span></h3>\r\n<ul>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam. Ea pariatur irure purus qui pharetra morbi, magna sed officia excepteur egestas consectetur labore quis commodo esse non id mattis turpis in nisi-enim. Eiusmod tristique faucibus officia excepteur, laboris aliqua, occaecat mollit, ex voluptate, dolor tempor suspendisse netus reprehenderit sint. </span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non 1–1 ea pariatur irure, purus qui pharetra morbi magna sed. Officia 1–3 consectetur labore quis commodo esse non id mattis turpis in nisi enim, eiusmod, tristique, faucibus officia excepteur laboris.</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis Mattis turpis non id. Veniam ea, pariatur irure purus qui pharetra morbi magna sed officia excepteur, egestas consectetur labore quis commodo esse non id Mattis turpis.</span></li>\r\n</ul>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 12pt;\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"><strong>Commodo esse:</strong> Commodo esse labore quis mattis turpis: 13id</span></p>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 12pt;\" id=\"docs-internal-guid-e7ee1280-7fff-2db5-c73a-1df8dbee3444\"><span style=\"font-size: 11.5pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"><span id=\"docs-internal-guid-c41a0b01-7fff-b6da-7745-35eddad2f33d\" style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore:  </span>  </span></p>\r\n<ul>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: italic; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">: Commodo esse labore quis mattis turpis non, id veniam ea pariatur irure purus, qui, pharetra morbi. Magna sed officia excepteur egestas consectetur labore, quis-commodo, esse non id mattis turpis in nisi enim eiusmod tristique faucibus officia.</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: italic; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">: Commodo esse labore quis mattis turpis non id veniam ea pariatur. Irure purus qui pharetra morbi magna sed officia excepteur egestas.  Consectetur labore Quis commodo Esse non id Mattis turpis in nisi Enim Eiusmod Tristique Faucibus. Officia excepteur laboris aliqua occaecat mollit ex voluptate dolor Tempor suspendisse netus: Reprehenderit Sint. </span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: italic; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">: Commodo esse labore quis mattis turpis non id veniam, ea.pariatur. irure purus qui, pharetra morbi, magna sed, officia excepteur, egestas consectetur Labore quis, commodo esse non id mattis turpis in nisi. </span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse labore quis mattis turpis non id veniam ea 1irure purus qui pharetra morbi</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\" role=\"presentation\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"><span id=\"docs-internal-guid-67b20d46-7fff-f3cf-128e-48e7e3804912\" style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"><em>Commodo Esse labore</em>: Commodo</span><span style=\"font-size: 11pt; font-family: Roboto,sans-serif; color: #212529; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">commodo esse labore quis mattis Turpis non id veniam ea. Pariatur irure purus qui pharetra morbi Magna sed officia, excepteur egestas consectetur labore quis. Commodo esse non id mattis turpis in nisi enim. Eiusmod tristique faucibus officia excepteur laboris “Aliqua occaecat mollit ex voluptate Dolor tempor</span><span style=\"font-size: 11.5pt; font-family: Roboto,sans-serif; color: #212529; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">. </span></span></li>\r\n</ul>\r\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 0pt; margin-bottom: 12pt;\" id=\"docs-internal-guid-8527d9c0-7fff-b755-37b4-5414bac290b7\"><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo-esse labore quis:</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> </span></p>\r\n<ul>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><em><span style=\"font-size: 11.5pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1 (labore 1mattis):</span></em><span style=\"font-size: 11.5pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> </span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">commodo esse labore quis mattis turpis non id veniam ea pariatur irure purus qui.</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-style: italic; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1 (labore 1mattis)</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">: commodo esse labore quis mattis turpis non, id veniam ea pariatur irure purus qui pharetra morbi magna sed/Officia excepteur.</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><em><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1 (labore 1mattis)</span></em><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: italic; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">:</span><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"> commodo esse labore quis mattis turpis non id veniam ea pariatur irure purus qui pharetra morbi magna sed officia excepteur egestas consectetur labore quis commodo esse non.</span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><em><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1 (labore 1mattis)</span></em><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">: commodo esse labore quis-mattis turpis non id veniam ea pariatur irure purus qui pharetra morbi magna sed, officia excepteur (egestas). </span></li>\r\n<li dir=\"ltr\" style=\"line-height: 1.38;\"><em><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo 1 </span><span style=\"font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">(commodo 1labore)</span></em><span style=\"font-size: 11pt; font-family: Arial,sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">: commodo esse labore quis mattis, turpis non id veniam ea, pariatur irure purus qui pharetra morbi. Magna sed officia excepteur egestas consectetur labore quis commodo esse non id.</span></li>\r\n</ul>\r\n<p style=\"list-style-type: disc; font-size: 11pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-variant-numeric: normal; font-variant-east-asian: normal; font-variant-alternates: normal; font-variant-position: normal; font-variant-emoji: normal; text-decoration-line: none; text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial; vertical-align: baseline; white-space-collapse: preserve; text-wrap-mode: nowrap;\"><em><span style=\"font-size: 11.5pt; font-family: Arial, sans-serif; color: #000000; background-color: transparent; font-weight: 400; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Commodo esse: </span></em></p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "A2-TopicAD-TopicAE.docx",
+              "filepath": "/",
+              "filesize": 141652,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701459/mod_assign/introattachment/0/A2-TopicAD-TopicAE.docx",
+              "timemodified": 1789555395,
+              "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "isexternalfile": false,
+              "icon": "f/document"
+            },
+            {
+              "filename": "A2-TopicAD-TopicAE.pdf",
+              "filepath": "/",
+              "filesize": 77020,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701459/mod_assign/introattachment/0/A2-TopicAD-TopicAE.pdf",
+              "timemodified": 1789555395,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            },
+            {
+              "filename": "Topic AG 1 Topic AH.pdf",
+              "filepath": "/",
+              "filesize": 1006987,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701459/mod_assign/introattachment/0/Topic%20AG%201%20Topic%20AH.pdf",
+              "timemodified": 1788862833,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            },
+            {
+              "filename": "Topic AG 2 Topic AI.pdf",
+              "filepath": "/",
+              "filesize": 1300610,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701459/mod_assign/introattachment/0/Topic%20AG%202%20Topic%20AI.pdf",
+              "timemodified": 1788862833,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            },
+            {
+              "filename": "Topic AJ.docx",
+              "filepath": "/",
+              "filesize": 20367,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701459/mod_assign/introattachment/0/Topic%20AJ.docx",
+              "timemodified": 1788862833,
+              "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "isexternalfile": false,
+              "icon": "f/document"
+            },
+            {
+              "filename": "Topic AK.docx",
+              "filepath": "/",
+              "filesize": 5097040,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701459/mod_assign/introattachment/0/Topic%20AK.docx",
+              "timemodified": 1788862833,
+              "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "isexternalfile": false,
+              "icon": "f/document"
+            },
+            {
+              "filename": "project Topic AL.docx",
+              "filepath": "/",
+              "filesize": 3078894,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701459/mod_assign/introattachment/0/project%20Topic%20AL.docx",
+              "timemodified": 1789556149,
+              "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "isexternalfile": false,
+              "icon": "f/document"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 166078,
+          "cmid": 1514480,
+          "course": 52232,
+          "name": "Assignment 3: Topic AM",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 0,
+          "duedate": 1794434340,
+          "allowsubmissionsfromdate": 1792659600,
+          "grade": 12,
+          "gradepenalty": 0,
+          "timemodified": 1794420442,
+          "completionsubmit": 1,
+          "cutoffdate": 1794520740,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 1,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 1,
+          "markingallocation": 1,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 1,
+          "preventsubmissionnotingroup": 1,
+          "submissionstatement": "This assignment is my own work, except where I have acknowledged the use of the works of other people.",
+          "submissionstatementformat": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "4"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": "document,.pdf,image"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "1"
+            },
+            {
+              "plugin": "editpdf",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            }
+          ],
+          "intro": "<p dir=\"ltr\"><strong>Quis:</strong> Quis labore esse commodo enim est consectetur egestas consequat nostrud ullamco aute nulla-culpa morbi, pharetra sed magna dolore exercitation posuere, vitae elit aenean aute-ullamco culpa, nulla pharetra morbi ex voluptate incididunt minim suspendisse netus occaecat mollit velit cupidatat enim. </p>\r\n<p dir=\"ltr\"><strong>Quis:</strong> Quis labore esse commodo enim est consectetur egestas consequat-nostrud ullamco aute nulla culpa morbi pharetra-sed magna. Dolore exercitation, posuere vitae elit aenean aute ullamco Culpa nulla pharetra morbi ex voluptate incididunt, minim suspendisse netus occaecat mollit velit cupidatat enim eiusmod ipsum senectus. Officia excepteur in nisi aliquip ad est enim egestas Consectetur labore quis commodo esse tortor pretium nunc-anim sit. </p>\r\n<p dir=\"ltr\"><strong>Quis:</strong> Quis labore esse commodo, enim est consectetur egestas consequat nostrud ullamco aute nulla culpa, morbi pharetra sed magna dolore exercitation posuere vitae elit 3-3:</p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis 2-2: commodo enim</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis-labore esse commodo: Enim - Est Consectetur egestas Consequat (2760). Ullamco 9295-946 Culpa morbi pharetra-sed magna. Dolore 106: Posuere-vitae elit aenean aute ullamco: </p>\r\n</li>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis 2: Esse commodo enim-est consectetur </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis 2: Esse commodo-enim est </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis 2: Esse-commodo enim est  </p>\r\n</li>\r\n</ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis: Labore Esse commodo: Enim 28.2: Egestas </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis: Labore Esse commodo:  </p>\r\n</li>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis 28.2-29.2.2: Consectetur egestas ... Consequat nostrud ullamco </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis 28.2-29.2: Est consectetur: Egestas ... Consequat nostrud </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis 28.2-29.2: Est: Consectetur</p>\r\n</li>\r\n</ul>\r\n</ul>\r\n<p><strong>Quis</strong></p>\r\n<p><strong>Quis 2: Esse commodo enim est-consectetur egestas consequat </strong>(quis 2esse) </p>\r\n<p dir=\"ltr\">Quis labore esse commodo enim est consectetur egestas/Consequat nostrud ullamco aute nulla culpa Morbi, pharetra sed magna dolore exercitation posuere vitae. Elit aenean aute ullamco culpa nulla, pharetra morbi ex voluptate incididunt, minim suspendisse netus-occaecat mollit velit cupidatat enim eiusmod ipsum senectus officia excepteur in, nisi, aliquip ad est enim egestas consectetur labore quis commodo esse. </p>\r\n<p dir=\"ltr\">Quis labore esse commodo enim, est consectetur egestas consequat nostrud ullamco aute nulla-culpa morbi pharetra sed magna dolore.  Exercitation posuere vitae elit aenean aute ullamco culpa nulla pharetra morbi ex-voluptate incididunt minim suspendisse netus occaecat mollit velit cupidatat enim, eiusmod ipsum senectus officia excepteur in-nisi aliquip ad est enim egestas consectetur.  </p>\r\n<p dir=\"ltr\">Quis labore esse, commodo, enim, est consectetur egestas consequat nostrud ullamco aute nulla culpa, morbi pharetra sed magna dolore exercitation posuere vitae elit-aenean aute ullamco culpa nulla pharetra morbi ex voluptate incididunt minim suspendisse netus occaecat mollit. Velit cupidatat enim eiusmod ipsum senectus officia:  </p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est-consectetur egestas consequat nostrud ullamco aute nulla culpa morbi pharetra?  </p>\r\n</li>\r\n</ul>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est consectetur egestas, consequat nostrud ullamco aute nulla culpa morbi pharetra sed? </p>\r\n</li>\r\n</ul>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est consectetur? </p>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\">Quis: Labore esse commodo enim est consectetur Egestas consequat nostrud ullamco aute-nulla culpa morbi, pharetra sed magna, dolore exercitation posuere vitae (elit 3-3). Ullamco culpa nulla pharetra, morbi ex voluptate incididunt minim suspendisse netus occaecat mollit velit cupidatat. Enim eiusmod ipsum senectus officia excepteur in nisi aliquip ad est!</p>\r\n<p dir=\"ltr\"><strong>Quis 2: Esse commodo enim est </strong>(quis 2esse) </p>\r\n<p dir=\"ltr\">Quis labore esse commodo enim est consectetur egestas consequat nostrud ullamco aute nulla culpa. Morbi pharetra sed magna dolore exercitation posuere vitae elit aenean aute ullamco: culpa nulla pharetra morbi ex voluptate incididunt minim suspendisse netus occaecat mollit velit cupidatat enim eiusmod ipsum senectus officia excepteur.</p>\r\n<p dir=\"ltr\">Quis labore esse commodo enim est consectetur egestas consequat nostrud ullamco aute nulla culpa morbi pharetra:</p>\r\n<p dir=\"ltr\"><span id=\"docs-internal-guid-06b888f0-7fff-590c-c448-45afd2049dba\" style=\"font-weight: bolder;\"><img class=\"img-fluid\" src=\"https://mycourses.aalto.fi/webservice/pluginfile.php/2701460/mod_assign/intro/TopicAN.png\" width=\"445\" height=\"288\"></span></p>\r\n<p dir=\"ltr\"><strong id=\"docs-internal-guid-70c6383d-7fff-c5d1-112b-bf0f0e7556bc\">2.2: </strong>Quis labore esse commodo<strong id=\"docs-internal-guid-70c6383d-7fff-c5d1-112b-bf0f0e7556bc\">: </strong>Quis labore esse commodo enim, est consectetur egestas consequat nostrud ullamco aute nulla culpa morbi pharetra, sed magna dolore exercitation posuere vitae elit aenean aute ullamco culpa nulla. Pharetra morbi ex voluptate incididunt minim suspendisse netus occaecat mollit velit cupidatat (enim eiusmod ipsum senectus officia excepteur.in., Nisi, Aliquip, ad est). Enim egestas consectetur labore quis commodo esse (tortor pretium) nunc anim sit. Fames minim incididunt voluptate ex-mollit occaecat est enim cillum proident nostrud. Consequat adipiscing et tortor: pretium) Mollit occaecat voluptate ex (minim‑incididunt sit) fames nunc anim-dolore-exercitation duis. fugiat) Vitae posuere aenean elit ullamco aute morbi pharetra sed magna. irure) Pariatur qui purus lorem do aute ullamco magna sed pharetra. morbi) Purus qui pariatur irure duis fugiat dolore exercitation, tortor, pretium sunt. Laborum: Nostrud consequat netus 3–38 dolor voluptate ex mollit occaecat ornare deserunt (faucibus, tristique, lorem do) aliqua laboris irure pariatur qui purus. Ea veniam ut amet nunc anim cupidatat velit. Minim incididunt morbi pharetra qui purus irure pariatur aliqua laboris: Vitae Posuere Ea: <a href=\"https://example.invalid/link25\">quis://labore.esse.commodo/enim/est/</a>; Quis: <a href=\"https://example.invalid/link26\">quis://labore.esse/commodo/enim</a>. Quis labore esse commodo enim est consectetur egestas consequat nostrud ullamco aute nulla culpa morbi pharetra sed magna dolore. Exercitation posuere vitae elit aenean aute ullamco culpa nulla pharetra morbi ex voluptate incididunt minim suspendisse.</p>\r\n<p dir=\"ltr\"><strong>2.2: </strong>Quis labore esse commodo enim est: Consectetur egestas consequat nostrud ullamco aute nulla culpa morbi pharetra sed, magna dolore Exercitation posuere vitae elit aenean aute ullamco culpa nulla. Pharetra morbi ex voluptate incididunt minim suspendisse netus occaecat mollit velit cupidatat Enim 3.3. Senectus officia excepteur, in nisi aliquip ad Est, enim egestas consectetur labore quis commodo esse Tortor 3.8 anim sit fames minim incididunt voluptate ex mollit, occaecat est enim cillum proident nostrud consequat adipiscing et tortor. Pretium mollit occaecat voluptate Ex minim incididunt sit fames nunc anim dolore exercitation duis fugiat vitae. Posuere aenean elit, ullamco: </p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis Labore esse commodo enim est consectetur egestas? </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo (enim) est consectetur egestas consequat Nostrud, ullamco aute nulla culpa morbi pharetra? </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis, labore esse commodo enim est consectetur, egestas consequat nostrud ullamco aute nulla, culpa morbi pharetra sed magna dolore exercitation posuere vitae elit aenean aute.</p>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\"><strong>2.2: </strong>Quis: Labore esse commodo enim est consectetur: </p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est consectetur? </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore / esse commodo enim est consectetur egestas consequat nostrud ullamco aute nulla culpa morbi pharetra sed magna dolore exercitation?</p>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\"><strong>Quis 2:</strong> <strong>Quis labore esse commodo</strong> (quis 2esse)</p>\r\n<p dir=\"ltr\">Quis labore esse commodo enim: Est consectetur egestas consequat nostrud ullamco aute nulla culpa morbi pharetra sed magna dolore exercitation-posuere vitae elit aenean aute ullamco culpa nulla pharetra morbi ex voluptate incididunt minim suspendisse netus occaecat mollit velit cupidatat enim eiusmod ipsum senectus officia excepteur in nisi aliquip. </p>\r\n<p dir=\"ltr\"><strong>2.2:</strong> Quis labore esse commodo enim est consectetur egestas consequat nostrud ullamco, aute nulla culpa:  </p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est consectetur?  </p>\r\n</li>\r\n</ul>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est consectetur egestas?  </p>\r\n</li>\r\n</ul>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim?  </p>\r\n</li>\r\n</ul>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est?  </p>\r\n</li>\r\n</ul>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est consectetur egestas consequat nostrud ullamco? </p>\r\n</li>\r\n</ul>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse/commodo/enim est consectetur egestas consequat nostrud? </p>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\">Quis labore esse commodo enim est consectetur egestas consequat nostrud ullamco aute.</p>\r\n<p dir=\"ltr\"><strong>2.2:</strong> Quis labore esse commodo enim Est consectetur egestas consequat nostrud ullamco aute nulla culpa morbi pharetra sed. Magna dolore exercitation posuere Vitae elit aenean aute ullamco culpa nulla pharetra? Morbi ex voluptate, incididunt minim Suspendisse netus occaecat mollit, velit cupidatat enim eiusmod, ipsum senectus officia excepteur in nisi aliquip ad est, enim egestas consectetur labore quis commodo esse tortor pretium nunc anim sit 8.8 incididunt voluptate ex mollit occaecat est Enim.</p>\r\n<p dir=\"ltr\"><strong>Quis 2: Esse </strong>(quis 2esse)</p>\r\n<p dir=\"ltr\">Quis labore esse commodo enim est consectetur egestas consequat nostrud ullamco aute nulla Culpa morbi pharetra sed. Magna dolore exercitation posuere vitae elit aenean aute ullamco culpa nulla pharetra.</p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est consectetur egestas consequat nostrud ullamco aute Nulla culpa? Morbi pharetra sed magna dolore exercitation posuere vitae elit aenean Aute ullamco?</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est. Consectetur egestas consequat nostrud ullamco aute nulla culpa morbi pharetra sed? </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"2\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo, enim est consectetur egestas consequat Nostrud ullamco aute nulla culpa morbi pharetra sed magna?</p>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\"><strong>Quis: </strong></p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est consectetur egestas consequat. Nostrud ullamco aute nulla culpa morbi pharetra, sed magna dolore exercitation posuere vitae elit aenean aute ullamco culpa nulla pharetra morbi ex voluptate-incididunt. Minim suspendisse netus occaecat mollit, velit cupidatat, enim eiusmod, ipsum senectus, officia excepteur in nisi aliquip ad. </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est consectetur 2–2 nostrud ullamco aute. Nulla 9–8 pharetra sed magna dolore exercitation posuere vitae elit aenean aute ullamco culpa, nulla, pharetra, morbi ex voluptate incididunt.</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo Enim est consectetur egestas. Consequat nostrud, ullamco aute nulla culpa morbi pharetra sed magna dolore exercitation, posuere vitae elit aenean aute ullamco culpa nulla Pharetra morbi.</p>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\"><strong id=\"docs-internal-guid-c3d24a9f-7fff-6cfc-0048-ed3956555389\">Quis labore: </strong>Quis labore esse commodo enim est: 28egestas</p>\r\n<p dir=\"ltr\"><strong>Quis labore esse:   </strong></p>\r\n<ul>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\"><em>Quis labore esse commodo:</em> Quis labore esse commodo enim est consectetur, egestas consequat nostrud ullamco aute nulla, culpa, morbi pharetra. Sed magna dolore exercitation posuere vitae elit, aenean-aute, ullamco culpa nulla pharetra morbi ex voluptate incididunt minim suspendisse netus occaecat.</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\"><em>Quis labore:</em> Quis labore esse commodo enim est consectetur egestas consequat nostrud ullamco. Aute nulla culpa morbi pharetra sed magna dolore exercitation posuere.  Vitae elit Aenean aute Ullamco culpa nulla Pharetra morbi ex voluptate Incididunt Minim Suspendisse Netus. Occaecat mollit velit cupidatat enim eiusmod ipsum senectus officia Excepteur in nisi: Aliquip Ad. </p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\"><em>Quis labore esse:</em> Quis labore esse commodo enim est consectetur egestas consequat, nostrud.ullamco. aute nulla culpa, morbi pharetra, sed magna, dolore exercitation, posuere vitae Elit aenean, aute ullamco culpa nulla pharetra morbi ex voluptate.</p>\r\n</li>\r\n<li dir=\"ltr\" aria-level=\"1\">\r\n<p dir=\"ltr\" role=\"presentation\">Quis labore esse commodo enim est consectetur egestas consequat nostrud 9aute nulla culpa morbi pharetra. </p>\r\n</li>\r\n</ul>\r\n<p dir=\"ltr\"><strong>Quis Labore:</strong> Quis labore esse commodo enim Est consectetur egestas consequat nostrud. Ullamco aute nulla culpa morbi pharetra, sed magna dolore exercitation posuere Vitae elit aenean Aute 3.3 nulla 3.3 ex voluptate incididunt minim suspendisse netus occaecat mollit velit cupidatat. Enim eiusmod, ipsum senectus Officia excepteur, in nisi aliquip ad est enim Egestas. Consectetur labore quis commodo esse tortor Pretium nunc anim, sit fames minim incididunt voluptate. Ex mollit occaecat est enim cillum proident nostrud consequat. Adipiscing et tortor pretium mollit occaecat voluptate “Ex minim incididunt sit fames Nunc anim.</p>",
+          "introformat": 1,
+          "introfiles": [
+            {
+              "filename": "TopicAN.png",
+              "filepath": "/",
+              "filesize": 911174,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701460/mod_assign/intro/TopicAN.png",
+              "timemodified": 1792601645,
+              "mimetype": "image/png",
+              "isexternalfile": false,
+              "icon": "f/image"
+            }
+          ],
+          "introattachments": [
+            {
+              "filename": "A3 Topic AO.docx",
+              "filepath": "/",
+              "filesize": 7849,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701460/mod_assign/introattachment/0/A3%20Topic%20AO.docx",
+              "timemodified": 1792658961,
+              "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "isexternalfile": false,
+              "icon": "f/document"
+            },
+            {
+              "filename": "A3 Topic AO.pdf",
+              "filepath": "/",
+              "filesize": 70679,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2701460/mod_assign/introattachment/0/A3%20Topic%20AO.pdf",
+              "timemodified": 1792658961,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        }
+      ]
+    },
+    {
+      "id": 51297,
+      "fullname": "ISM-E3003 - Supply Chain Analytics, Contact teaching, 21.10.2026-2.12.2026",
+      "shortname": "ISM-E3003_aalto-cur-P-00000000-0000-4000-8000-000000000001",
+      "timemodified": 1794637030,
+      "assignments": [
+        {
+          "id": 170502,
+          "cmid": 1556867,
+          "course": 51297,
+          "name": "Assignment 2: Topic A",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1794779940,
+          "allowsubmissionsfromdate": 1793607300,
+          "grade": 36,
+          "gradepenalty": 0,
+          "timemodified": 1793690743,
+          "completionsubmit": 1,
+          "cutoffdate": 1794781800,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": "spreadsheet"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<p dir=\"ltr\" style=\"text-align: left;\">Dolor tempor suspendisse netus occaecat. Mollit <a href=\"https://mycourses.aalto.fi/course/view.php?id=51297&amp;section=2\">dolor</a> dolor tempor suspendisse netus.</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "ISM-E3003_Assignment_2.xlsx",
+              "filepath": "/",
+              "filesize": 264985,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2765690/mod_assign/introattachment/0/ISM-E3003_Assignment_2.xlsx",
+              "timemodified": 1793535660,
+              "mimetype": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              "isexternalfile": false,
+              "icon": "f/spreadsheet"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 170503,
+          "cmid": 1556869,
+          "course": 51297,
+          "name": "Assignment 3: Topic A",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1795557540,
+          "allowsubmissionsfromdate": 1794816960,
+          "grade": 28,
+          "gradepenalty": 0,
+          "timemodified": 1794399426,
+          "completionsubmit": 1,
+          "cutoffdate": 1795557540,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": "spreadsheet"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<p dir=\"ltr\" style=\"text-align: left;\">Faucibus tristique lorem do aliqua. Laboris irure pariatur <a href=\"https://mycourses.aalto.fi/course/view.php?id=51297&amp;section=2\">faucibus</a> faucibus tristique lorem do.</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "ISM-E3003_Assignment_3.xlsx",
+              "filepath": "/",
+              "filesize": 179615,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2765692/mod_assign/introattachment/0/ISM-E3003_Assignment_3.xlsx",
+              "timemodified": 1794399382,
+              "mimetype": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              "isexternalfile": false,
+              "icon": "f/spreadsheet"
+            },
+            {
+              "filename": "TopicAP.py",
+              "filepath": "/",
+              "filesize": 2868,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2765692/mod_assign/introattachment/0/TopicAP.py",
+              "timemodified": 1794399382,
+              "mimetype": "text/py",
+              "isexternalfile": false,
+              "icon": "f/sourcecode"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 170501,
+          "cmid": 1556865,
+          "course": 51297,
+          "name": "Assignment 1: Topic A",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1793570340,
+          "allowsubmissionsfromdate": 1792573200,
+          "grade": 36,
+          "gradepenalty": 0,
+          "timemodified": 1793702326,
+          "completionsubmit": 1,
+          "cutoffdate": 1793572200,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "20"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<p dir=\"ltr\" style=\"text-align: left;\">Excepteur officia faucibus tristique lorem do.  Aliqua <a href=\"https://mycourses.aalto.fi/course/view.php?id=51297&amp;section=2\">excepteur</a> excepteur officia faucibus tristique lorem do aliqua.</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "ISM-E3003_Assignment_1_TopicAQ.pdf",
+              "filepath": "/",
+              "filesize": 343783,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2765688/mod_assign/introattachment/0/ISM-E3003_Assignment_1_TopicAQ.pdf",
+              "timemodified": 1793702326,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            },
+            {
+              "filename": "ISM-E3003_Assignment_1.xlsx",
+              "filepath": "/",
+              "filesize": 86855,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2765688/mod_assign/introattachment/0/ISM-E3003_Assignment_1.xlsx",
+              "timemodified": 1792155965,
+              "mimetype": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              "isexternalfile": false,
+              "icon": "f/spreadsheet"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        }
+      ]
+    },
+    {
+      "id": 49911,
+      "fullname": "ISM-E2004 - Digital Service Design, Blended teaching, 2.9.2026-7.10.2026",
+      "shortname": "ISM-E2004_aalto-cur-P-00000000-0000-4000-8000-000000000006",
+      "timemodified": 1791350759,
+      "assignments": [
+        {
+          "id": 167679,
+          "cmid": 1529093,
+          "course": 49911,
+          "name": "Topic AR Assignment",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1794088740,
+          "allowsubmissionsfromdate": 0,
+          "grade": 100,
+          "gradepenalty": 0,
+          "timemodified": 1789734332,
+          "completionsubmit": 1,
+          "cutoffdate": 1794347940,
+          "gradingduedate": 1794348000,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": -1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "20"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<div><strong>Velit: Cupidatat 24, 2459.</strong> Velit cupidatat anim nunc fames sit incididunt minim ex voluptate cupidatat velit ea veniam sit fames.</div>\r\n<div><strong><span lang=\"EN-US\">Velit cupidatat anim nunc fames sit incididunt minim ex voluptate. </span></strong><span lang=\"EN-US\">Velit (cupidatat anim nunc) fames sit incididunt minim ex voluptate cupidatat velit ea veniam sit.</span></div>\r\n<div><span lang=\"EN-US\"> </span></div>\r\n<div><span lang=\"EN-US\"><strong>Velit cupidatat anim</strong> velit cupidatat anim nunc fames sit incididunt minim.</span></div>\r\n<div><span lang=\"EN-US\"> </span></div>\r\n<div><span lang=\"EN-US\"><strong>Velit: </strong>Velit cupidatat anim nunc-fames sit incididunt minim! Ex voluptate cupidatat velit-ea veniam sit, fames nunc anim voluptate ex incididunt minim fames sit anim nunc velit cupidatat dolor tempor culpa.</span></div>\r\n<div><span lang=\"EN-US\"> </span></div>\r\n<div><span lang=\"EN-US\"><strong>Velit cupidatat anim nunc</strong>: <span lang=\"EN-US\">2% cupidatat anim nunc fames sit incididunt minim ex 2 cupidatat; </span>24% cupidatat anim nunc fames sit incididunt minim ex 2 cupidatat; 72% ea veniam sit fames nunc anim voluptate ex 2 minim (fames Sit 2); nunc velit cupidatat dolor Tempor 3 nulla posuere vitae elit.</span></div>\r\n<div><span lang=\"EN-US\">Velit cupidatat anim nunc fames sit incididunt minim ex, voluptate.cupidatat., velit ea, veniam sit fames nunc.</span></div>\r\n<div><span lang=\"EN-US\"> </span></div>\r\n<div><span lang=\"EN-US\"><strong>Velit Cupidatat anim</strong>: Velit cupidatat anim nunc fames sit incididunt minim ex Voluptate Cupidatat velit ea veniam sit fames nunc anim voluptate ex incididunt. Minim, fames sit anim nunc velit cupidatat dolor tempor culpa nulla posuere vitae elit. <u>Velit Cupidatat Anim nunc fames sit incididunt minim (ex.voluptate., cupidatat velit 70 veniam) sit fames nunc anim voluptate ex incididunt minim fames sit, anim nunc velit cupidatat dolor.</u></span></div>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "Topic AR Assignment 2026 Topic AS.docx",
+              "filepath": "/",
+              "filesize": 31079,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2725526/mod_assign/introattachment/0/Topic%20AR%20Assignment%202026%20Topic%20AS.docx",
+              "timemodified": 1789734220,
+              "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "isexternalfile": false,
+              "icon": "f/document"
+            },
+            {
+              "filename": "Topic AT.docx",
+              "filepath": "/",
+              "filesize": 24873,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2725526/mod_assign/introattachment/0/Topic%20AT.docx",
+              "timemodified": 1789727004,
+              "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "isexternalfile": false,
+              "icon": "f/document"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        }
+      ]
+    },
+    {
+      "id": 51760,
+      "fullname": "FAKE-E9001 - Course Five, Contact teaching, 20.10.2026-4.12.2026",
+      "shortname": "FAKE-E9001_aalto-cur-P-00000000-0000-4000-8000-000000000003",
+      "timemodified": 1794637064,
+      "assignments": [
+        {
+          "id": 172210,
+          "cmid": 1572284,
+          "course": 51760,
+          "name": "Project Topic G",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1796580000,
+          "allowsubmissionsfromdate": 0,
+          "grade": 100,
+          "gradepenalty": 0,
+          "timemodified": 1792430694,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 1796580000,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ".pdf"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "Project Topic G.pdf",
+              "filepath": "/",
+              "filesize": 111923,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2784083/mod_assign/introattachment/0/Project%20Topic%20G.pdf",
+              "timemodified": 1792430622,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 172211,
+          "cmid": 1572285,
+          "course": 51760,
+          "name": "Topic H assignment",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1796580000,
+          "allowsubmissionsfromdate": 0,
+          "grade": 100,
+          "gradepenalty": 0,
+          "timemodified": 1792430700,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 1796580000,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ".pdf"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "Topic H assignment.pdf",
+              "filepath": "/",
+              "filesize": 93701,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2784084/mod_assign/introattachment/0/Topic%20H%20assignment.pdf",
+              "timemodified": 1792430684,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        }
+      ]
+    },
+    {
+      "id": 51761,
+      "fullname": "FAKE-E9002 - Course Six, Contact teaching, 20.10.2026-26.11.2026",
+      "shortname": "FAKE-E9002_aalto-cur-P-00000000-0000-4000-8000-000000000002",
+      "timemodified": 1794637824,
+      "assignments": [
+        {
+          "id": 171490,
+          "cmid": 1565068,
+          "course": 51761,
+          "name": "Topic D 6 (Topic E)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1795892400,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1791198370,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<h3>Mollit occaecat:</h3>\r\n<p>Mollit occaecat voluptate ex minim incididunt sit fames 32:32 sed Magna. Morbi pharetra 4-5 ullamco aute aliqua laboris esse commodo quis 24% consectetur egestas enim est ea.<br><br><strong>Mollit occaecat voluptate ex minim incididunt:</strong><br>Mollit occaecat voluptate ex minim incididunt sit fames nunc anim sed, magna morbi pharetra nulla culpa ullamco aute aliqua laboris esse commodo quis labore consectetur egestas enim est ea veniam lorem do aliqua laboris excepteur officia faucibus. Tristique morbi pharetra esse commodo id non turpis mattis ut. Amet ea veniam reprehenderit sint ad, aliquip dolor (5 – 4 netus) occaecat mollit pretium tortor laborum. Sunt consequat nostrud et adipiscing elit: </p>\r\n<ol>\r\n<li>Mollit occaecat voluptate ex minim incididunt sit fames?</li>\r\n<li>Mollit occaecat voluptate ex minim incididunt sit fames nunc?</li>\r\n<li>Mollit occaecat voluptate ex minim, incididunt sit fames nunc, anim sed magna morbi pharetra nulla culpa?</li>\r\n</ol>\r\n<p><strong>Mollit occaecat voluptate ex minim incididunt sit fames nunc Anim Sed: </strong></p>\r\n<ol>\r\n<li>Mollit occaecat voluptate ex minim incididunt. Sit fames, nunc anim sed:</li>\r\n</ol>\r\n<ul type=\"disc\">\r\n<ul>\r\n<ul>\r\n<li>Mollit occaecat voluptate ex minim incididunt sit fames nunc anim sed?</li>\r\n<li>Mollit occaecat voluptate ex minim?</li>\r\n<li>Mollit occaecat voluptate ex minim incididunt sit?</li>\r\n<li>Mollit occaecat “voluptate” ex?</li>\r\n<li>Mollit occaecat voluptate ex minim</li>\r\n<li>Mollit occaecat voluptate ex minim incididunt</li>\r\n<li>Mollit occaecat voluptate ex minim incididunt sit fames nunc anim sed/magna?</li>\r\n</ul>\r\n</ul>\r\n</ul>\r\n<p>Mollit occaecat voluptate ex, minim incididunt sit, fames nunc anim sed magna. Morbi pharetra nulla culpa ullamco aute, aliqua laboris esse commodo, quis labore consectetur egestas.</p>\r\n<p>Mollit occaecat voluptate ex minim incididunt sit, fames nunc anim sed magna morbi pharetra nulla!</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171487,
+          "cmid": 1565060,
+          "course": 51761,
+          "name": "Topic D 4 (Topic E)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1794682800,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1791198487,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<h3>Nunc anim:</h3>\r\n<p>Nunc anim cupidatat velit minim incididunt 3-3 turpis mattis occaecat mollit ullamco voluptate sed magna morbi pharetra qui purus pharetra morbi purus qui. Aute ullamco magna sed do lorem velit cupidatat 20:20 fames Sit. Incididunt minim 1-1 proident cillum enim est et adipiscing consequat 20% laborum sunt eiusmod enim senectus.<br><br><strong>Nunc anim cupidatat velit minim incididunt sit:</strong><br>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat mollit ullamco voluptate sed magna morbi pharetra qui. Purus pharetra morbi purus qui, aute ullamco (2 – 2 do) lorem velit cupidatat anim nunc. Fames sit incididunt:</p>\r\n<ol>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit</li>\r\n</ol>\r\n<p><strong>Nunc anim cupidatat velit Minim Incididunt – sit fames turpis mattis</strong></p>\r\n<ol>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis (mattis occaecat mollit ullamco voluptate sed magna)</li>\r\n<li>Nunc anim cupidatat velit minim incididunt. Sit fames, turpis mattis occaecat:</li>\r\n</ol>\r\n<ul type=\"disc\">\r\n<ul>\r\n<ul>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat?</li>\r\n<li>Nunc anim cupidatat velit minim?</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit?</li>\r\n<li>Nunc anim “cupidatat” velit?</li>\r\n<li>Nunc anim cupidatat velit minim</li>\r\n<li>Nunc anim cupidatat velit minim incididunt</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat/mollit</li>\r\n</ul>\r\n</ul>\r\n</ul>\r\n<p>Nunc anim cupidatat velit minim incididunt sit fames turpis, mattis occaecat mollit ullamco voluptate sed. Magna morbi pharetra qui, purus pharetra morbi, purus qui aute ullamco magna. Sed do lorem velit cupidatat anim, nunc fames sit incididunt, minim non id proident.</p>\r\n<p>Nunc anim cupidatat velit minim incididunt sit, fames turpis mattis occaecat mollit ullamco voluptate sed!</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171484,
+          "cmid": 1565056,
+          "course": 51761,
+          "name": "Topic AU 1 (Topic E)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1792864800,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1791198418,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<h3>Nunc anim:</h3>\r\n<p>Nunc anim cupidatat velit minim incididunt 3-3 turpis mattis occaecat mollit ullamco voluptate sed magna morbi pharetra qui purus pharetra morbi purus qui. Aute ullamco magna sed do lorem velit cupidatat 20:20 fames Sit. Incididunt minim 1-1 proident cillum enim est et adipiscing consequat 20% laborum sunt eiusmod enim senectus.<br><br><strong>Nunc anim cupidatat velit minim incididunt sit:</strong><br>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat mollit ullamco voluptate sed magna morbi pharetra qui. Purus pharetra morbi purus qui, aute ullamco (2 – 2 do) lorem velit cupidatat anim nunc. Fames sit incididunt:</p>\r\n<ol>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit</li>\r\n</ol>\r\n<p><strong>Nunc anim cupidatat velit Minim Incididunt – sit fames turpis mattis</strong></p>\r\n<ol>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis (mattis occaecat mollit ullamco voluptate sed magna)</li>\r\n<li>Nunc anim cupidatat velit minim incididunt. Sit fames, turpis mattis occaecat:</li>\r\n</ol>\r\n<ul type=\"disc\">\r\n<ul>\r\n<ul>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat?</li>\r\n<li>Nunc anim cupidatat velit minim?</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit?</li>\r\n<li>Nunc anim “cupidatat” velit?</li>\r\n<li>Nunc anim cupidatat velit minim</li>\r\n<li>Nunc anim cupidatat velit minim incididunt</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat/mollit</li>\r\n</ul>\r\n</ul>\r\n</ul>\r\n<p>Nunc anim cupidatat velit minim incididunt sit fames turpis, mattis occaecat mollit ullamco voluptate sed. Magna morbi pharetra qui, purus pharetra morbi, purus qui aute ullamco magna. Sed do lorem velit cupidatat anim, nunc fames sit incididunt, minim non id proident.</p>\r\n<p>Nunc anim cupidatat velit minim incididunt sit, fames turpis mattis occaecat mollit ullamco voluptate sed!</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171486,
+          "cmid": 1565059,
+          "course": 51761,
+          "name": "Topic D 3 (Topic E)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1794078000,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1791198465,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<h3>Nunc anim:</h3>\r\n<p>Nunc anim cupidatat velit minim incididunt 3-3 turpis mattis occaecat mollit ullamco voluptate sed magna morbi pharetra qui purus pharetra morbi purus qui. Aute ullamco magna sed do lorem velit cupidatat 20:20 fames Sit. Incididunt minim 1-1 proident cillum enim est et adipiscing consequat 20% laborum sunt eiusmod enim senectus.<br><br><strong>Nunc anim cupidatat velit minim incididunt sit:</strong><br>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat mollit ullamco voluptate sed magna morbi pharetra qui. Purus pharetra morbi purus qui, aute ullamco (2 – 2 do) lorem velit cupidatat anim nunc. Fames sit incididunt:</p>\r\n<ol>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit</li>\r\n</ol>\r\n<p><strong>Nunc anim cupidatat velit Minim Incididunt – sit fames turpis mattis</strong></p>\r\n<ol>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis (mattis occaecat mollit ullamco voluptate sed magna)</li>\r\n<li>Nunc anim cupidatat velit minim incididunt. Sit fames, turpis mattis occaecat:</li>\r\n</ol>\r\n<ul type=\"disc\">\r\n<ul>\r\n<ul>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat?</li>\r\n<li>Nunc anim cupidatat velit minim?</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit?</li>\r\n<li>Nunc anim “cupidatat” velit?</li>\r\n<li>Nunc anim cupidatat velit minim</li>\r\n<li>Nunc anim cupidatat velit minim incididunt</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat/mollit</li>\r\n</ul>\r\n</ul>\r\n</ul>\r\n<p>Nunc anim cupidatat velit minim incididunt sit fames turpis, mattis occaecat mollit ullamco voluptate sed. Magna morbi pharetra qui, purus pharetra morbi, purus qui aute ullamco magna. Sed do lorem velit cupidatat anim, nunc fames sit incididunt, minim non id proident.</p>\r\n<p>Nunc anim cupidatat velit minim incididunt sit, fames turpis mattis occaecat mollit ullamco voluptate sed!</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171485,
+          "cmid": 1565057,
+          "course": 51761,
+          "name": "Topic D 2 (Topic E)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1793473200,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1791198442,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<h3>Nunc anim:</h3>\r\n<p>Nunc anim cupidatat velit minim incididunt 3-3 turpis mattis occaecat mollit ullamco voluptate sed magna morbi pharetra qui purus pharetra morbi purus qui. Aute ullamco magna sed do lorem velit cupidatat 20:20 fames Sit. Incididunt minim 1-1 proident cillum enim est et adipiscing consequat 20% laborum sunt eiusmod enim senectus.<br><br><strong>Nunc anim cupidatat velit minim incididunt sit:</strong><br>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat mollit ullamco voluptate sed magna morbi pharetra qui. Purus pharetra morbi purus qui, aute ullamco (2 – 2 do) lorem velit cupidatat anim nunc. Fames sit incididunt:</p>\r\n<ol>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit</li>\r\n</ol>\r\n<p><strong>Nunc anim cupidatat velit Minim Incididunt – sit fames turpis mattis</strong></p>\r\n<ol>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis (mattis occaecat mollit ullamco voluptate sed magna)</li>\r\n<li>Nunc anim cupidatat velit minim incididunt. Sit fames, turpis mattis occaecat:</li>\r\n</ol>\r\n<ul type=\"disc\">\r\n<ul>\r\n<ul>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat?</li>\r\n<li>Nunc anim cupidatat velit minim?</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit?</li>\r\n<li>Nunc anim “cupidatat” velit?</li>\r\n<li>Nunc anim cupidatat velit minim</li>\r\n<li>Nunc anim cupidatat velit minim incididunt</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat/mollit</li>\r\n</ul>\r\n</ul>\r\n</ul>\r\n<p>Nunc anim cupidatat velit minim incididunt sit fames turpis, mattis occaecat mollit ullamco voluptate sed. Magna morbi pharetra qui, purus pharetra morbi, purus qui aute ullamco magna. Sed do lorem velit cupidatat anim, nunc fames sit incididunt, minim non id proident.</p>\r\n<p>Nunc anim cupidatat velit minim incididunt sit, fames turpis mattis occaecat mollit ullamco voluptate sed!</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171489,
+          "cmid": 1565067,
+          "course": 51761,
+          "name": "Topic D 5 (Topic E)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1795287600,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1791198506,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<h3>Nunc anim:</h3>\r\n<p>Nunc anim cupidatat velit minim incididunt 3-3 turpis mattis occaecat mollit ullamco voluptate sed magna morbi pharetra qui purus pharetra morbi purus qui. Aute ullamco magna sed do lorem velit cupidatat 20:20 fames Sit. Incididunt minim 1-1 proident cillum enim est et adipiscing consequat 20% laborum sunt eiusmod enim senectus.<br><br><strong>Nunc anim cupidatat velit minim incididunt sit:</strong><br>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat mollit ullamco voluptate sed magna morbi pharetra qui. Purus pharetra morbi purus qui, aute ullamco (2 – 2 do) lorem velit cupidatat anim nunc. Fames sit incididunt:</p>\r\n<ol>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit</li>\r\n</ol>\r\n<p><strong>Nunc anim cupidatat velit Minim Incididunt – sit fames turpis mattis</strong></p>\r\n<ol>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis (mattis occaecat mollit ullamco voluptate sed magna)</li>\r\n<li>Nunc anim cupidatat velit minim incididunt. Sit fames, turpis mattis occaecat:</li>\r\n</ol>\r\n<ul type=\"disc\">\r\n<ul>\r\n<ul>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat?</li>\r\n<li>Nunc anim cupidatat velit minim?</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit?</li>\r\n<li>Nunc anim “cupidatat” velit?</li>\r\n<li>Nunc anim cupidatat velit minim</li>\r\n<li>Nunc anim cupidatat velit minim incididunt</li>\r\n<li>Nunc anim cupidatat velit minim incididunt sit fames turpis mattis occaecat/mollit</li>\r\n</ul>\r\n</ul>\r\n</ul>\r\n<p>Nunc anim cupidatat velit minim incididunt sit fames turpis, mattis occaecat mollit ullamco voluptate sed. Magna morbi pharetra qui, purus pharetra morbi, purus qui aute ullamco magna. Sed do lorem velit cupidatat anim, nunc fames sit incididunt, minim non id proident.</p>\r\n<p>Nunc anim cupidatat velit minim incididunt sit, fames turpis mattis occaecat mollit ullamco voluptate sed!</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171482,
+          "cmid": 1565050,
+          "course": 51761,
+          "name": "Assignment 1 (Topic E)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1792778400,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1792646266,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<h4>Suspendisse netus</h4>\r\n<h5><strong>Suspendisse 4 dolor 4:</strong></h5>\r\n<p>Suspendisse netus dolor tempor ad aliquip reprehenderit sint. Deserunt ornare exercitation dolore elit aenean 4 sunt:</p>\r\n<ol>\r\n<li>Suspendisse netus dolor tempor ad aliquip reprehenderit sint deserunt, ornare exercitation dolore (4-4 laborum)</li>\r\n<li>Suspendisse netus dolor tempor ad aliquip. Reprehenderit sint deserunt ornare exercitation (dolore elit aenean) laborum sunt fugiat duis et adipiscing suspendisse netus occaecat. Mollit ex voluptate, incididunt minim est enim aliquip. Ad sint reprehenderit ornare deserunt ipsum senectus (4-4 senectus).</li>\r\n</ol>\r\n<p>Suspendisse netus dolor tempor ad 4 reprehenderit.</p>\r\n<p>Suspendisse 4 dolor: Tempor. Ad. Aliquip, Reprehenderit., Sint, Deserunt., &amp; Ornare, Exercitation. (4142). Elit Aenean Laborum: Sunt fugiat Duis Et adipiscing Suspendisse Netus occaecat Mollit Ex. <i>Suspendisse netus dolor Tempor ad Aliquip Reprehenderit</i>, <i>40</i>(4), 4104–4120. tempor://ad.aliquip/41.42046/4ornare.41588</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "Topic AV 2020 - Topic AW - Topic AX.pdf",
+              "filepath": "/",
+              "filesize": 684671,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2775884/mod_assign/introattachment/0/Topic%20AV%202020%20-%20Topic%20AW%20-%20Topic%20AX.pdf",
+              "timemodified": 1791196996,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171483,
+          "cmid": 1565053,
+          "course": 51761,
+          "name": "Assignment 2 (Topic E)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1793214000,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1791971379,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 0,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 0,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<h4 id=\"yui_3_18_1_1_1765777456898_203\">Fugiat duis</h4>\r\n<h5><strong>Fugiat 4 exercitation 3:</strong></h5>\r\n<p>Fugiat duis exercitation dolore pretium tortor laborum sunt. Culpa nulla irure pariatur aliqua laboris 1 do:</p>\r\n<ol>\r\n<li>Fugiat duis exercitation dolore pretium tortor laborum sunt culpa, nulla irure pariatur (1-1 lorem)</li>\r\n<li>Fugiat duis exercitation dolore pretium tortor. Laborum sunt culpa nulla irure (pariatur aliqua laboris) lorem do faucibus tristique excepteur officia enim est proident. Cillum quis labore, consectetur egestas pretium tortor nisi. In excepteur officia faucibus tristique lorem do (3-3 voluptate).</li>\r\n</ol>\r\n<p>Fugiat duis exercitation dolore pretium 4 laborum.</p>\r\n<p>Fugiat duis exercitation: Dolore, Pretium. Tortor. Laborum., Sunt, Culpa., Nulla, Irure., &amp; Pariatur, Aliqua. (1820). Lorem do faucibus tristique excepteur officia enim: est proident cillum quis Labore consectetur egestas pretium. <i>Fugiat duis Exercitation Dolore Pretium</i>, <i>42</i>(4), 404–387. dolore://pretium.tortor/45.4378/Culpa-27-1837-1854<br><br>Fugiat: Duis exercitation dolore pretium tortor laborum sunt culpa nulla, irure pariatur / aliqua laboris lorem do faucibus. Tristique excepteur officia enim est proident cillum quis labore consectetur egestas pretium tortor nisi in excepteur officia faucibus tristique lorem do reprehenderit sint voluptate ex.</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [
+            {
+              "filename": "Topic AY 2022 Topic AZ.pdf",
+              "filepath": "/",
+              "filesize": 1258416,
+              "fileurl": "https://mycourses.aalto.fi/webservice/pluginfile.php/2775891/mod_assign/introattachment/0/Topic%20AY%202022%20Topic%20AZ.pdf",
+              "timemodified": 1791197242,
+              "mimetype": "application/pdf",
+              "isexternalfile": false,
+              "icon": "f/pdf"
+            }
+          ],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171491,
+          "cmid": 1565074,
+          "course": 51761,
+          "name": "Assignment 3 (Topic B)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1793818800,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1793000213,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 1,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 8962,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<p dir=\"ltr\">Excepteur officia nisi, in lorem do faucibus tristique irure pariatur ut amet ea veniam cupidatat velit nunc anim enim eiusmod excepteur. Officia faucibus tristique, lorem do, aliqua laboris-irure pariatur consectetur, egestas enim est esse commodo quis labore, turpis mattis dolore exercitation aenean elit sunt laborum duis fugiat adipiscing et, mollit occaecat netus Suspendisse minim incididunt voluptate Ex. </p>\r\n<p dir=\"ltr\">Excepteur officia 3 in lorem do faucibus tristique irure pariatur ut:</p>\r\n<p dir=\"ltr\">Excepteur officia nisi, in lorem do faucibus tristique irure pariatur ut (amet ea veniam cupidatat velit 2). Anim enim eiusmod excepteur officia faucibus / tristique lorem do aliqua laboris irure pariatur consectetur egestas enim est esse commodo. Quis labore, turpis mattis dolore exercitation aenean elit sunt laborum duis fugiat / adipiscing et mollit occaecat netus suspendisse minim incididunt voluptate ex sint reprehenderit qui purus morbi pharetra aliqua laboris irure pariatur faucibus tristique ut amet. Turpis mattis id non esse commodo quis labore nostrud consequat adipiscing et tortor pretium sunt laborum duis fugiat enim eiusmod in nisi officia excepteur tristique faucibus do lorem (laborum sunt fugiat duis) et adipiscing pretium tortor posuere vitae dolore. </p>\r\n<p dir=\"ltr\">Excepteur officia nisi in lorem do faucibus:</p>\r\n<p dir=\"ltr\">3. Officia nisi in lorem do faucibus - tristique irure pariatur ut?</p>\r\n<p dir=\"ltr\">3. Officia nisi in lorem do faucibus tristique irure?</p>\r\n<p dir=\"ltr\">3. Officia nisi in lorem do faucibus tristique irure pariatur?</p>\r\n<p dir=\"ltr\">Excepteur officia nisi in 3-3 faucibus Tristique3 pariatur. Ut amet ea veniam cupidatat velit nunc anim enim eiusmod Excepteur / Officia / Faucibus tristique lorem do aliqua laboris irure pariatur consectetur egestas enim est. Esse commodo quis labore turpis mattis dolore exercitation aenean elit sunt laborum duis. Fugiat adipiscing et mollit occaecat netus suspendisse minim incididunt voluptate ex.</p>\r\n<p dir=\"ltr\"></p>\r\n<p>Excepteur officia nisi in, lorem do faucibus tristique irure pariatur ut amet ea veniam cupidatat velit nunc anim enim.  Eiusmod excepteur officia faucibus tristique lorem do aliqua laboris irure/pariatur consectetur egestas enim.</p>\r\n<p><strong>Excepteur officia nisi in, lorem do faucibus tristique irure, pariatur ut amet ea veniam cupidatat velit nunc anim enim eiusmod excepteur.</strong></p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171492,
+          "cmid": 1565075,
+          "course": 51761,
+          "name": "Assignment 4 (Topic B)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1794423600,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1793000242,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 1,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 8962,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<p dir=\"ltr\">Voluptate ex mollit occaecat netus suspendisse tempor dolor cupidatat velit sed magna ullamco aute nulla culpa vitae posuere aliqua 2, et adipiscing consequat nostrud proident cillum enim-est consectetur egestas dolore exercitation aenean elit. Vitae, posuere nulla culpa ullamco / Aute / enim eiusmod / Ipsum senectus ornare deserunt sint reprehenderit do lorem est enim egestas consectetur. Nostrud consequat cillum proident non id enim eiusmod in nisi ornare deserunt ipsum senectus aliquip. Ad est enim cillum proident labore quis egestas 3. </p>\r\n<p dir=\"ltr\">Voluptate ex mollit occaecat netus suspendisse tempor:</p>\r\n<p dir=\"ltr\">2. Ex mollit occaecat netus suspendisse tempor - dolor cupidatat velit sed?</p>\r\n<p dir=\"ltr\">2. Ex mollit occaecat netus suspendisse tempor dolor cupidatat?</p>\r\n<p dir=\"ltr\">2. Ex mollit occaecat netus suspendisse tempor dolor cupidatat velit?</p>\r\n<p dir=\"ltr\">Voluptate ex mollit occaecat 2-2 tempor Dolor2 velit. Sed magna ullamco aute nulla culpa &amp; vitae posuere aliqua laboris, et adipiscing consequat nostrud proident cillum Enim / Est / Consectetur egestas dolore exercitation aenean, elit vitae posuere nulla culpa ullamco aute.</p>\r\n<p dir=\"ltr\">Voluptate: ex mollit occaecat netus suspendisse Tempor, Dolor, cupidatat. velit sed magna.</p>\r\n<p dir=\"ltr\"><strong>Voluptate ex mollit occaecat, netus suspendisse tempor dolor cupidatat, velit sed magna ullamco aute nulla culpa vitae posuere aliqua laboris et.</strong></p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171493,
+          "cmid": 1565076,
+          "course": 51761,
+          "name": "Assignment 5 (Topic B)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1795028400,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1793000265,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 1,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 8962,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<p dir=\"ltr\">Voluptate ex mollit occaecat netus suspendisse tempor dolor aliquip ad incididunt minim ex voluptate occaecat mollit suspendisse netus dolor 3 laborum 1, pretium tortor et adipiscing consequat nostrud posuere vitae incididunt minim fames sit anim nunc velit cupidatat. Dolor, tempor laborum sunt fugiat / Duis / exercitation dolore / Elit aenean posuere vitae ad aliquip reprehenderit sint suspendisse netus dolor tempor ex voluptate quis labore esse commodo enim est consectetur. </p>\r\n<p dir=\"ltr\">Voluptate, ex mollit occaecat netus suspendisse tempor dolor aliquip ad incididunt 3 ex voluptate occaecat mollit suspendisse netus dolor 3. Laborum sunt pretium tortor et adipiscing consequat nostrud posuere vitae incididunt minim fames. Sit anim nunc velit cupidatat dolor tempor laborum sunt fugiat. Duis exercitation dolore elit aenean posuere vitae ad aliquip reprehenderit: 1) suspendisse netus \"Dolor tempor ex...\" voluptate, 3) labore esse commodo enim \"Est consectetur egestas ut\" amet faucibus tristique excepteur Officia aliqua(laboris), lorem 3) qui purus quis labore consectetur / egestas / id non esse commodo consequat nostrud faucibus tristique lorem do. Aliqua laboris irure pariatur senectus ipsum senectus ipsum eiusmod. Enim nisi in excepteur officia faucibus-tristique-consequat nostrud et, adipiscing Enim, Est, Proident cillum quis labore lorem. Do faucibus tristique excepteur officia nisi in morbi pharetra esse commodo id non turpis mattis ut amet proident cillum lorem.</p>\r\n<p dir=\"ltr\"></p>\r\n<p dir=\"ltr\">Voluptate ex mollit occaecat netus suspendisse tempor:</p>\r\n<p dir=\"ltr\">3. Ex mollit occaecat netus suspendisse tempor dolor aliquip - ad incididunt minim ex?</p>\r\n<p dir=\"ltr\">3. Ex mollit occaecat netus suspendisse tempor dolor aliquip? Ad incididunt minim ex voluptate occaecat mollit suspendisse netus dolor tempor.</p>\r\n<p dir=\"ltr\">3. Ex mollit occaecat netus suspendisse tempor dolor aliquip ad?</p>\r\n<p dir=\"ltr\">Voluptate ex mollit occaecat 3-3 tempor Dolor3 ad. Incididunt minim ex voluptate occaecat mollit suspendisse Netus / Dolor / Tempor laborum sunt pretium tortor, et adipiscing consequat nostrud posuere vitae incididunt minim fames sit.</p>\r\n<p dir=\"ltr\"><strong>Voluptate ex mollit occaecat, netus suspendisse tempor dolor aliquip, ad incididunt minim ex voluptate occaecat mollit suspendisse netus dolor tempor laborum.</strong></p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171494,
+          "cmid": 1565077,
+          "course": 51761,
+          "name": "Assignment 6 (Topic B)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1795460400,
+          "allowsubmissionsfromdate": 0,
+          "grade": 3,
+          "gradepenalty": 0,
+          "timemodified": 1793000287,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 1,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 8962,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<p dir=\"ltr\" id=\"yui_3_18_1_1_1765778680792_212\">Velit cupidatat veniam ea fames sit anim nunc non id quis labore esse commodo id non turpis mattis ut 2, 9, aliquip 9, sint deserunt ornare senectus ipsum ex voluptate ornare deserunt sint reprehenderit enim eiusmod (ipsum  senectus netus suspendisse morbi pharetra qui 9 - ullamco aute sed magna lorem do ea veniam cupidatat velit turpis mattis ut amet esse). </p>\r\n<p dir=\"ltr\">Velit cupidatat veniam ea fames sit anim:</p>\r\n<p dir=\"ltr\">1. Cupidatat veniam ea fames sit anim - nunc non id quis?</p>\r\n<p dir=\"ltr\">1. Cupidatat veniam ea fames sit anim nunc non?</p>\r\n<p dir=\"ltr\">1. Cupidatat veniam ea fames sit anim nunc non id?</p>\r\n<p dir=\"ltr\">Velit cupidatat veniam ea 1-1 anim Nunc9 id. Quis labore esse commodo id non turpis Mattis / Ut / Amet ad aliquip reprehenderit sint, deserunt ornare senectus ipsum ex voluptate, ornare deserunt sint reprehenderit enim eiusmod ipsum senectus netus suspendisse.morbi., pharetra qui purus ullamco aute sed magna lorem.</p>\r\n<p dir=\"ltr\"></p>\r\n<p dir=\"ltr\">Velit cupidatat veniam ea fames sit anim nunc:</p>\r\n<p dir=\"ltr\">velit://cupidatat.veniam.ea/fames_sit/anim-nunc-non/</p>\r\n<p dir=\"ltr\">velit://cupidatat.veniam-ea.fames/sit/anim/nunc-non-id?quis=Labore2Commodo2non2mattis2Amet_Ad-aliquip_reprehenderit9Deserunt10Senectus</p>\r\n<p dir=\"ltr\"><strong>Velit cupidatat veniam ea, fames sit anim nunc non, id quis labore esse commodo id non turpis mattis ut amet ad.</strong></p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        },
+        {
+          "id": 171503,
+          "cmid": 1565127,
+          "course": 51761,
+          "name": "Topic F report (Topic B)",
+          "nosubmissions": 0,
+          "submissiondrafts": 0,
+          "sendnotifications": 0,
+          "sendlatenotifications": 0,
+          "sendstudentnotifications": 1,
+          "duedate": 1796497200,
+          "allowsubmissionsfromdate": 0,
+          "grade": 5,
+          "gradepenalty": 0,
+          "timemodified": 1793000344,
+          "completionsubmit": 1,
+          "cutoffdate": 0,
+          "gradingduedate": 0,
+          "teamsubmission": 1,
+          "requireallteammemberssubmit": 0,
+          "teamsubmissiongroupingid": 8962,
+          "blindmarking": 0,
+          "hidegrader": 0,
+          "revealidentities": 0,
+          "attemptreopenmethod": "untilpass",
+          "maxattempts": 1,
+          "markingworkflow": 0,
+          "markingallocation": 0,
+          "markinganonymous": 0,
+          "requiresubmissionstatement": 0,
+          "preventsubmissionnotingroup": 1,
+          "configs": [
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxfilesubmissions",
+              "value": "1"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "maxsubmissionsizebytes",
+              "value": "419430400"
+            },
+            {
+              "plugin": "file",
+              "subtype": "assignsubmission",
+              "name": "filetypeslist",
+              "value": ""
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "enabled",
+              "value": "1"
+            },
+            {
+              "plugin": "comments",
+              "subtype": "assignfeedback",
+              "name": "commentinline",
+              "value": "0"
+            }
+          ],
+          "intro": "<p>Enim est proident cillum, consequat nostrud et adipiscing pretium tortor non id commodo esse amet ut mattis turpis est enim do lorem tristique faucibus officia Excepteur in nisi. Pharetra morbi excepteur officia faucibus tristique eiusmod enim nisi in:</p>\r\n<ol>\r\n<li>Enim est proident cillum consequat nostrud et adipiscing Pretium tortor non 2 commodo esse amet ut mattis turpis est. Enim do lorem tristique faucibus officia excepteur in, nisi pharetra, morbi excepteur officia faucibus tristique eiusmod, 4 nisi in irure pariatur consectetur egestas quis labore esse commodo.</li>\r\n<li>Enim est proident cillum consequat nostrud et adipiscing Pretium tortor non 28 commodo esse amet ut mattis turpis est. Enim do lorem tristique faucibus officia-excepteur in, nisi pharetra morbi, excepteur officia faucibus tristique, eiusmod enim nisi in irure pariatur consectetur egestas.</li>\r\n<li>Enim est Proident - cillum consequat nostrud et adipiscing pretium tortor Non id commodo esse. Amet ut mattis turpis Est enim do lorem 2-2 officia excepteur in nisi pharetra morbi excepteur officia faucibus tristique eiusmod enim nisi in irure pariatur consectetur, egestas quis labore esse commodo id non turpis mattis 8 et Tortor Pretium. Sunt laborum duis fugiat dolore exercitation voluptate ex minim incididunt netus Suspendisse mollit, occaecat cupidatat velit, aenean elit dolore exercitation duis fugiat sunt laborum sed magna-voluptate ex mollit occaecat sit fames minim. Incididunt aliquip ad aenean elit vitae posuere duis Fugiat dolore exercitation tortor pretium, commodo esse labore quis egestas consectetur est enim cillum proident Ea veniam. </li>\r\n</ol>\r\n<p dir=\"ltr\">Enim est proident cillum consequat nostrud et:</p>\r\n<p dir=\"ltr\">2. Est proident cillum consequat nostrud et - adipiscing pretium tortor non?</p>\r\n<p dir=\"ltr\">2. Est proident cillum consequat nostrud et adipiscing pretium?</p>\r\n<p dir=\"ltr\">2. Est proident cillum consequat nostrud et adipiscing pretium tortor non id?</p>\r\n<p dir=\"ltr\">2. Est proident cillum consequat Nostrud? Et Adipiscing pretium(tortor) non id commodo? Esse amet ut mattis turpis est Enim? Do lorem tristique faucibus officia excepteur In nisi?</p>\r\n<p dir=\"ltr\">Enim est proident cillum consequat Nostrud2 adipiscing. Pretium tortor non id commodo 2-2 ut. Mattis turpis est enim do lorem tristique faucibus officia excepteur in nisi pharetra morbi excepteur. Officia faucibus tristique eiusmod enim nisi in Irure / Pariatur / Consectetur egestas quis labore esse, commodo id non turpis mattis adipiscing.</p>\r\n<p>Enim est proident cillum Consequat Nostrud Et adipiscing \"Pretium tortor Non id Commodo: 2 Amet ut Mattis Turpis Est\" enim do lorem tristique faucibus: </p>\r\n<p>enim://est.proident-cillum.consequat/nostrud/et/adipiscing-pretium-tortor-non-id-commodo-esse-amet-ut-mattis?turpis=Est2Do2Tristique2officia2In2pharetra28excepteur5Faucibus</p>",
+          "introformat": 1,
+          "introfiles": [],
+          "introattachments": [],
+          "timelimit": 0,
+          "submissionattachments": 0
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "item": "module",
+      "itemid": 1565126,
+      "warningcode": "1",
+      "message": "No access rights in module context"
+    }
+  ]
+}
