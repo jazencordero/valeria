@@ -45,16 +45,23 @@
  * - Anything else is a bug and is thrown.
  * A finished sync sets `last_sync_at`, status 'ok' and clears `last_error`.
  * It also adds one `sync-files` job for her (deduped per user), which lists
- * her course files in the background (./files). An unfinished call adds none.
+ * her course files in the background (./files), and one `estimate` job for
+ * each of her assignments with no `estimate_min` yet (deduped per assignment),
+ * which asks the small model how long it takes (../ai/jobs/estimate; that job
+ * itself skips courses not marked as allowing AI). An unfinished call adds none.
  *
  * Cut: no lock. Two calls at the same moment (two tabs) both do the same
  * slice; the rows are still written once, Moodle is asked twice.
  */
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { MOODLE_STATUSES, moodleConnections } from "@/server/db/schema/moodle";
 import { users } from "@/server/db/schema/users";
+import { assignments } from "@/server/db/schema/work";
 import { enqueue } from "@/server/jobs/queue";
+
+// Same string as ESTIMATE_KIND in ../ai/jobs/estimate; written out so syncing never loads the AI router.
+const ESTIMATE_KIND = "estimate";
 import { KeyRejected, MoodleError } from "@/server/moodle/client";
 import { getAssignments, getSubmissionStatus, type Assignment } from "@/server/moodle/read/assignments";
 import { getCourses } from "@/server/moodle/read/courses";
@@ -208,6 +215,16 @@ export async function syncNow(
     // still waits adds nothing. Added before the sync is marked finished: if
     // this fails, the cursor is still there and the next call tries again.
     await enqueue(SYNC_FILES_KIND, {}, { userId, dedupeKey: userId, db: database, now: () => new Date(deps.now()) });
+
+    // How long each assignment takes (M2-12): one `estimate` job per assignment
+    // that has none, deduped per assignment, so a job still waiting is not doubled.
+    const unestimated = await database
+      .select({ id: assignments.id })
+      .from(assignments)
+      .where(and(eq(assignments.userId, userId), isNull(assignments.estimateMin)));
+    for (const { id } of unestimated) {
+      await enqueue(ESTIMATE_KIND, { assignmentId: id }, { userId, dedupeKey: id, db: database, now: () => new Date(deps.now()) });
+    }
 
     await database
       .update(moodleConnections)

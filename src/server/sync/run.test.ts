@@ -14,6 +14,7 @@ import { ALLOWED_SITES, connectWithKey } from "@/server/moodle/connect";
 import { DEMO_KEY } from "@/server/moodle/fake-inline";
 import { getAssignments, getSubmissionStatus, type Assignment } from "@/server/moodle/read/assignments";
 import { getCourses } from "@/server/moodle/read/courses";
+import { ESTIMATE_KIND } from "@/server/ai/jobs/estimate";
 import { SYNC_FILES_KIND } from "./files";
 import { BUDGET_MS, CURSOR_KEY, CURSOR_MAX_AGE_MS, FRESH_MS, SLICE, cursorFrom, syncNow, type SyncNowDeps } from "./run";
 
@@ -127,6 +128,10 @@ async function courseCount(userId: string) {
 
 async function syncFilesJobs() {
   return t.db.select().from(jobs).where(eq(jobs.kind, SYNC_FILES_KIND)).orderBy(asc(jobs.createdAt));
+}
+
+async function estimateJobs() {
+  return t.db.select().from(jobs).where(eq(jobs.kind, ESTIMATE_KIND)).orderBy(asc(jobs.createdAt));
 }
 
 const range = (from: number, count: number) => Array.from({ length: count }, (_, i) => from + i);
@@ -336,6 +341,43 @@ describe("syncNow", () => {
     expect((await syncFilesJobs()).map((j) => j.status)).toEqual(["done", "queued"]);
   }, SLOW);
 
+  it("adds one estimate job per assignment with no estimate when a sync finishes, deduped per assignment", async () => {
+    const userId = await connectedUser();
+    const { deps, state } = fakeMoodle({ callMs: 2_000, assignments: 20 });
+
+    // Unfinished: none yet.
+    expect((await syncNow(userId, {}, t.db, deps)).more).toBe(true);
+    expect(await estimateJobs()).toEqual([]);
+
+    state.clock += 1_000;
+    expect((await syncNow(userId, {}, t.db, deps)).more).toBe(false);
+    const rows = await t.db.select({ id: assignments.id }).from(assignments).where(eq(assignments.userId, userId));
+    expect(rows).toHaveLength(20);
+    const queued = await estimateJobs();
+    expect(queued.map((j) => (j.payload as { assignmentId: string }).assignmentId).sort()).toEqual(
+      rows.map((r) => r.id).sort(),
+    );
+    for (const j of queued) {
+      expect(j).toMatchObject({ userId, status: "queued", payload: { _dedupeKey: (j.payload as { assignmentId: string }).assignmentId } });
+    }
+
+    // Another finished sync while they wait: still one per assignment.
+    state.clock += MINUTE;
+    while ((await syncNow(userId, { force: true }, t.db, deps)).more) state.clock += 1_000;
+    expect(await estimateJobs()).toHaveLength(20);
+
+    // Once they have run, only assignments still without an estimate get a new job.
+    await t.db.update(jobs).set({ status: "done" }).where(eq(jobs.kind, ESTIMATE_KIND));
+    const [first, ...others] = rows;
+    await t.db.update(assignments).set({ estimateMin: 45 }).where(eq(assignments.id, first.id));
+    state.clock += MINUTE;
+    while ((await syncNow(userId, { force: true }, t.db, deps)).more) state.clock += 1_000;
+    const fresh = (await estimateJobs()).filter((j) => j.status === "queued");
+    expect(fresh.map((j) => (j.payload as { assignmentId: string }).assignmentId).sort()).toEqual(
+      others.map((r) => r.id).sort(),
+    );
+  }, SLOW);
+
   it("adds no sync-files job when Moodle is down or rejects the key", async () => {
     const userId = await connectedUser();
     const { deps, state } = fakeMoodle({ assignments: 2 * SLICE });
@@ -352,6 +394,7 @@ describe("syncNow", () => {
     state.downFor.clear();
     expect((await syncNow(userId, { force: true }, t.db, deps)).status).toBe("expired");
     expect(await syncFilesJobs()).toEqual([]);
+    expect(await estimateJobs()).toEqual([]);
 
   }, SLOW);
 
