@@ -2,7 +2,7 @@
 // server runtime. The token travels in the POST body, never in a URL we build
 // for a call, and never in a log line or an error message.
 //
-// With MOODLE_FAKE=1 every call and upload is answered in-process by
+// With MOODLE_FAKE=1 every call and form post is answered in-process by
 // ./fake-inline (never in production). Those answers skip the politeness
 // rules below: they never reach a Moodle server.
 //
@@ -13,7 +13,7 @@
 // - at most 2,000 requests per Helsinki day, then MoodleDown("daily limit")
 //   without a request. Counted in memory, with users.settings.moodleCalls as
 //   the fallback for a fresh server instance (see `dbCallCountStore`).
-// Every request, uploads included, says `User-Agent: Ready/0.1 (student study tool)`.
+// Every request, form posts included, says `User-Agent: Ready/0.1 (student study tool)`.
 // The limits are guesses until Aalto IT answers (M0-11).
 
 export type MoodleConn = {
@@ -146,36 +146,29 @@ export async function callMoodle<T = unknown>(
   }, options, (res) => readAnswer(res, fn))) as T;
 }
 
-/** Upload one file to her draft area. Returns the draft `itemid` to pass to save_submission. */
-export async function uploadFile(
+/**
+ * POST a multipart form to a Moodle endpoint other than the REST server (a
+ * file endpoint, say), under the same politeness rules and User-Agent, and
+ * return Moodle's JSON answer. `path` is relative to the site, for example
+ * "/webservice/x.php". The caller puts the token in `form` under the field
+ * name that endpoint reads. Moodle error answers throw like `callMoodle`.
+ */
+export async function postMoodleForm(
   conn: MoodleConn,
-  bytes: Uint8Array | ArrayBuffer | Blob,
-  filename: string,
+  path: string,
+  form: FormData,
   options: CallOptions = {},
-): Promise<number> {
+): Promise<unknown> {
+  if (!path.startsWith("/") || path.startsWith("//")) throw new Error("postMoodleForm needs a path on her site");
   if (fakeOn()) {
     const fake = await import("./fake-inline");
-    return fake.fakeUpload(conn, filename);
+    return fake.fakeForm(conn, path, form);
   }
-  const form = new FormData();
-  form.append("token", conn.token);
-  form.append("filearea", "draft");
-  form.append("itemid", "0");
-  const blob = bytes instanceof Blob ? bytes : new Blob([bytes as BlobPart]);
-  form.append("file_1", blob, filename);
-  return politely(conn, `${base(conn.siteUrl)}/webservice/upload.php`, {
+  return politely(conn, `${base(conn.siteUrl)}${path}`, {
     method: "POST",
     headers: { "user-agent": USER_AGENT },
     body: form,
-  }, options, async (res) => {
-    const answer = await readAnswer(res, "upload");
-    const first = Array.isArray(answer) ? (answer[0] as { itemid?: unknown } | undefined) : undefined;
-    const itemid = Number(first?.itemid);
-    if (!first || !Number.isFinite(itemid)) {
-      throw new MoodleError("Upload answer had no itemid", { errorcode: "invalidresponse", status: res.status });
-    }
-    return itemid;
-  });
+  }, options, (res) => readAnswer(res, path));
 }
 
 /**

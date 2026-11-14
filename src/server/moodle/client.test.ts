@@ -19,7 +19,7 @@ import {
   flattenParams,
   moodleDay,
   resetMoodleClient,
-  uploadFile,
+  postMoodleForm,
   type CallCountStore,
   type MoodleConn,
 } from "./client";
@@ -80,6 +80,15 @@ async function caught(p: Promise<unknown>): Promise<unknown> {
     return err;
   }
   throw new Error("expected a rejection");
+}
+
+/** A one-file form post to the fake's file endpoint; answers with the draft itemid. */
+async function postFile(c: MoodleConn, filename = "a.pdf"): Promise<number> {
+  const form = new FormData();
+  form.append("token", c.token);
+  form.append("file_1", new Blob([new Uint8Array([1])]), filename);
+  const answer = (await postMoodleForm(c, "/webservice/upload.php", form)) as { itemid: number }[];
+  return answer[0].itemid;
 }
 
 describe("flattenParams", () => {
@@ -230,21 +239,21 @@ describe("callMoodle", () => {
   });
 });
 
-describe("uploadFile", () => {
-  it("uploads to /webservice/upload.php and returns the draft itemid", async () => {
-    const itemid = await uploadFile(conn, new TextEncoder().encode("%PDF-1.4 fake"), "memo.pdf");
-    expect(itemid).toBe(FAKE_UPLOAD_ITEMID);
-    expect(lastCall()).toMatchObject({
-      path: "/webservice/upload.php",
-      fn: "upload",
-      params: { filearea: "draft", itemid: "0", file_1: "memo.pdf" },
-      token: moodle.token,
-    });
+describe("postMoodleForm", () => {
+  it("posts the form to the path on her site and returns Moodle's answer", async () => {
+    expect(await postFile(conn, "memo.pdf")).toBe(FAKE_UPLOAD_ITEMID);
+    expect(lastCall()).toMatchObject({ params: { file_1: "memo.pdf" }, token: moodle.token });
   });
 
-  it("maps a rejected token on upload to KeyRejected", async () => {
-    const err = await caught(uploadFile({ ...conn, token: "wrong" }, new Uint8Array([1]), "a.pdf"));
-    expect(err).toBeInstanceOf(KeyRejected);
+  it("maps a rejected token to KeyRejected", async () => {
+    expect(await caught(postFile({ ...conn, token: "wrong" }))).toBeInstanceOf(KeyRejected);
+  });
+
+  it("only posts to a path on her site", async () => {
+    const before = moodle.calls.length;
+    expect(await caught(postMoodleForm(conn, "//elsewhere.example.com/x", new FormData()))).toBeInstanceOf(Error);
+    expect(await caught(postMoodleForm(conn, "https://elsewhere.example.com/x", new FormData()))).toBeInstanceOf(Error);
+    expect(moodle.calls.length).toBe(before);
   });
 });
 
@@ -274,7 +283,7 @@ describe("MOODLE_FAKE=1", () => {
     const courses = await callMoodle<unknown[]>(demo, "core_enrol_get_users_courses", { userid: 4242 });
     expect(courses).toHaveLength(4);
     expect(await callMoodle(demo, "mod_assign_save_submission", { assignmentid: 7301 })).toEqual([]);
-    expect(await uploadFile(demo, new Uint8Array([1]), "memo.pdf")).toBe(FAKE_DRAFT_ITEMID);
+    expect(await postFile(demo, "memo.pdf")).toBe(FAKE_DRAFT_ITEMID);
     expect(moodle.calls.length).toBe(before);
   });
 
@@ -290,7 +299,7 @@ describe("MOODLE_FAKE=1", () => {
     const err = await caught(callMoodle(demo, "core_webservice_get_site_info"));
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(MoodleError);
-    expect(await caught(uploadFile(demo, new Uint8Array([1]), "a.pdf"))).not.toBeInstanceOf(MoodleError);
+    expect(await caught(postFile(demo))).not.toBeInstanceOf(MoodleError);
   });
 });
 
@@ -367,21 +376,21 @@ describe("politeness", () => {
     expect(waits.filter((w) => w > MIN_GAP_MS)).toEqual([]);
   });
 
-  it("retries uploads too", async () => {
+  it("retries form posts too", async () => {
     instantSleep();
     const realFetch = globalThis.fetch;
     let n = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (...args) =>
       ++n === 1 ? new Response("{}", { status: 503 }) : realFetch(...args),
     );
-    expect(await uploadFile({ ...conn, userId: "u-up" }, new Uint8Array([1]), "a.pdf")).toBe(FAKE_UPLOAD_ITEMID);
+    expect(await postFile({ ...conn, userId: "u-up" })).toBe(FAKE_UPLOAD_ITEMID);
     expect(n).toBe(2);
   });
 
-  it("sends User-Agent: Ready/0.1 (student study tool) on calls and uploads", async () => {
+  it("sends User-Agent: Ready/0.1 (student study tool) on calls and form posts", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     await callMoodle(conn, "core_webservice_get_site_info");
-    await uploadFile(conn, new Uint8Array([1]), "a.pdf");
+    await postFile(conn);
     expect(USER_AGENT).toBe("Ready/0.1 (student study tool)");
     expect(spy).toHaveBeenCalledTimes(2);
     for (const [, init] of spy.mock.calls) expect(new Headers(init?.headers).get("user-agent")).toBe(USER_AGENT);
@@ -399,7 +408,7 @@ describe("politeness", () => {
     const err = await caught(callMoodle(her, "core_webservice_get_site_info"));
     expect(err).toBeInstanceOf(MoodleDown);
     expect((err as MoodleDown).message).toBe("daily limit");
-    expect(await caught(uploadFile(her, new Uint8Array([1]), "a.pdf"))).toBeInstanceOf(MoodleDown);
+    expect(await caught(postFile(her))).toBeInstanceOf(MoodleDown);
     expect(spy).not.toHaveBeenCalled();
     expect(moodle.calls.length).toBe(before);
   });
