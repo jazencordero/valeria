@@ -8,7 +8,7 @@
  * status: a `Not started` or `Draft saved` chip, or the NEW tag.
  * Plain data in, no fetching. Cut: no lift or collapse animation (M4-13).
  */
-import type { HTMLAttributes } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { Tag } from "@/components/ui/tag";
 import { listDate, minutesLabel, type DateInput } from "@/lib/dates";
 
@@ -24,10 +24,13 @@ export type QueueRowProps = {
   position: number;
   title: string;
   course: string;
-  dueAt: DateInput;
+  /** Null when the LMS gives no due date; the date line is then left out. */
+  dueAt: DateInput | null;
   /** Estimated minutes of work. Missing or null hides the estimate. */
   estimateMin?: number | null;
   status: QueueStatus;
+  /** Optional trailing action under the status, e.g. a Start button. */
+  action?: ReactNode;
   className?: string;
 };
 
@@ -38,6 +41,7 @@ export function QueueRow({
   dueAt,
   estimateMin,
   status,
+  action,
   className = "",
 }: QueueRowProps) {
   const hasEstimate = typeof estimateMin === "number" && estimateMin > 0;
@@ -56,7 +60,7 @@ export function QueueRow({
       <div className="min-w-0">
         <p className="text-[15px] font-medium [overflow-wrap:anywhere]">{title}</p>
         <p className="mt-0.5 text-[13px] text-ink-3">{course}</p>
-        <p className="mono mt-0.5 text-ink-3">{listDate(dueAt)}</p>
+        {dueAt != null && <p className="mono mt-0.5 text-ink-3">{listDate(dueAt)}</p>}
       </div>
       <div className="flex flex-col items-end gap-1.5 text-right">
         {hasEstimate && (
@@ -69,6 +73,7 @@ export function QueueRow({
             {CHIP_TEXT[status]}
           </span>
         )}
+        {action}
       </div>
     </li>
   );
