@@ -1,15 +1,26 @@
 // @vitest-environment node
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { startFakeMoodle, FAKE_UPLOAD_ITEMID, type FakeMoodle } from "../../../tests/fake-moodle/server";
+import { users } from "../db/schema/users";
+import { createTestDb } from "../db/test-db";
 import {
+  DAILY_LIMIT,
   KeyRejected,
+  MIN_GAP_MS,
   MoodleDown,
   MoodleError,
   NotAllowed,
+  USER_AGENT,
   callMoodle,
+  configureMoodleClient,
+  dbCallCountStore,
   fileUrl,
   flattenParams,
+  moodleDay,
+  resetMoodleClient,
   uploadFile,
+  type CallCountStore,
   type MoodleConn,
 } from "./client";
 import { DEMO_KEY, FAKE_DRAFT_ITEMID } from "./fake-inline";
@@ -24,10 +35,39 @@ beforeAll(async () => {
 afterAll(async () => {
   await moodle.close();
 });
+beforeEach(() => {
+  resetMoodleClient();
+  // Tests never touch the app database unless they hand in their own store.
+  configureMoodleClient({ countStore: null });
+});
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
+
+/** A fake clock: every wait is instant, moves the clock on, and is remembered. */
+function instantSleep(): number[] {
+  const waits: number[] = [];
+  let t = Date.now();
+  configureMoodleClient({
+    now: () => t,
+    sleep: async (ms) => {
+      waits.push(ms);
+      t += ms;
+    },
+  });
+  return waits;
+}
+
+/** A count store that starts each day at `start(day)` and records what is saved. */
+function memoryStore(start: (day: string) => number) {
+  const saved: { userId: string; day: string; count: number }[] = [];
+  const store: CallCountStore = {
+    load: async (_userId, day) => start(day),
+    save: async (userId, day, count) => void saved.push({ userId, day, count }),
+  };
+  return { store, saved };
+}
 
 function lastCall() {
   return moodle.calls[moodle.calls.length - 1];
@@ -154,6 +194,7 @@ describe("callMoodle", () => {
   });
 
   it("maps a 5xx to MoodleDown", async () => {
+    instantSleep();
     moodle.override("core_course_get_contents", { status: 503, body: { error: "maintenance" } });
     const err = await caught(callMoodle(conn, "core_course_get_contents", { courseid: 3101 }));
     expect(err).toBeInstanceOf(MoodleDown);
@@ -250,5 +291,193 @@ describe("MOODLE_FAKE=1", () => {
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(MoodleError);
     expect(await caught(uploadFile(demo, new Uint8Array([1]), "a.pdf"))).not.toBeInstanceOf(MoodleError);
+  });
+});
+
+describe("politeness", () => {
+  it("keeps ten parallel calls to two in flight, starting at least 150 ms apart", async () => {
+    moodle.override("core_course_get_categories", { delayMs: 400, body: [] });
+    const realFetch = globalThis.fetch;
+    let inFlight = 0;
+    let most = 0;
+    const starts: number[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (...args) => {
+      starts.push(performance.now());
+      most = Math.max(most, ++inFlight);
+      try {
+        return await realFetch(...args);
+      } finally {
+        inFlight--;
+      }
+    });
+    const before = moodle.calls.length;
+    const her = { ...conn, userId: "u-parallel" };
+    const answers = await Promise.all(Array.from({ length: 10 }, () => callMoodle(her, "core_course_get_categories")));
+    expect(answers).toEqual(Array(10).fill([]));
+    expect(moodle.calls.length - before).toBe(10);
+    expect(most).toBe(2);
+    for (let i = 1; i < starts.length; i++) expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(MIN_GAP_MS - 5);
+  });
+
+  it("keeps each user to her own limits", async () => {
+    moodle.override("core_course_get_categories", { delayMs: 200, body: [] });
+    const started = performance.now();
+    await Promise.all(["u-a", "u-b", "u-c"].map((userId) => callMoodle({ ...conn, userId }, "core_course_get_categories")));
+    // Three users at once do not wait for each other's 150 ms gap or slots.
+    expect(performance.now() - started).toBeLessThan(400);
+  });
+
+  it("retries a 429 with Retry-After: 1 after about a second", async () => {
+    const realFetch = globalThis.fetch;
+    const at: number[] = [];
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (...args) => {
+      at.push(performance.now());
+      if (at.length === 1) return new Response("{}", { status: 429, headers: { "retry-after": "1" } });
+      return realFetch(...args);
+    });
+    const info = await callMoodle<{ fullname: string }>({ ...conn, userId: "u-429" }, "core_webservice_get_site_info");
+    expect(info.fullname).toBe("Test Student");
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(at[1] - at[0]).toBeGreaterThanOrEqual(950);
+    expect(at[1] - at[0]).toBeLessThan(1500);
+  });
+
+  it("waits 2, 4 and 8 seconds on a 503 without Retry-After, then is MoodleDown", async () => {
+    const waits = instantSleep();
+    moodle.override("core_course_get_courses", { status: 503, body: { error: "maintenance" } });
+    const before = moodle.calls.length;
+    const err = await caught(callMoodle({ ...conn, userId: "u-503" }, "core_course_get_courses"));
+    expect(err).toBeInstanceOf(MoodleDown);
+    expect((err as MoodleDown).status).toBe(503);
+    expect(moodle.calls.length - before).toBe(4);
+    expect(waits.filter((w) => w > MIN_GAP_MS)).toEqual([2000, 4000, 8000]);
+  });
+
+  it("is MoodleDown after three retried 429s, and at once for a Retry-After over a minute", async () => {
+    const waits = instantSleep();
+    moodle.override("core_course_get_courses", { status: 429, body: {} });
+    const err = await caught(callMoodle({ ...conn, userId: "u-429-max" }, "core_course_get_courses"));
+    expect(err).toBeInstanceOf(MoodleDown);
+    expect((err as MoodleDown).status).toBe(429);
+    expect(waits.filter((w) => w > MIN_GAP_MS)).toEqual([2000, 4000, 8000]);
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 429, headers: { "retry-after": "3600" } }));
+    waits.length = 0;
+    expect(await caught(callMoodle({ ...conn, userId: "u-429-long" }, "core_course_get_courses"))).toBeInstanceOf(MoodleDown);
+    expect(waits.filter((w) => w > MIN_GAP_MS)).toEqual([]);
+  });
+
+  it("retries uploads too", async () => {
+    instantSleep();
+    const realFetch = globalThis.fetch;
+    let n = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (...args) =>
+      ++n === 1 ? new Response("{}", { status: 503 }) : realFetch(...args),
+    );
+    expect(await uploadFile({ ...conn, userId: "u-up" }, new Uint8Array([1]), "a.pdf")).toBe(FAKE_UPLOAD_ITEMID);
+    expect(n).toBe(2);
+  });
+
+  it("sends User-Agent: Ready/0.1 (student study tool) on calls and uploads", async () => {
+    const spy = vi.spyOn(globalThis, "fetch");
+    await callMoodle(conn, "core_webservice_get_site_info");
+    await uploadFile(conn, new Uint8Array([1]), "a.pdf");
+    expect(USER_AGENT).toBe("Ready/0.1 (student study tool)");
+    expect(spy).toHaveBeenCalledTimes(2);
+    for (const [, init] of spy.mock.calls) expect(new Headers(init?.headers).get("user-agent")).toBe(USER_AGENT);
+  });
+
+  it("refuses the 2,001st call of a day without a request", async () => {
+    const { store, saved } = memoryStore(() => DAILY_LIMIT - 1);
+    configureMoodleClient({ countStore: store });
+    const her = { ...conn, userId: "u-limit" };
+    await callMoodle(her, "core_webservice_get_site_info"); // the 2,000th
+    expect(saved.at(-1)).toMatchObject({ userId: "u-limit", count: DAILY_LIMIT });
+
+    const spy = vi.spyOn(globalThis, "fetch");
+    const before = moodle.calls.length;
+    const err = await caught(callMoodle(her, "core_webservice_get_site_info"));
+    expect(err).toBeInstanceOf(MoodleDown);
+    expect((err as MoodleDown).message).toBe("daily limit");
+    expect(await caught(uploadFile(her, new Uint8Array([1]), "a.pdf"))).toBeInstanceOf(MoodleDown);
+    expect(spy).not.toHaveBeenCalled();
+    expect(moodle.calls.length).toBe(before);
+  });
+
+  it("counts 2,000 calls in memory, then refuses", async () => {
+    instantSleep();
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json([]));
+    const her = { ...conn, userId: "u-memory" };
+    for (let i = 0; i < DAILY_LIMIT; i++) await callMoodle(her, "core_course_get_categories");
+    expect(spy).toHaveBeenCalledTimes(DAILY_LIMIT);
+    const err = await caught(callMoodle(her, "core_course_get_categories"));
+    expect((err as MoodleDown).message).toBe("daily limit");
+    expect(spy).toHaveBeenCalledTimes(DAILY_LIMIT);
+    // Another user, and a call with no user, are not affected.
+    await callMoodle({ ...conn, userId: "u-other" }, "core_course_get_categories");
+    await callMoodle(conn, "core_course_get_categories");
+  });
+
+  it("starts a new count at midnight in Helsinki", async () => {
+    // 21:59 and 22:01 UTC on 14 Nov 2026 are 23:59 and 00:01 in Helsinki.
+    const late = Date.UTC(2026, 10, 14, 21, 59);
+    const early = Date.UTC(2026, 10, 14, 22, 1);
+    expect(moodleDay(late)).toBe("2026-11-14");
+    expect(moodleDay(early)).toBe("2026-11-15");
+    const { store } = memoryStore((day) => (day === "2026-11-14" ? DAILY_LIMIT : 0));
+    configureMoodleClient({ countStore: store, now: () => late });
+    const her = { ...conn, userId: "u-midnight" };
+    expect(await caught(callMoodle(her, "core_webservice_get_site_info"))).toBeInstanceOf(MoodleDown);
+    configureMoodleClient({ now: () => early });
+    await expect(callMoodle(her, "core_webservice_get_site_info")).resolves.toMatchObject({ fullname: "Test Student" });
+  });
+
+  it("keeps calling when the count store fails", async () => {
+    configureMoodleClient({
+      countStore: { load: () => Promise.reject(new Error("db down")), save: () => Promise.reject(new Error("db down")) },
+    });
+    await expect(callMoodle({ ...conn, userId: "u-dbdown" }, "core_webservice_get_site_info")).resolves.toBeTruthy();
+  });
+
+  it("does not throttle or count the in-process fake", async () => {
+    vi.stubEnv("MOODLE_FAKE", "1");
+    const { store } = memoryStore(() => DAILY_LIMIT);
+    configureMoodleClient({ countStore: store });
+    const demo = { siteUrl: "https://moodle.example.edu", token: DEMO_KEY, userId: "u-fake" };
+    await expect(callMoodle(demo, "core_webservice_get_site_info")).resolves.toBeTruthy();
+  });
+});
+
+describe("dbCallCountStore", () => {
+  it("keeps the day's count in users.settings.moodleCalls and refuses from it", async () => {
+    const t = await createTestDb();
+    try {
+      const today = moodleDay(Date.now());
+      const [full] = await t.db
+        .insert(users)
+        .values({ settings: { theme: "calm", moodleCalls: { day: today, count: DAILY_LIMIT } } })
+        .returning();
+      const [fresh] = await t.db.insert(users).values({ settings: { moodleCalls: { day: "2000-01-01", count: 1999 } } }).returning();
+      configureMoodleClient({ countStore: dbCallCountStore(t.db) });
+
+      const before = moodle.calls.length;
+      const err = await caught(callMoodle({ ...conn, userId: full.id }, "core_webservice_get_site_info"));
+      expect((err as MoodleDown).message).toBe("daily limit");
+      expect(moodle.calls.length).toBe(before);
+
+      await callMoodle({ ...conn, userId: fresh.id }, "core_webservice_get_site_info");
+      const settingsOf = async (id: string) =>
+        (await t.db.select({ s: users.settings }).from(users).where(eq(users.id, id)))[0].s;
+      expect(await settingsOf(fresh.id)).toEqual({ moodleCalls: { day: today, count: 1 } });
+
+      // A late, lower save never lowers the count; other settings stay.
+      const store = dbCallCountStore(t.db);
+      await store.save(full.id, today, 5);
+      expect(await settingsOf(full.id)).toEqual({ theme: "calm", moodleCalls: { day: today, count: DAILY_LIMIT } });
+      expect(await store.load(full.id, today)).toBe(DAILY_LIMIT);
+      expect(await store.load(full.id, "2000-01-02")).toBe(0);
+    } finally {
+      await t.close();
+    }
   });
 });

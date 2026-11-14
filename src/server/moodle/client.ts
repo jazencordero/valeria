@@ -3,9 +3,25 @@
 // for a call, and never in a log line or an error message.
 //
 // With MOODLE_FAKE=1 every call and upload is answered in-process by
-// ./fake-inline (never in production).
+// ./fake-inline (never in production). Those answers skip the politeness
+// rules below: they never reach a Moodle server.
+//
+// Politeness (per user: `conn.userId`, else one shared bucket per site and key):
+// - at most 2 requests in flight and at least 150 ms between request starts;
+// - HTTP 429 or 503 is retried up to 3 times, after `Retry-After` seconds or
+//   else 2, 4 and 8 seconds, then it is MoodleDown;
+// - at most 2,000 requests per Helsinki day, then MoodleDown("daily limit")
+//   without a request. Counted in memory, with users.settings.moodleCalls as
+//   the fallback for a fresh server instance (see `dbCallCountStore`).
+// Every request, uploads included, says `User-Agent: Ready/0.1 (student study tool)`.
+// The limits are guesses until Aalto IT answers (M0-11).
 
-export type MoodleConn = { siteUrl: string; token: string };
+export type MoodleConn = {
+  siteUrl: string;
+  token: string;
+  /** Our users.id. Limits and the daily count are kept per user; without it, per site and key. */
+  userId?: string;
+};
 
 /** Moodle params: nested objects and arrays, flattened by `flattenParams`. */
 export type MoodleParams = { [key: string]: MoodleParam };
@@ -17,6 +33,18 @@ export type CallOptions = {
 };
 
 export const MOODLE_TIMEOUT_MS = 15_000;
+
+export const USER_AGENT = "Ready/0.1 (student study tool)";
+export const MAX_IN_FLIGHT = 2;
+export const MIN_GAP_MS = 150;
+export const MAX_RETRIES = 3;
+/** Waits when Moodle sends no usable Retry-After: 2, 4, 8 seconds. */
+export const BACKOFF_MS = [2_000, 4_000, 8_000];
+/** A Retry-After longer than this is not waited for; the call is MoodleDown at once. */
+export const MAX_RETRY_AFTER_MS = 60_000;
+export const DAILY_LIMIT = 2_000;
+/** The day the daily limit counts in: the students' local day. */
+export const DAY_TIME_ZONE = "Europe/Helsinki";
 
 type ErrorInit = { errorcode?: string | null; exception?: string | null; status?: number | null };
 
@@ -111,12 +139,11 @@ export async function callMoodle<T = unknown>(
   body.append("wsfunction", fn);
   body.append("moodlewsrestformat", "json");
   for (const [k, v] of flattenParams(params)) body.append(k, v);
-  const res = await send(`${base(conn.siteUrl)}/webservice/rest/server.php`, {
+  return (await politely(conn, `${base(conn.siteUrl)}/webservice/rest/server.php`, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": USER_AGENT },
     body,
-  }, options);
-  return (await readAnswer(res, fn)) as T;
+  }, options, (res) => readAnswer(res, fn))) as T;
 }
 
 /** Upload one file to her draft area. Returns the draft `itemid` to pass to save_submission. */
@@ -136,14 +163,19 @@ export async function uploadFile(
   form.append("itemid", "0");
   const blob = bytes instanceof Blob ? bytes : new Blob([bytes as BlobPart]);
   form.append("file_1", blob, filename);
-  const res = await send(`${base(conn.siteUrl)}/webservice/upload.php`, { method: "POST", body: form }, options);
-  const answer = await readAnswer(res, "upload");
-  const first = Array.isArray(answer) ? (answer[0] as { itemid?: unknown } | undefined) : undefined;
-  const itemid = Number(first?.itemid);
-  if (!first || !Number.isFinite(itemid)) {
-    throw new MoodleError("Upload answer had no itemid", { errorcode: "invalidresponse", status: res.status });
-  }
-  return itemid;
+  return politely(conn, `${base(conn.siteUrl)}/webservice/upload.php`, {
+    method: "POST",
+    headers: { "user-agent": USER_AGENT },
+    body: form,
+  }, options, async (res) => {
+    const answer = await readAnswer(res, "upload");
+    const first = Array.isArray(answer) ? (answer[0] as { itemid?: unknown } | undefined) : undefined;
+    const itemid = Number(first?.itemid);
+    if (!first || !Number.isFinite(itemid)) {
+      throw new MoodleError("Upload answer had no itemid", { errorcode: "invalidresponse", status: res.status });
+    }
+    return itemid;
+  });
 }
 
 /**
@@ -162,6 +194,196 @@ export function fileUrl(conn: MoodleConn, url: string): string {
   }
   u.searchParams.set("token", conn.token);
   return u.toString();
+}
+
+// ---------------------------------------------------------------------------
+// Politeness: throttle, retries, daily count.
+
+/** Where the daily count survives a fresh server instance. Days are `YYYY-MM-DD`. */
+export type CallCountStore = {
+  /** The count saved for this user and day, or 0. */
+  load: (userId: string, day: string) => Promise<number>;
+  /** Save the count; never lowers a count already saved for the same day. */
+  save: (userId: string, day: string, count: number) => Promise<void>;
+};
+
+export type ClientConfig = {
+  /** Fallback for the daily count of calls made with a userId. Defaults to `dbCallCountStore()`; null for memory only. */
+  countStore: CallCountStore | null;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+};
+
+const defaults = (): ClientConfig => ({
+  countStore: dbCallCountStore(),
+  now: () => Date.now(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+});
+
+let config: ClientConfig = defaults();
+
+/** Swap the clock, the sleep or the count store (tests). */
+export function configureMoodleClient(change: Partial<ClientConfig>): void {
+  config = { ...config, ...change };
+}
+
+/** Back to the defaults, and forget every throttle and daily count in memory (tests). */
+export function resetMoodleClient(): void {
+  config = defaults();
+  limiters.clear();
+  counts.clear();
+}
+
+/**
+ * The daily count in users.settings.moodleCalls = { day, count }. The database
+ * client is imported only when it is first used, so importing this module
+ * never opens a database. Pass `db` to use another handle (tests).
+ */
+export function dbCallCountStore(db?: import("../db/client").Db): CallCountStore {
+  const handle = async () => {
+    const [{ sql, eq }, { users }] = await Promise.all([import("drizzle-orm"), import("../db/schema/users")]);
+    return { d: db ?? (await import("../db/client")).db, sql, eq, users };
+  };
+  return {
+    async load(userId, day) {
+      const { d, eq, users } = await handle();
+      const [row] = await d.select({ settings: users.settings }).from(users).where(eq(users.id, userId)).limit(1);
+      const saved = row?.settings?.moodleCalls as { day?: unknown; count?: unknown } | undefined;
+      const count = Number(saved?.count);
+      return saved?.day === day && Number.isFinite(count) ? count : 0;
+    },
+    async save(userId, day, count) {
+      const { d, sql, eq, users } = await handle();
+      const was = sql`${users.settings}->'moodleCalls'`;
+      await d
+        .update(users)
+        .set({
+          settings: sql`jsonb_set(${users.settings}, '{moodleCalls}', jsonb_build_object(
+            'day', ${day}::text,
+            'count', case when ${was}->>'day' = ${day}::text
+              then greatest(coalesce((${was}->>'count')::int, 0), ${count}::int)
+              else ${count}::int end))`,
+        })
+        .where(eq(users.id, userId));
+    },
+  };
+}
+
+/** `YYYY-MM-DD` of this moment in Helsinki. */
+export function moodleDay(ms: number): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: DAY_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
+}
+
+/** Who a call counts against: her user id, or the site and a hash of the key (never the key itself). */
+function bucket(conn: MoodleConn): string {
+  if (conn.userId) return `user:${conn.userId}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < conn.token.length; i++) h = Math.imul(h ^ conn.token.charCodeAt(i), 0x01000193) >>> 0;
+  return `anon:${base(conn.siteUrl)}:${h.toString(16)}`;
+}
+
+/** At most MAX_IN_FLIGHT holders at once, and starts at least MIN_GAP_MS apart. */
+class Limiter {
+  private active = 0;
+  private waiting: (() => void)[] = [];
+  private nextStart = 0;
+
+  async acquire(): Promise<void> {
+    if (this.active < MAX_IN_FLIGHT) this.active++;
+    else await new Promise<void>((resolve) => this.waiting.push(resolve)); // the slot is handed over
+    const now = config.now();
+    const at = Math.max(now, this.nextStart);
+    this.nextStart = at + MIN_GAP_MS;
+    if (at > now) await config.sleep(at - now);
+  }
+
+  release(): void {
+    const next = this.waiting.shift();
+    if (next) next();
+    else this.active--;
+  }
+}
+
+const limiters = new Map<string, Limiter>();
+type DayCount = { day: string; count: number };
+const counts = new Map<string, DayCount | Promise<DayCount>>();
+
+function limiterFor(key: string): Limiter {
+  let l = limiters.get(key);
+  if (!l) limiters.set(key, (l = new Limiter()));
+  return l;
+}
+
+/** Count one request against today's limit, or refuse it before it is made. */
+async function countRequest(key: string, userId: string | undefined): Promise<void> {
+  const day = moodleDay(config.now());
+  const store = userId ? config.countStore : null;
+  let entry: DayCount | undefined;
+  while (!entry) {
+    const known = counts.get(key);
+    if (known instanceof Promise) {
+      // Someone else is loading; take their answer, then read the map again.
+      const loaded = await known;
+      if (counts.get(key) === known) counts.set(key, loaded);
+    } else if (known && known.day === day) {
+      entry = known;
+    } else {
+      // Set synchronously, so calls that arrive while it loads share this one load.
+      const loading = (async (): Promise<DayCount> => ({
+        day,
+        count: store && userId ? await store.load(userId, day).catch(() => 0) : 0,
+      }))();
+      counts.set(key, loading);
+      entry = await loading;
+      if (counts.get(key) === loading) counts.set(key, entry);
+    }
+  }
+  if (entry.count >= DAILY_LIMIT) throw new MoodleDown("daily limit", { errorcode: "dailylimit" });
+  entry.count++;
+  // A database hiccup must not stop the call; memory still counts it.
+  if (store && userId) await store.save(userId, day, entry.count).catch(() => {});
+}
+
+/** Seconds or an HTTP date, as milliseconds to wait; null when missing or unreadable. */
+function retryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const v = header.trim();
+  if (/^\d+$/.test(v)) return Number(v) * 1000;
+  const at = Date.parse(v);
+  return Number.isNaN(at) ? null : Math.max(0, at - config.now());
+}
+
+/** Send under the user's throttle and daily limit, retrying 429 and 503; `read` turns the answer into a result. */
+async function politely<T>(
+  conn: MoodleConn,
+  url: string,
+  init: RequestInit,
+  options: CallOptions,
+  read: (res: Response) => Promise<T>,
+): Promise<T> {
+  const key = bucket(conn);
+  const limiter = limiterFor(key);
+  for (let attempt = 0; ; attempt++) {
+    await countRequest(key, conn.userId);
+    await limiter.acquire();
+    let wait: number;
+    try {
+      const res = await send(url, init, options);
+      if (res.status !== 429 && res.status !== 503) return await read(res);
+      await res.body?.cancel().catch(() => {});
+      const why = { errorcode: `http_${res.status}`, status: res.status };
+      if (attempt >= MAX_RETRIES) {
+        throw new MoodleDown(`Moodle answered HTTP ${res.status} ${attempt + 1} times`, why);
+      }
+      wait = retryAfterMs(res.headers.get("retry-after")) ?? BACKOFF_MS[attempt];
+      if (wait > MAX_RETRY_AFTER_MS) {
+        throw new MoodleDown(`Moodle asked us to wait ${Math.round(wait / 1000)} s`, why);
+      }
+    } finally {
+      limiter.release();
+    }
+    await config.sleep(wait);
+  }
 }
 
 async function send(url: string, init: RequestInit, options: CallOptions): Promise<Response> {
