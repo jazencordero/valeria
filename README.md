@@ -2,6 +2,8 @@
 
 Know if you'll be ready. Start studying in 10 seconds.
 
+Ready connects to a student's MyCourses (Moodle), shows her assignments in the order to do them, and hands one in with her tap. To run it with no accounts: `KEY_SEAL_SECRET=$(openssl rand -base64 32) MOODLE_FAKE=1 npm run dev` uses the built-in test database (PGlite in `.data/`) and a fake Moodle; connect with the key `demo-key`.
+
 Live: https://valeria-theta.vercel.app
 
 ## Set up on your Mac (once)
