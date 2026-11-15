@@ -7,7 +7,8 @@
     "q": "What does a 3-period moving average forecast for next period?",
     "a": "The mean of the last three observed values.",
     "source": "Lecture 1, slide 4",
-    "first": true
+    "first": true,
+    "core": true
   },
   {
     "id": "tf-2",

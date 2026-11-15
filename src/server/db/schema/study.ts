@@ -1,5 +1,6 @@
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -33,6 +34,12 @@ export const exams = pgTable(
     kind: text("kind", { enum: EXAM_KINDS }).notNull().default("exam"),
     at: tstz("at").notNull(),
     targetPct: integer("target_pct").notNull().default(80),
+    /** A hand-made bundle's `prerequisites`, `threads` and `studyOrder`, as given (M3-53). */
+    studyMap: jsonb("study_map"),
+    /** Helsinki day (`YYYY-MM-DD`) from which sessions may introduce new cards; null = now. */
+    startNewOn: date("start_new_on"),
+    /** The grade she aims for, as the bundle gave it (M3-53). */
+    gradeTarget: jsonb("grade_target"),
   },
   (t) => [
     index("exams_user_id_idx").on(t.userId),
@@ -51,6 +58,8 @@ export const concepts = pgTable(
       .notNull()
       .references(() => exams.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /** The concept's stable name in a hand-made bundle (M3-53); null for other concepts. */
+    slug: text("slug"),
     lecture: text("lecture"),
     position: integer("position").notNull().default(0),
     weight: numeric("weight", { mode: "number" }).notNull().default(1),
@@ -80,14 +89,38 @@ export const cards = pgTable(
     origin: text("origin", { enum: CARD_ORIGINS }).notNull(),
     status: text("status", { enum: CARD_STATUSES }).notNull().default("active"),
     contentHash: text("content_hash").notNull(),
+    /** The card's stable id in a hand-made bundle (M3-53); null for other cards. */
+    importId: text("import_id"),
   },
   (t) => [
     index("cards_user_id_idx").on(t.userId),
     index("cards_exam_id_idx").on(t.examId),
     unique("cards_user_content_hash_key").on(t.userId, t.contentHash),
+    unique("cards_user_exam_import_id_key").on(t.userId, t.examId, t.importId),
     oneOf("cards_type_check", t.type, CARD_TYPES),
     oneOf("cards_origin_check", t.origin, CARD_ORIGINS),
     oneOf("cards_status_check", t.status, CARD_STATUSES),
+  ],
+);
+
+/** Markdown documents about one exam (a study plan, exam essentials), from a hand-made bundle (M3-53). */
+export const examDocuments = pgTable(
+  "exam_documents",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    userId: userId(),
+    examId: uuid("exam_id")
+      .notNull()
+      .references(() => exams.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    bodyMd: text("body_md").notNull(),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [
+    index("exam_documents_user_id_idx").on(t.userId),
+    unique("exam_documents_exam_slug_key").on(t.examId, t.slug),
   ],
 );
 

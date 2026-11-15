@@ -324,3 +324,77 @@ describe("a seeded deck (M3-52)", () => {
     expect(bite!.cards.map((c) => (c.body as { q: string }).q)).toEqual(["Intro opens?", "Intro 1?", "Intro 2?", "Heavy?"]);
   }, DB_TIMEOUT);
 });
+
+describe("an exam with a study start (M3-53)", () => {
+  // startNewOn is Tuesday 24 Nov 2026; that day starts at 22:00 UTC on the 23rd (Helsinki is UTC+2).
+  const START_DAY = "2026-11-24";
+  const START = new Date("2026-11-23T22:00:00Z").getTime();
+
+  /** An exam as the importer leaves it: every card new, with a state row first due on the start day. */
+  async function seedHeld(): Promise<{ examId: string; cardIds: string[] }> {
+    const [course] = await t.db.insert(courses).values({ userId: her, moodleId: 9, name: "Held" }).returning();
+    const [exam] = await t.db
+      .insert(exams)
+      .values({ userId: her, courseId: course.id, title: "Held final", kind: "exam", at: new Date(NOW.getTime() + 30 * D), startNewOn: START_DAY })
+      .returning();
+    const [concept] = await t.db.insert(concepts).values({ userId: her, examId: exam.id, name: "Held concept", position: 1, weight: 1 }).returning();
+    const { newCard } = await import("@/lib/study/memory");
+    const cardIds: string[] = [];
+    for (let k = 0; k < 6; k++) {
+      const [card] = await t.db
+        .insert(cards)
+        .values({ userId: her, examId: exam.id, type: "basic", rung: 1, body: { q: `Held ${k}?`, a: "A" }, origin: "manual", contentHash: `held-${k}`, importId: `held-${k}` })
+        .returning();
+      await t.db.insert(cardConcepts).values({ cardId: card.id, conceptId: concept.id });
+      await t.db.insert(cardStates).values({ cardId: card.id, fsrs: newCard(new Date(START)), dueAt: new Date(START), lapses: 0 });
+      cardIds.push(card.id);
+    }
+    return { examId: exam.id, cardIds };
+  }
+
+  it("offers no new card before the start day, and does from that day", async () => {
+    const held = await seedHeld();
+
+    // Saturday the 14th: ten days early. No bite, and no other session brings a new card either.
+    const early = await examView(held.examId);
+    expect(early.bite).toBeNull();
+    expect(early.concepts).toHaveLength(1); // the deck is still shown
+    expect(await beginSession(held.examId, "bite")).toBeNull();
+    expect(await beginSession(held.examId, "extra")).toBeNull();
+    expect(await beginSession(held.examId, "tile", "basic")).toBeNull();
+    expect(await beginSession(held.examId, "concept", early.concepts[0].id)).toBeNull();
+
+    // The last minute of the 23rd in Helsinki: still nothing.
+    setNow(START - MIN);
+    expect((await examView(held.examId)).bite).toBeNull();
+    expect(await beginSession(held.examId, "bite")).toBeNull();
+
+    // Midnight: the new cards open.
+    setNow(START);
+    expect((await examView(held.examId)).bite).not.toBeNull();
+    const bite = await beginSession(held.examId, "bite");
+    expect(bite).not.toBeNull();
+    expect(bite!.cards.length).toBeGreaterThanOrEqual(3);
+    expect(bite!.cards.every((c) => held.cardIds.includes(c.id))).toBe(true);
+
+    // Her other exam, which has no start day, was never held back.
+    setNow(NOW.getTime());
+    expect(await beginSession(examId, "bite")).not.toBeNull();
+  }, DB_TIMEOUT);
+
+  it("before the start day a card she has already graded is still reviewed, alone", async () => {
+    const held = await seedHeld();
+    // She met one card early (an extra session on the day the hold was not there yet).
+    await t.db.update(exams).set({ startNewOn: null }).where(eq(exams.id, held.examId));
+    const open = await beginSession(held.examId, "extra");
+    const seen = open!.cards[0].id;
+    setNow(clock + 20_000);
+    await saveProgress(open!.sessionId, [{ cardId: seen, grade: 1, firstTry: true, ms: 20_000, at: new Date(clock) }]);
+    await endSession(open!.sessionId);
+    await t.db.update(exams).set({ startNewOn: START_DAY }).where(eq(exams.id, held.examId));
+
+    setNow(clock + D);
+    const bite = await beginSession(held.examId, "bite");
+    expect(bite!.cards.map((c) => c.id)).toEqual([seen]);
+  }, DB_TIMEOUT);
+});

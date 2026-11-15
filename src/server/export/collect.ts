@@ -28,6 +28,7 @@ import {
   cards,
   cardStates,
   concepts,
+  examDocuments,
   exams,
   reviews,
   studySessions,
@@ -102,6 +103,7 @@ export const EXPORT_PLAN: PlanEntry[] = [
 
   // Study.
   own(exams),
+  own(examDocuments),
   own(concepts),
   own(cards),
   child(cardConcepts, cardConcepts.cardId, cards),

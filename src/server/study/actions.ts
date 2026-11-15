@@ -25,6 +25,14 @@
  *   `core` and `first` come from `cards.body` (true only when stored as true),
  *   so a seeded deck gets the study order in `bite.ts`. Session cards return
  *   the body as stored, so they carry them (and cloze `accept`) too.
+ * - Study start (M3-53). Before the exam's `start_new_on` day (Helsinki,
+ *   `newCardsAllowed` in `./start-date`) no session introduces a card she has
+ *   never graded: every session kind is built from `studyDeck`, the deck
+ *   without its never-graded cards. Cards she has graded are reviewed as
+ *   usual, so before that day a fresh imported exam has no bite at all, and
+ *   from that day it has one. The forecast, the concepts' mastery and the
+ *   "new" count still read the whole deck. The importer also sets a new
+ *   card's first due date to that day (M3-51), which is left as it is.
  * - Days left are whole Helsinki calendar days to the exam (`daysBetween`),
  *   as the chart and the phase bar use them.
  * - Forecast: `forecastNow` (raw) and `forecastShown` (rounded). Plan end and
@@ -119,6 +127,7 @@ import {
 import { GRADES, grade as gradeMemory, intervalLabel, newCard, type Grade, type MemoryState } from "@/lib/study/memory";
 import type { SessionMode } from "@/lib/study/session";
 import { DEFAULT_GOAL, freeSkipsLeft, streakLine, weekOf, weeksInARow, type Week } from "@/lib/study/week";
+import { newCardsAllowed } from "./start-date";
 import {
   bitesDoneToday,
   countsToday,
@@ -345,6 +354,8 @@ type ExamState = {
   exam: Exam;
   deck: Deck;
   biteDeck: BiteDeck;
+  /** What sessions are built from: `biteDeck`, without never-graded cards before the study start. */
+  studyDeck: BiteDeck;
   concepts: ConceptView[];
   forecast: number;
 };
@@ -377,6 +388,13 @@ function toBiteDeck(deck: Deck, examAt: Date, now: Date): BiteDeck {
   };
 }
 
+/** The deck sessions may draw from: before the exam's study start, only cards she has graded. */
+function studyDeckOf(exam: Exam, biteDeck: BiteDeck, now: Date): BiteDeck {
+  if (newCardsAllowed(exam, now)) return biteDeck;
+  const graded = (id: string) => (biteDeck.states[id]?.lastReviewAt ?? null) !== null;
+  return { ...biteDeck, cards: biteDeck.cards.filter((c) => graded(c.id)) };
+}
+
 /** Each concept's mastery for the given card memories (missing = never graded). */
 function masteries(deck: BiteDeck, states: Readonly<Record<string, MemoryState>>, examAt: Date): Record<string, number> {
   const out: Record<string, number> = {};
@@ -403,7 +421,7 @@ async function examState(userId: string, examId: string, now: Date, database: Db
     const rung = rungOf(m);
     return { id: c.id, name: c.name, lecture: c.lecture, icon: c.icon, weight: c.weight, mastery: m, rung, rungName: rungName(rung) };
   });
-  return { exam, deck, biteDeck, concepts, forecast: forecastOf(deck, mastery) };
+  return { exam, deck, biteDeck, studyDeck: studyDeckOf(exam, biteDeck, now), concepts, forecast: forecastOf(deck, mastery) };
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -453,7 +471,7 @@ async function studyWeek(userId: string, now: Date, database: Db): Promise<Study
 }
 
 function todayBite(state: ExamState, done: number): Bite | null {
-  return buildBite({ ...state.biteDeck, kind: state.exam.kind, bitesDoneToday: done });
+  return buildBite({ ...state.studyDeck, kind: state.exam.kind, bitesDoneToday: done });
 }
 
 const sizeOf = (b: Bite) => b.sections.reduce((n, [, ids]) => n + ids.length, 0);
@@ -526,7 +544,7 @@ async function begin(
 ): Promise<BegunSession | null> {
   if (!(SESSION_MODES as readonly string[]).includes(kind)) throw new Error(`beginSession: unknown kind ${String(kind)}`);
   const state = await examState(userId, examId, now, database);
-  const { biteDeck } = state;
+  const biteDeck = state.studyDeck;
 
   let bite: Bite | null;
   if (kind === "bite") {

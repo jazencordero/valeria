@@ -38,5 +38,9 @@
       "page": "page-1.json"
     }
   ],
-  "startNewOn": "2026-11-24"
+  "startNewOn": "2026-11-24",
+  "map": "map.json",
+  "documents": [
+    "study-plan.md"
+  ]
 }

@@ -1,5 +1,5 @@
 /**
- * Import a hand-made study bundle into one user's account (ticket M3-51).
+ * Import a hand-made study bundle into one user's account (tickets M3-51 and M3-53).
  *
  *   const bundle = await loadBundle(root, { courses: ["TST-E0001"] }); // read + validate, no db
  *   const plans = bundle.courses.map(planImport);                    // pure
@@ -10,37 +10,52 @@
  * folder holds:
  * - `seed.json`: `{ exam: {courseCode, title, kind, at, targetPct | gradeTarget, startNewOn?},
  *   concepts: [{slug, name, lecture, position, weight}], lectures: [{n, title, file, deck, page}],
- *   map?, startNewOn? }`. Weights are renormalised to sum to 1. `gradeTarget` 1..5 becomes
- *   `target_pct` with the M3-13 scale (`targetPctForGrade`).
+ *   map?, startNewOn?, documents? }`. Weights are renormalised to sum to 1. `gradeTarget` 1..5
+ *   becomes `target_pct` with the M3-13 scale (`targetPctForGrade`) and is kept as given in
+ *   `exams.grade_target`. A seed without `exam.at` (no exam date yet) or with `studyOnly: true`
+ *   (cards without an exam; `cards.exam_id` is NOT NULL) is refused: nothing is imported.
  * - one deck file per lecture: an array of cards in the M3-49 format (`parseCard`); `concept` /
- *   `concepts` hold slugs from seed.json. An optional `id` is the card's stable id.
+ *   `concepts` hold slugs from seed.json. An optional `id` is the card's stable id. `core`,
+ *   `first` and cloze `accept` are part of the format; `beyondSlides`, `basis`, `quote` and
+ *   `fromFigure` are copied into `cards.body` as given. Other unknown fields are dropped.
  * - one page per lecture in the M9-05 shape stored in `lecture_content`.
  * - optional `map.json` (named by `seed.map`): `prerequisites` (slug -> slugs), `threads`,
  *   `studyOrder` (lecture groups, then e.g. "Exam essentials").
- * - optional `exam/`: exam documents, validated and counted (there is no table for them).
+ * - optional `exam/`: exam documents. Every Markdown file becomes an `exam_documents` row: slug
+ *   from its path under `exam/`, title from its first heading (else the file name), position
+ *   from `seed.documents` (a list of file names) and then file-name order. Other files (pdf,
+ *   json, text) are validated and counted, not imported.
  * The root may hold `account.json`: `{ courses: { <code>: { aiAllowed, scope } } }`.
  *
  * Matching rules (so a second run changes nothing):
  * - Course: one of the user's courses whose `code` equals `courseCode` (trimmed, any case).
  *   Never created: `courses.moodle_id` is NOT NULL, so sync Moodle first. Several matches
  *   (an old and a new instance of a retake) is an error unless `courseId` picks one.
- * - Exam: same course + same title. An existing one is left as it is (a difference is a note).
- * - Concepts: same exam + same name (the schema has no slug column; slug -> id lives in memory).
- *   An existing concept gets the bundle's position, weight and lecture when they differ (updated).
+ * - Exam: same course + same title. An existing one keeps its date, kind and target (a
+ *   difference is a problem line); its `study_map` (the map's prerequisites, threads and
+ *   studyOrder), `start_new_on` and `grade_target` are set to the bundle's when the bundle gives
+ *   them and they differ (updated). A value the bundle does not give is left as it is.
+ * - Concepts: same exam + same `slug`, else same name with no slug yet (a concept imported
+ *   before M3-53 gets its slug filled). An existing concept gets the bundle's name, position,
+ *   weight and lecture when they differ (updated).
  * - Concept position: the order in `map.studyOrder` when there is one, else the seed's.
  * - Lectures: same course + same `n`. An existing lecture keeps its title and file.
  * - Page: `source_hash` = sha256 of the page's canonical JSON. Same: skipped. Different: replaced.
  * - Lecture concepts: each concept whose `lecture` is one of the bundle's lectures is linked.
- * - Cards, in this order: (1) a card with the same stable `id` in this exam is the same card;
- *   same `content_hash` -> skipped, edited -> updated in place (memory kept, links replaced);
- *   (2) else the same `content_hash` anywhere in her account (the schema's unique key) ->
- *   skipped; (3) else created with `origin 'manual'`, `card_concepts` links and a fresh
- *   `card_states` row due at max(now, `startNewOn` 00:00 Helsinki). The stable id is kept in
- *   `body.importId`: the schema has no column for it.
+ * - Cards, in this order: (1) a card with the same stable `id` in this exam is the same card.
+ *   The id is `cards.import_id`, or `body.importId` for a card imported before M3-53. Nothing
+ *   differs -> skipped; anything differs (text, core/first/accept, the extra fields, a missing
+ *   `import_id`) -> updated in place: memory (`card_states`) kept, links replaced, and
+ *   `body.importId` gone; (2) else the same `content_hash` anywhere in her account (the schema's
+ *   unique key) -> skipped; (3) else created with `origin 'manual'`, `import_id`,
+ *   `card_concepts` links and a fresh `card_states` row due at max(now, `startNewOn` 00:00
+ *   Helsinki). Sessions hold new cards back until that day (`./start-date`).
+ * - Exam documents: same exam + same slug. Same title, text and position -> skipped; else
+ *   updated. A document no longer in the bundle is left.
  * - AI policy: account.json `aiAllowed` true/false -> `courses.ai_policy` allowed/not_allowed.
  *
  * Problems (a card skipped, and why) name the file and the card's position, never its text.
- * Notes say what the bundle holds that the schema or M3-49 cannot store. Writes are batched;
+ * Notes say what the bundle holds that is not stored, and how some things were read. Writes are batched;
  * `applyImport` runs in one transaction (a savepoint when called inside one), and `dryRun`
  * does every write and then rolls back.
  */
@@ -54,7 +69,7 @@ import { newCard } from "@/lib/study/memory";
 import type { Db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { lectureConcepts, lectureContent, lectures } from "@/server/db/schema/learn";
-import { cardConcepts, cards, cardStates, concepts, EXAM_KINDS, exams } from "@/server/db/schema/study";
+import { cardConcepts, cards, cardStates, concepts, EXAM_KINDS, examDocuments, exams } from "@/server/db/schema/study";
 import { helsinkiToInstant, targetPctForGrade, type TargetGrade } from "@/server/study/exams";
 
 // ---------------------------------------------------------------------------
@@ -75,6 +90,12 @@ const day = (what: string) =>
     .regex(/^\d{4}-\d{2}-\d{2}$/, { error: `${what} must be a date, YYYY-MM-DD.` })
     .refine((d) => helsinkiToInstant(d, "00:00") !== null, { error: `${what} is not a real date.` });
 
+/** A seed whose exam has no date yet (`at: null`, often with `atIsPlaceholderTime`). */
+export const NO_EXAM_DATE = "exam.at is missing: this bundle has no exam date yet. Get the date first; nothing was imported.";
+/** A seed with `studyOnly: true`: lectures, pages and cards, no exam. */
+export const STUDY_ONLY =
+  "study-only bundles need cards without an exam, which the schema does not allow yet; nothing was imported";
+
 export const SeedSchema = z
   .object({
     exam: z.object({
@@ -82,7 +103,10 @@ export const SeedSchema = z
       title: nonEmpty("exam.title"),
       kind: z.enum(EXAM_KINDS, { error: `exam.kind must be one of ${EXAM_KINDS.join(", ")}.` }),
       at: z
-        .string({ error: "exam.at must be an ISO date and time." })
+        .string({
+          error: (iss) =>
+            iss.input === undefined || iss.input === null ? NO_EXAM_DATE : "exam.at must be an ISO date and time.",
+        })
         .refine((s) => !Number.isNaN(Date.parse(s)), { error: "exam.at must be an ISO date and time." }),
       targetPct: z.number().int().min(0).max(100).optional(),
       gradeTarget: z
@@ -95,6 +119,8 @@ export const SeedSchema = z
     }),
     startNewOn: day("startNewOn").optional(),
     map: fileName("The map").optional(),
+    /** Markdown files of `exam/` in the order to show them (with or without the `exam/` prefix). */
+    documents: z.array(fileName("Each document")).optional(),
     concepts: z
       .array(
         z.object({
@@ -160,7 +186,7 @@ export const PageSchema = z.object({
 export type Page = z.infer<typeof PageSchema>;
 
 const slugList = z.array(nonEmpty("Each concept slug"));
-const StudyGroup = z.object({
+const StudyGroup = z.looseObject({
   lecture: z.union([z.number().int(), z.string()]).optional(),
   name: z.string().optional(),
   title: z.string().optional(),
@@ -206,7 +232,8 @@ export type Account = z.infer<typeof AccountSchema>;
 
 export type BundleDeck = { lecture: number; file: string; cards: unknown[] };
 export type BundlePage = { lecture: number; file: string; page: Page };
-export type ExamDoc = { file: string; kind: "pdf" | "json" | "text"; bytes: number };
+/** `text` is set for a Markdown file: its content, to be stored in `exam_documents`. */
+export type ExamDoc = { file: string; kind: "pdf" | "json" | "text"; bytes: number; text?: string };
 
 /** One course of a bundle. `dir` is its folder; file names in problems are relative to it. */
 export type CourseBundle = {
@@ -301,7 +328,7 @@ async function loadExamDocs(dir: string): Promise<Pick<CourseBundle, "examDocs" 
       const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
       if (text.includes("�")) examDocProblems.push({ file, reason: "is not valid UTF-8 text." });
       else if (text.trim() === "") examDocProblems.push({ file, reason: "is empty." });
-      else examDocs.push({ file, kind: "text", bytes: bytes.length });
+      else examDocs.push({ file, kind: "text", bytes: bytes.length, ...(ext === ".md" ? { text } : {}) });
     } else {
       examDocProblems.push({ file, reason: `has a type the importer does not know (${ext || "no extension"}).` });
     }
@@ -401,10 +428,17 @@ export async function loadBundle(root: string, options: { courses?: string[] } =
     const raw = await readJson(place.dir, "seed.json", problems, seedLabel);
     if (raw === undefined) continue;
     // Filter on the code before validating, so a course that is not ready is never checked.
-    const looseCode = (raw as { exam?: { courseCode?: unknown } })?.exam?.courseCode;
-    const code = typeof looseCode === "string" ? normCode(looseCode) : null;
+    const loose = (isRecord(raw) ? raw : {}) as { exam?: { courseCode?: unknown }; courseCode?: unknown; studyOnly?: unknown };
+    const studyOnly = loose.studyOnly === true;
+    // A study-only seed has no exam to carry the code: take a top-level one, else the folder's name.
+    const looseCode = loose.exam?.courseCode ?? (studyOnly ? (loose.courseCode ?? place.label) : undefined);
+    const code = typeof looseCode === "string" && looseCode.trim() !== "" ? normCode(looseCode) : null;
     if (code) codesSeen.push(code);
     if (wanted && (!code || !wanted.has(code))) continue;
+    if (studyOnly) {
+      problems.push(`${seedLabel}: ${STUDY_ONLY}.`);
+      continue;
+    }
     const parsed = SeedSchema.safeParse(raw);
     if (!parsed.success) {
       problems.push(...issues(seedLabel, parsed.error));
@@ -461,19 +495,40 @@ export type PlannedCard = {
   importId: string | null;
   /** Concept slugs, primary first (all known to the seed). */
   conceptSlugs: string[];
+  /** The `EXTRA_CARD_FIELDS` the card carries, as given; they go into `cards.body`. */
+  extras: Record<string, unknown>;
 };
 
+/** One Markdown file of `exam/`, as it will be stored in `exam_documents`. */
+export type PlannedDocument = { file: string; slug: string; title: string; bodyMd: string; position: number };
+
+/** What `exams.study_map` holds: the three parts of map.json, as given. */
+export type StoredStudyMap = Pick<StudyMap, "prerequisites" | "threads" | "studyOrder">;
+
 export type ImportPlan = {
-  exam: { courseCode: string; title: string; kind: (typeof EXAM_KINDS)[number]; at: Date; targetPct: number };
+  exam: {
+    courseCode: string;
+    title: string;
+    kind: (typeof EXAM_KINDS)[number];
+    at: Date;
+    targetPct: number;
+    /** `exams.study_map`, or null when the bundle has no map. */
+    studyMap: StoredStudyMap | null;
+    /** `exams.start_new_on` (`YYYY-MM-DD`, a Helsinki day), or null when the bundle gives none. */
+    startNewOn: string | null;
+    /** `exams.grade_target`, as the seed gave it, or null. */
+    gradeTarget: number | null;
+  };
   concepts: PlannedConcept[];
   lectures: PlannedLecture[];
   cards: PlannedCard[];
+  documents: PlannedDocument[];
   /** New cards are not due before this instant (startNewOn, 00:00 Helsinki), or null. */
   startNewAt: Date | null;
   /** account.json for this course: the AI policy to write, or null to leave it. */
   aiPolicy: "allowed" | "not_allowed" | null;
   problems: ImportProblem[];
-  /** What the bundle holds that the schema or the M3-49 card format cannot store. */
+  /** What the bundle holds that is not stored, and how some things were read. */
   notes: string[];
 };
 
@@ -483,15 +538,29 @@ export function pageHash(page: Page): string {
 }
 
 /**
- * Card fields M3-49 has no place for; `parseCard` drops them. Counted and reported, never a failure.
- * `accept`, `first` and `core` are kept since M3-52 (they land in cards.body).
+ * Card fields the M3-49 format has no place for: `parseCard` drops them, so the importer copies
+ * them into `cards.body` as given (M3-53). They are never checked, so they never fail a card.
+ * `accept`, `first` and `core` are part of the format since M3-52 and land in the body too.
+ * (This list was `UNSTORED_CARD_FIELDS` in M3-51; nothing a card carries is left unstored now
+ * except fields nobody named.)
  */
-const UNSTORED_CARD_FIELDS = [
-  ["beyondSlides", "says the card goes beyond the slides"],
-  ["basis", "what the card is based on"],
-  ["quote", "a quote from the slides"],
-  ["fromFigure", "the figure the card comes from"],
-] as const;
+export const EXTRA_CARD_FIELDS = ["beyondSlides", "basis", "quote", "fromFigure"] as const;
+
+/** A document's slug: its path under `exam/` without the extension, lower case, dashes. */
+function documentSlug(file: string): string {
+  return file
+    .replace(/^exam\//, "")
+    .replace(/\.md$/i, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** A document's title: its first Markdown heading, else its file name without the extension. */
+function documentTitle(file: string, text: string): string {
+  const heading = /^[ \t]{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/m.exec(text);
+  return heading?.[1].trim() || path.basename(file).replace(/\.md$/i, "");
+}
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -542,12 +611,7 @@ export function planImport(course: CourseBundle): ImportPlan {
         `studyOrder sets the position of ${plural(ordered.filter((s) => slugs.has(s)).length, "concept")}` +
           (missing ? `; ${plural(missing, "concept")} not in it come after, in seed order.` : "."),
       );
-      const groups = map.studyOrder.filter((g) => typeof g !== "string").length;
-      if (groups) notes.push(`studyOrder groups (${plural(groups, "group")}, such as "Exam essentials") are not stored: no column for a study group.`);
     }
-    const prereqs = Object.values(map.prerequisites).reduce((s, l) => s + l.length, 0);
-    if (prereqs) notes.push(`prerequisites (${plural(prereqs, "link")}) are not stored: no table for concept prerequisites.`);
-    if (threadLists.length) notes.push(`threads (${plural(threadLists.length, "thread")}) are not stored: no table for threads.`);
   }
 
   const pageOf = new Map(course.pages.map((p) => [p.lecture, p.page]));
@@ -560,14 +624,11 @@ export function planImport(course: CourseBundle): ImportPlan {
   const plannedCards: PlannedCard[] = [];
   const seenHash = new Map<string, string>(); // hash -> "deck-1.json card 3"
   const seenId = new Map<string, string>();
-  const unstored = new Map<string, number>();
   const firstPerConcept = new Map<string, number>();
   for (const deck of course.decks) {
     deck.cards.forEach((raw, i) => {
       const where = { file: deck.file, lecture: deck.lecture, index: i + 1 };
       const label = `${deck.file} card ${i + 1}`;
-      if (isRecord(raw)) for (const [field] of UNSTORED_CARD_FIELDS) if (field in raw) unstored.set(field, (unstored.get(field) ?? 0) + 1);
-
       const parsed = parseCard(raw);
       if (!parsed.ok) {
         problems.push({ ...where, reason: parsed.problems.join(" ") });
@@ -605,27 +666,22 @@ export function planImport(course: CourseBundle): ImportPlan {
       if ((raw as Record<string, unknown>).first === true) {
         firstPerConcept.set(card.concepts[0], (firstPerConcept.get(card.concepts[0]) ?? 0) + 1);
       }
-      plannedCards.push({ ...where, card, hash, importId, conceptSlugs: card.concepts });
+      const extras: Record<string, unknown> = {};
+      for (const field of EXTRA_CARD_FIELDS) {
+        const value = (raw as Record<string, unknown>)[field];
+        if (value !== undefined && value !== null) extras[field] = value;
+      }
+      plannedCards.push({ ...where, card, hash, importId, conceptSlugs: card.concepts, extras });
     });
-  }
-  for (const [field, why] of UNSTORED_CARD_FIELDS) {
-    const n = unstored.get(field);
-    if (n) notes.push(`"${field}" on ${plural(n, "card")} is not stored (${why}): the M3-49 card format has no field for it.`);
   }
   const manyFirsts = [...firstPerConcept].filter(([, n]) => n > 1).map(([s]) => s);
   if (manyFirsts.length) notes.push(`More than one "first" card for ${manyFirsts.map((s) => `"${s}"`).join(", ")}.`);
-  if (plannedCards.some((c) => c.importId)) {
-    notes.push("Card ids are kept in cards.body.importId and used to match on re-import: the schema has no column for them.");
-  }
 
   // Exam target, study start, AI policy, exam documents.
   const { exam } = seed;
   const targetPct = exam.targetPct ?? (exam.gradeTarget ? targetPctForGrade(exam.gradeTarget as TargetGrade) : 80);
   const startDay = seed.startNewOn ?? exam.startNewOn ?? map?.startNewOn ?? null;
   const startNewAt = startDay ? helsinkiToInstant(startDay, "00:00") : null;
-  if (startDay) {
-    notes.push(`startNewOn ${startDay}: new cards are due from then; there is no course or exam column for a study start, so cards added later are not held back.`);
-  }
 
   let aiPolicy: ImportPlan["aiPolicy"] = null;
   if (course.account) {
@@ -636,24 +692,52 @@ export function planImport(course: CourseBundle): ImportPlan {
     if (course.account.other.length) notes.push(`account.json fields ${course.account.other.join(", ")} are not stored.`);
   }
 
-  if (course.examDocs.length || course.examDocProblems.length) {
+  // Exam documents: every Markdown file of exam/ is stored; the rest is counted.
+  const markdown = course.examDocs.filter((d) => d.text !== undefined);
+  const listed = (seed.documents ?? []).map((f) => (f.startsWith("exam/") ? f : `exam/${f}`));
+  for (const f of listed) {
+    if (!markdown.some((d) => d.file === f)) problems.push({ file: "seed.json", reason: `documents names ${f}, which is not a Markdown file in exam/.` });
+  }
+  const rank = (file: string) => (listed.includes(file) ? listed.indexOf(file) : listed.length);
+  const documents: PlannedDocument[] = [];
+  const slugOwner = new Map<string, string>();
+  // `examDocs` is in file-name order and the sort is stable, so unlisted files keep that order.
+  for (const d of [...markdown].sort((a, b) => rank(a.file) - rank(b.file))) {
+    const slug = documentSlug(d.file);
+    const owner = slugOwner.get(slug);
+    if (slug === "" || owner) {
+      problems.push({ file: d.file, reason: slug === "" ? "has no usable name; skipped." : `has the same name as ${owner}; skipped.` });
+      continue;
+    }
+    slugOwner.set(slug, d.file);
+    documents.push({ file: d.file, slug, title: documentTitle(d.file, d.text!), bodyMd: d.text!, position: documents.length + 1 });
+  }
+  const others = course.examDocs.filter((d) => d.text === undefined);
+  if (others.length) {
     const kinds = ["pdf", "json", "text"]
-      .map((k) => [k, course.examDocs.filter((d) => d.kind === k).length] as const)
+      .map((k) => [k, others.filter((d) => d.kind === k).length] as const)
       .filter(([, n]) => n)
       .map(([k, n]) => `${n} ${k}`)
       .join(", ");
-    notes.push(
-      `exam/ holds ${plural(course.examDocs.length, "valid document")}${kinds ? ` (${kinds})` : ""}, not imported: ` +
-        "no table holds exam documents (course_files needs a Moodle ref and url; notes are her own writing).",
-    );
-    for (const p of course.examDocProblems) problems.push({ file: p.file, reason: p.reason });
+    notes.push(`exam/ holds ${plural(others.length, "valid file")} that is not Markdown (${kinds}), not imported: exam_documents holds Markdown only.`);
   }
+  for (const p of course.examDocProblems) problems.push({ file: p.file, reason: p.reason });
 
   return {
-    exam: { courseCode: exam.courseCode, title: exam.title, kind: exam.kind, at: new Date(exam.at), targetPct },
+    exam: {
+      courseCode: exam.courseCode,
+      title: exam.title,
+      kind: exam.kind,
+      at: new Date(exam.at),
+      targetPct,
+      studyMap: map ? { prerequisites: map.prerequisites, threads: map.threads, studyOrder: map.studyOrder } : null,
+      startNewOn: startDay,
+      gradeTarget: exam.gradeTarget ?? null,
+    },
     concepts: plannedConcepts,
     lectures: plannedLectures,
     cards: plannedCards,
+    documents,
     startNewAt,
     aiPolicy,
     problems,
@@ -673,6 +757,7 @@ export type ImportCounts = {
   pages: Count;
   lectureConcepts: Count;
   cards: Count;
+  documents: Count;
   aiPolicy: Count;
 };
 
@@ -710,11 +795,14 @@ function chunks<T>(list: T[], size = CHUNK): T[][] {
   return out;
 }
 
-/** The card's own fields (the prototype's CARD_DATA body) plus its stable id; shared fields have columns. */
+/**
+ * The card's own fields (the prototype's CARD_DATA body, with core/first/accept) plus the extra
+ * fields it carries; shared fields and the stable id have columns.
+ */
 function cardBody(p: PlannedCard): Record<string, unknown> {
   const { type: _type, concepts: _concepts, rung: _rung, boss: _boss, why: _why, source: _source, ...body } = p.card;
   void [_type, _concepts, _rung, _boss, _why, _source];
-  return p.importId ? { ...body, importId: p.importId } : body;
+  return { ...p.extras, ...body };
 }
 
 function cardColumns(p: PlannedCard) {
@@ -726,8 +814,25 @@ function cardColumns(p: PlannedCard) {
     why: p.card.why ?? null,
     source: p.card.source,
     contentHash: p.hash,
+    importId: p.importId,
   };
 }
+
+/** Columns that can differ while the content hash is the same (so a re-import still updates them). */
+function sameCard(row: { type: string; rung: number; boss: boolean; body: unknown; why: string | null; source: string | null; importId: string | null }, p: PlannedCard): boolean {
+  const c = cardColumns(p);
+  return (
+    row.importId === c.importId &&
+    row.type === c.type &&
+    row.rung === c.rung &&
+    row.boss === c.boss &&
+    row.why === c.why &&
+    row.source === c.source &&
+    canonicalJson(row.body) === canonicalJson(c.body)
+  );
+}
+
+const sameJson = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
 
 const sameNumber = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 
@@ -751,6 +856,7 @@ export async function applyImport(
         pages: zero(),
         lectureConcepts: zero(),
         cards: zero(),
+        documents: zero(),
         aiPolicy: zero(),
       };
       const problems: ImportProblem[] = [...plan.problems];
@@ -798,7 +904,15 @@ export async function applyImport(
       let examId: string;
       if (existingExam) {
         examId = existingExam.id;
-        counts.exam.skipped += 1;
+        // The map, the study start and the grade target follow the bundle; the rest is hers.
+        const set: Partial<typeof exams.$inferInsert> = {};
+        if (plan.exam.studyMap && !sameJson(existingExam.studyMap, plan.exam.studyMap)) set.studyMap = plan.exam.studyMap;
+        if (plan.exam.startNewOn && existingExam.startNewOn !== plan.exam.startNewOn) set.startNewOn = plan.exam.startNewOn;
+        if (plan.exam.gradeTarget !== null && !sameJson(existingExam.gradeTarget, plan.exam.gradeTarget)) set.gradeTarget = plan.exam.gradeTarget;
+        if (Object.keys(set).length) {
+          await tx.update(exams).set(set).where(eq(exams.id, examId));
+          counts.exam.updated += 1;
+        } else counts.exam.skipped += 1;
         const differs =
           existingExam.at.getTime() !== plan.exam.at.getTime() ||
           existingExam.kind !== plan.exam.kind ||
@@ -812,33 +926,45 @@ export async function applyImport(
       } else {
         const [row] = await tx
           .insert(exams)
-          .values({ userId, courseId, title, kind: plan.exam.kind, at: plan.exam.at, targetPct: plan.exam.targetPct })
+          .values({
+            userId,
+            courseId,
+            title,
+            kind: plan.exam.kind,
+            at: plan.exam.at,
+            targetPct: plan.exam.targetPct,
+            studyMap: plan.exam.studyMap,
+            startNewOn: plan.exam.startNewOn,
+            gradeTarget: plan.exam.gradeTarget,
+          })
           .returning({ id: exams.id });
         examId = row.id;
         counts.exam.created += 1;
       }
 
-      // Concepts: by exam + name; slug -> id kept in memory.
+      // Concepts: by exam + slug, else by name (a concept from before M3-53 has no slug yet).
       const conceptRows = await tx
-        .select({ id: concepts.id, name: concepts.name, lecture: concepts.lecture, position: concepts.position, weight: concepts.weight })
+        .select({ id: concepts.id, name: concepts.name, slug: concepts.slug, lecture: concepts.lecture, position: concepts.position, weight: concepts.weight })
         .from(concepts)
         .where(and(eq(concepts.userId, userId), eq(concepts.examId, examId)));
-      const conceptByName = new Map(conceptRows.map((c) => [c.name.trim(), c]));
+      const conceptBySlug = new Map(conceptRows.filter((c) => c.slug !== null).map((c) => [c.slug!, c]));
+      const conceptByName = new Map(conceptRows.filter((c) => c.slug === null).map((c) => [c.name.trim(), c]));
       const conceptIdOf = new Map<string, string>();
       const newConcepts: PlannedConcept[] = [];
       for (const c of plan.concepts) {
-        const row = conceptByName.get(c.name.trim());
+        const name = c.name.trim();
+        const row = conceptBySlug.get(c.slug) ?? conceptByName.get(name);
         if (!row) {
           newConcepts.push(c);
           continue;
         }
         conceptIdOf.set(c.slug, row.id);
-        if (row.position === c.position && sameNumber(row.weight, c.weight) && row.lecture === c.lecture) {
+        if (row.slug === c.slug && row.name === name && row.position === c.position && sameNumber(row.weight, c.weight) && row.lecture === c.lecture) {
           counts.concepts.skipped += 1;
         } else {
           await tx
             .update(concepts)
-            .set({ position: c.position, weight: c.weight, lecture: c.lecture })
+            .set({ slug: c.slug, name, position: c.position, weight: c.weight, lecture: c.lecture })
             .where(eq(concepts.id, row.id));
           counts.concepts.updated += 1;
         }
@@ -846,10 +972,9 @@ export async function applyImport(
       for (const part of chunks(newConcepts)) {
         const rows = await tx
           .insert(concepts)
-          .values(part.map((c) => ({ userId, examId, name: c.name.trim(), lecture: c.lecture, position: c.position, weight: c.weight })))
-          .returning({ id: concepts.id, name: concepts.name });
-        const idOf = new Map(rows.map((r) => [r.name, r.id]));
-        for (const c of part) conceptIdOf.set(c.slug, idOf.get(c.name.trim())!);
+          .values(part.map((c) => ({ userId, examId, slug: c.slug, name: c.name.trim(), lecture: c.lecture, position: c.position, weight: c.weight })))
+          .returning({ id: concepts.id, slug: concepts.slug });
+        for (const r of rows) conceptIdOf.set(r.slug!, r.id);
         counts.concepts.created += rows.length;
       }
 
@@ -913,21 +1038,63 @@ export async function applyImport(
         counts.lectureConcepts.skipped += part.length - made.length;
       }
 
-      // Cards: by stable id in this exam, then by content hash in her account.
+      // Exam documents: by exam + slug.
+      const docRows = plan.documents.length
+        ? await tx
+            .select({ id: examDocuments.id, slug: examDocuments.slug, title: examDocuments.title, bodyMd: examDocuments.bodyMd, position: examDocuments.position })
+            .from(examDocuments)
+            .where(and(eq(examDocuments.userId, userId), eq(examDocuments.examId, examId)))
+        : [];
+      const docOf = new Map(docRows.map((d) => [d.slug, d]));
+      const newDocs = [];
+      for (const d of plan.documents) {
+        const values = { slug: d.slug, title: d.title, bodyMd: d.bodyMd, position: d.position };
+        const row = docOf.get(d.slug);
+        if (!row) newDocs.push({ userId, examId, ...values });
+        else if (row.title === d.title && row.bodyMd === d.bodyMd && row.position === d.position) counts.documents.skipped += 1;
+        else {
+          await tx.update(examDocuments).set(values).where(eq(examDocuments.id, row.id));
+          counts.documents.updated += 1;
+        }
+      }
+      if (newDocs.length) {
+        await tx.insert(examDocuments).values(newDocs);
+        counts.documents.created += newDocs.length;
+      }
+
+      // Cards: by stable id in this exam (the column, or body.importId from before M3-53),
+      // then by content hash in her account.
       const existing = await tx
-        .select({ id: cards.id, examId: cards.examId, hash: cards.contentHash, importId: sql<string | null>`${cards.body}->>'importId'` })
+        .select({
+          id: cards.id,
+          examId: cards.examId,
+          hash: cards.contentHash,
+          importId: cards.importId,
+          bodyImportId: sql<string | null>`${cards.body}->>'importId'`,
+          type: cards.type,
+          rung: cards.rung,
+          boss: cards.boss,
+          body: cards.body,
+          why: cards.why,
+          source: cards.source,
+        })
         .from(cards)
         .where(eq(cards.userId, userId));
       const byHash = new Map(existing.map((c) => [c.hash, c.id]));
-      const byImportId = new Map(existing.filter((c) => c.importId && c.examId === examId).map((c) => [c.importId!, c]));
+      const byImportId = new Map<string, (typeof existing)[number]>();
+      // The column wins over the old body field when both name the same id.
+      for (const c of existing) if (c.examId === examId && c.importId === null && c.bodyImportId) byImportId.set(c.bodyImportId, c);
+      for (const c of existing) if (c.examId === examId && c.importId !== null) byImportId.set(c.importId, c);
 
       const toInsert: PlannedCard[] = [];
       const toUpdate: { id: string; p: PlannedCard }[] = [];
       for (const p of plan.cards) {
         const same = p.importId ? byImportId.get(p.importId) : undefined;
         if (same) {
-          if (same.hash === p.hash) counts.cards.skipped += 1;
-          else if (byHash.has(p.hash)) {
+          if (same.hash === p.hash) {
+            if (sameCard(same, p)) counts.cards.skipped += 1;
+            else toUpdate.push({ id: same.id, p });
+          } else if (byHash.has(p.hash)) {
             problems.push({
               file: p.file,
               lecture: p.lecture,

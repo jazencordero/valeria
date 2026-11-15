@@ -14,6 +14,7 @@ import {
   cards,
   cardStates,
   concepts,
+  examDocuments,
   exams,
   reviews,
   studySessions,
@@ -152,6 +153,7 @@ async function seedEverything(userId: string, tag: string) {
     .insert(exams)
     .values({ userId, courseId: course.id, eventId: event.id, title: "Exam", at: now })
     .returning();
+  await db.insert(examDocuments).values({ userId, examId: exam.id, slug: "plan", title: "Plan", bodyMd: "# Plan" });
   const [concept] = await db.insert(concepts).values({ userId, examId: exam.id, name: "Concept" }).returning();
   const [card] = await db
     .insert(cards)

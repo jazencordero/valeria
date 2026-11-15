@@ -140,6 +140,7 @@ async function seedEverything(userId: string, tag: string) {
     .insert(exams)
     .values({ userId, courseId: course.id, eventId: event.id, title: "Exam", at: now })
     .returning();
+  await db.execute(sql`insert into exam_documents (user_id, exam_id, slug, title, body_md) values (${userId}, ${exam.id}, 'plan', 'Plan', '# Plan')`);
   const [concept] = await db.insert(concepts).values({ userId, examId: exam.id, name: "Concept" }).returning();
   const [card] = await db
     .insert(cards)

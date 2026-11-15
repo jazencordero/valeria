@@ -1,0 +1,13 @@
+{
+  "prerequisites": {
+    "error-measures": ["moving-average"],
+    "trend-season": ["moving-average"]
+  },
+  "threads": [
+    { "name": "Accuracy", "concepts": ["moving-average", "error-measures"] }
+  ],
+  "studyOrder": [
+    { "lecture": 1, "concepts": ["trend-season", "moving-average"] },
+    { "name": "Exam essentials", "concepts": ["error-measures"] }
+  ]
+}

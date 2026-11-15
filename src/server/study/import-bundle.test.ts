@@ -9,7 +9,7 @@ import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { courses } from "@/server/db/schema/courses";
 import { lectureConcepts, lectureContent, lectures } from "@/server/db/schema/learn";
 import { moodleConnections } from "@/server/db/schema/moodle";
-import { cardConcepts, cards, cardStates, concepts, exams } from "@/server/db/schema/study";
+import { cardConcepts, cards, cardStates, concepts, examDocuments, exams } from "@/server/db/schema/study";
 import { users } from "@/server/db/schema/users";
 import { parseArgs, run } from "../../../scripts/study/import-bundle";
 import {
@@ -17,7 +17,9 @@ import {
   BundleInvalid,
   ImportFailed,
   loadBundle,
+  NO_EXAM_DATE,
   planImport,
+  STUDY_ONLY,
   type CourseBundle,
   type ImportPlan,
 } from "./import-bundle";
@@ -45,7 +47,7 @@ async function addUserWithCourse(moodleId: number): Promise<[string, string]> {
   return [u.id, c.id];
 }
 
-const TABLES = { courses, exams, concepts, cards, cardConcepts, cardStates, lectures, lectureContent, lectureConcepts };
+const TABLES = { courses, exams, examDocuments, concepts, cards, cardConcepts, cardStates, lectures, lectureContent, lectureConcepts };
 
 async function rowCounts(): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -61,7 +63,7 @@ const write = (file: string, value: unknown) =>
 
 // A multi-course root, built from the fixture at test time:
 //   <root>/account.json
-//   <root>/TST-E0001/{seed.json, deck-1.json, page-1.json, map.json, exam/...}
+//   <root>/TST-E0001/{seed.json, deck-1.json, page-1.json, map.json, exam/...}  (the fixture plus more exam files)
 //   <root>/TST-E0002/seed.json   (not ready: its seed is invalid)
 let root: string;
 const MAP = {
@@ -80,7 +82,7 @@ beforeAll(async () => {
   const seed = JSON.parse(await readFile(path.join(one, "seed.json"), "utf8"));
   await write(path.join(one, "seed.json"), { ...seed, map: "map.json" });
   await write(path.join(one, "map.json"), MAP);
-  await mkdir(path.join(one, "exam"));
+  await mkdir(path.join(one, "exam"), { recursive: true });
   await write(path.join(one, "exam", "past-paper.pdf"), "%PDF-1.4\n% invented\n");
   await write(path.join(one, "exam", "essentials.md"), "# Exam essentials\n\nInvented text.\n");
   await write(path.join(one, "exam", "broken.json"), "{ nope");
@@ -110,7 +112,11 @@ afterEach(async () => {
 describe("planImport (pure)", () => {
   it("renormalises the weights to sum to 1", () => {
     expect(plan.concepts.map((c) => c.weight)).toEqual([0.5, 0.25, 0.25]);
-    expect(plan.concepts.map((c) => c.position)).toEqual([1, 2, 3]);
+    // Seed order is moving-average, trend-season, error-measures; map.studyOrder swaps the first two.
+    expect(plan.concepts.map((c) => c.position)).toEqual([2, 1, 3]);
+    const bare = planImport({ ...course, map: null });
+    expect(bare.concepts.map((c) => c.position)).toEqual([1, 2, 3]);
+    expect(bare.exam.studyMap).toBeNull();
   });
 
   it("keeps the valid cards with their ids and reports the unknown slug and the parseCard failure", () => {
@@ -124,23 +130,39 @@ describe("planImport (pure)", () => {
     expect(JSON.stringify(plan.problems)).not.toContain("smoothing constant"); // never the card's text
   });
 
-  it("drops the fields M3-49 cannot hold, never failing a card for them, and lists them", () => {
-    for (const p of plan.cards) {
-      for (const f of ["id", "beyondSlides", "basis", "quote", "fromFigure"]) expect(p.card).not.toHaveProperty(f);
-    }
+  it("keeps the fields M3-49 has no place for as extras, never failing a card for them", () => {
+    const extrasOf = (id: string) => plan.cards.find((p) => p.importId === id)!.extras;
+    expect(extrasOf("tf-3")).toEqual({ quote: "MAE keeps the units of the series.", fromFigure: "Figure 1.3" });
+    expect(extrasOf("tf-5")).toEqual({ beyondSlides: true, basis: "Lecture 1 summary slide" });
+    expect(extrasOf("tf-1")).toEqual({});
     const notes = plan.notes.join("\n");
-    for (const f of ["beyondSlides", "basis", "quote", "fromFigure"]) expect(notes).toContain(`"${f}" on 1 card`);
-    // Kept since M3-52: accept (the array shorthand of a one-blank cloze) and first.
-    for (const f of ["accept", "first"]) expect(notes).not.toContain(`"${f}" on`);
-    const tf2 = plan.cards.find((p) => p.card.type === "cloze" && "accept" in p.card);
+    for (const f of ["beyondSlides", "basis", "quote", "fromFigure", "accept", "first", "core", "importId"]) expect(notes).not.toContain(f);
+    // Part of the card format since M3-52: accept (the array shorthand of a one-blank cloze), first and core.
+    const tf2 = plan.cards.find((p) => p.importId === "tf-2");
     expect(tf2?.card).toMatchObject({ accept: { seasonality: ["seasonal pattern", "season"] } });
-    expect(notes).toContain("body.importId");
+    expect(plan.cards.find((p) => p.importId === "tf-1")?.card).toMatchObject({ first: true, core: true });
+
+    // An extra field of any shape, and a field nobody named, never fail a card.
+    const odd = planImport({
+      ...course,
+      decks: [{ lecture: 1, file: "d.json", cards: [{ type: "basic", concept: "moving-average", source: "s", q: "Q?", a: "A.", quote: { odd: [1] }, basis: null, mystery: 7 }] }],
+    });
+    expect(odd.problems).toEqual([]);
+    expect(odd.cards[0].extras).toEqual({ quote: { odd: [1] } });
   });
 
   it("turns gradeTarget into target_pct with the M3-13 scale, and startNewOn into Helsinki midnight", () => {
     expect(plan.exam.targetPct).toBe(80);
+    expect(plan.exam.gradeTarget).toBe(4);
+    expect(plan.exam.startNewOn).toBe("2026-11-24");
     expect(plan.startNewAt).toEqual(START);
-    expect(plan.notes.join("\n")).toContain("startNewOn 2026-11-24");
+  });
+
+  it("plans the map and the Markdown document of the sample", () => {
+    expect(plan.exam.studyMap).toEqual(MAP);
+    expect(plan.documents).toHaveLength(1);
+    expect(plan.documents[0]).toMatchObject({ file: "exam/study-plan.md", slug: "study-plan", title: "Study plan for the forecasting exam", position: 1 });
+    expect(plan.documents[0].bodyMd).toContain("## Week 2");
   });
 
   it("reports a repeated card and a repeated id inside the bundle", () => {
@@ -166,15 +188,13 @@ describe("planImport (pure)", () => {
     ]);
   });
 
-  it("takes concept positions from map.studyOrder, checks its slugs and lists what it cannot store", async () => {
+  it("takes concept positions from map.studyOrder, checks its slugs and keeps the map as given", async () => {
     const [mapped] = (await loadBundle(root, { courses: ["tst-e0001"] })).courses;
     const p = planImport(mapped);
     const pos = Object.fromEntries(p.concepts.map((c) => [c.slug, c.position]));
     expect(pos).toEqual({ "trend-season": 1, "moving-average": 2, "error-measures": 3 });
-    const notes = p.notes.join("\n");
-    expect(notes).toContain("prerequisites (2 links) are not stored");
-    expect(notes).toContain("threads (1 thread) are not stored");
-    expect(notes).toContain('studyOrder groups (2 groups, such as "Exam essentials")');
+    expect(p.exam.studyMap).toEqual(MAP);
+    expect(p.notes.join("\n")).not.toContain("are not stored");
 
     const bad = planImport({ ...mapped, map: { ...mapped.map!, prerequisites: { nope: ["moving-average"] } } });
     expect(bad.problems.some((x) => x.file === "map.json" && x.reason.includes('"nope"'))).toBe(true);
@@ -186,8 +206,29 @@ describe("planImport (pure)", () => {
     expect(p.aiPolicy).toBe("not_allowed");
     const notes = p.notes.join("\n");
     expect(notes).toContain('AI scope "assignments" is not stored');
-    expect(notes).toContain("exam/ holds 2 valid documents (1 pdf, 1 text), not imported: no table holds exam documents");
+    expect(notes).toContain("exam/ holds 1 valid file that is not Markdown (1 pdf), not imported");
     expect(p.problems).toContainEqual({ file: "exam/broken.json", reason: "is not valid JSON." });
+    // The seed lists study-plan.md, so it comes first; essentials.md follows in file-name order.
+    expect(p.documents.map((d) => [d.slug, d.title, d.position])).toEqual([
+      ["study-plan", "Study plan for the forecasting exam", 1],
+      ["essentials", "Exam essentials", 2],
+    ]);
+  });
+
+  it("orders documents by file name without a seed list, titles one without a heading by its file name, and reports a bad list or name clash", () => {
+    const doc = (file: string, text: string) => ({ file, kind: "text" as const, bytes: text.length, text });
+    const p = planImport({
+      ...course,
+      seed: { ...course.seed, documents: ["exam/02-plan.md", "missing.md"] },
+      examDocs: [doc("exam/01-rules.md", "No heading here.\n"), doc("exam/02-plan.md", "## Plan ##\n"), doc("exam/02 plan.md", "# Twin\n"), { file: "exam/notes.txt", kind: "text", bytes: 3 }],
+    });
+    expect(p.documents.map((d) => [d.slug, d.title, d.position])).toEqual([
+      ["02-plan", "Plan", 1],
+      ["01-rules", "01-rules", 2],
+    ]);
+    expect(p.problems).toContainEqual({ file: "seed.json", reason: "documents names exam/missing.md, which is not a Markdown file in exam/." });
+    expect(p.problems).toContainEqual({ file: "exam/02 plan.md", reason: "has the same name as exam/02-plan.md; skipped." });
+    expect(p.notes.join("\n")).toContain("1 valid file that is not Markdown (1 text)");
   });
 });
 
@@ -239,6 +280,86 @@ describe("loadBundle", () => {
   });
 });
 
+describe("a bundle that cannot be imported yet", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "bundle-"));
+    await cp(FIXTURE, dir, { recursive: true });
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function dryRun(folder: string, extra: string[] = []) {
+    const before = await rowCounts();
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await run([folder, "--user", her, "--dry-run", ...extra], t.db, { out: (l) => out.push(l), err: (l) => err.push(l) });
+    expect(await rowCounts()).toEqual(before);
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  }
+
+  it(
+    "the dry run refuses an exam with no date yet (at: null, atIsPlaceholderTime: true)",
+    async () => {
+      const seed = JSON.parse(await readFile(path.join(dir, "seed.json"), "utf8"));
+      await write(path.join(dir, "seed.json"), { ...seed, exam: { ...seed.exam, at: null, atIsPlaceholderTime: true } });
+      const err = await loadBundle(dir).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BundleInvalid);
+      expect((err as BundleInvalid).problems).toEqual([`seed.json (at exam.at): ${NO_EXAM_DATE}`]);
+
+      const r = await dryRun(dir);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("exam.at is missing: this bundle has no exam date yet. Get the date first; nothing was imported.");
+      expect(r.out).toBe("");
+
+      // The same when the key is not there at all; a date that is not one keeps its own message.
+      const { at: _at, ...noAt } = seed.exam;
+      void _at;
+      await write(path.join(dir, "seed.json"), { ...seed, exam: noAt });
+      expect(((await loadBundle(dir).catch((e: unknown) => e)) as BundleInvalid).problems).toEqual([`seed.json (at exam.at): ${NO_EXAM_DATE}`]);
+      await write(path.join(dir, "seed.json"), { ...seed, exam: { ...seed.exam, at: "soon" } });
+      expect(((await loadBundle(dir).catch((e: unknown) => e)) as BundleInvalid).problems[0]).toContain("must be an ISO date and time");
+    },
+    T,
+  );
+
+  it(
+    "the dry run refuses a study-only bundle (lectures, pages and cards, no exam): cards.exam_id is required",
+    async () => {
+      // A second invented sample: the fixture's lectures, page and deck, with no exam.
+      const seed = JSON.parse(await readFile(path.join(dir, "seed.json"), "utf8"));
+      const { exam: _exam, ...rest } = seed;
+      void _exam;
+      await write(path.join(dir, "seed.json"), { ...rest, studyOnly: true, courseCode: "TST-E0001" });
+
+      const err = await loadBundle(dir).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BundleInvalid);
+      expect((err as BundleInvalid).problems).toEqual([`seed.json: ${STUDY_ONLY}.`]);
+
+      const r = await dryRun(dir);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("study-only bundles need cards without an exam, which the schema does not allow yet; nothing was imported");
+
+      // In a multi-course root it is found by its folder name, picked or not, and blocks only when picked.
+      const many = await mkdtemp(path.join(os.tmpdir(), "bundle-many-"));
+      try {
+        await cp(FIXTURE, path.join(many, "TST-E0001"), { recursive: true });
+        await cp(dir, path.join(many, "TST-E0003"), { recursive: true });
+        await write(path.join(many, "TST-E0003", "seed.json"), { ...rest, studyOnly: true });
+        expect((await dryRun(many, ["--course", "TST-E0003"])).err).toContain("TST-E0003/seed.json: study-only bundles need cards without an exam");
+        expect((await dryRun(many)).code).toBe(1);
+        const picked = await dryRun(many, ["--course", "TST-E0001"]);
+        expect(picked.code).toBe(0);
+        expect(picked.out).toMatch(/Cards\s+5 created/);
+      } finally {
+        await rm(many, { recursive: true, force: true });
+      }
+    },
+    T,
+  );
+});
+
 describe("applyImport", () => {
   it(
     "first import creates the exam, concepts, lecture, page and cards",
@@ -251,6 +372,7 @@ describe("applyImport", () => {
         pages: { created: 1, skipped: 0, updated: 0 },
         lectureConcepts: { created: 3, skipped: 0, updated: 0 },
         cards: { created: 5, skipped: 0, updated: 0 },
+        documents: { created: 1, skipped: 0, updated: 0 },
         aiPolicy: { created: 0, skipped: 0, updated: 0 },
       });
       expect(result.courseId).toBe(herCourse);
@@ -259,11 +381,20 @@ describe("applyImport", () => {
       expect(examRows).toHaveLength(1);
       expect(examRows[0]).toMatchObject({ courseId: herCourse, title: "Intro to Forecasting final exam", kind: "exam", targetPct: 80 });
       expect(examRows[0].at.toISOString()).toBe("2026-12-10T07:00:00.000Z");
+      // The exam has its map, start date, grade target and one document.
+      expect(examRows[0].studyMap).toEqual(MAP);
+      expect(examRows[0].startNewOn).toBe("2026-11-24");
+      expect(examRows[0].gradeTarget).toBe(4);
+      const docs = await t.db.select().from(examDocuments);
+      expect(docs).toHaveLength(1);
+      expect(docs[0]).toMatchObject({ userId: her, examId: examRows[0].id, slug: "study-plan", title: "Study plan for the forecasting exam", position: 1 });
+      expect(docs[0].bodyMd).toBe(await readFile(path.join(FIXTURE, "exam/study-plan.md"), "utf8"));
 
       const conceptRows = await t.db.select().from(concepts).where(eq(concepts.examId, examRows[0].id));
       expect(conceptRows).toHaveLength(3);
       expect(conceptRows.reduce((s, c) => s + c.weight, 0)).toBeCloseTo(1, 10);
       expect(conceptRows.every((c) => c.lecture === "1" && c.userId === her)).toBe(true);
+      expect(Object.fromEntries(conceptRows.map((c) => [c.slug, c.position]))).toEqual({ "trend-season": 1, "moving-average": 2, "error-measures": 3 });
 
       const lectureRows = await t.db.select().from(lectures).where(eq(lectures.userId, her));
       expect(lectureRows).toMatchObject([{ courseId: herCourse, n: 1, title: "Why forecast at all" }]);
@@ -287,8 +418,18 @@ describe("applyImport", () => {
           ["Noise", "Random variation"],
         ],
         order: [2, 0, 1],
-        importId: "tf-4",
       });
+      expect(match.importId).toBe("tf-4");
+      // A card's accept and first survive the import, and so do core and the extra fields.
+      const bodyOf = (id: string) => cardRows.find((c) => c.importId === id)!.body;
+      expect(bodyOf("tf-2")).toEqual({
+        q: "A pattern that repeats every year at the same time is called {{seasonality}}.",
+        accept: { seasonality: ["seasonal pattern", "season"] },
+      });
+      expect(bodyOf("tf-1")).toMatchObject({ first: true, core: true });
+      expect(bodyOf("tf-3")).toMatchObject({ quote: "MAE keeps the units of the series.", fromFigure: "Figure 1.3" });
+      expect(bodyOf("tf-5")).toMatchObject({ beyondSlides: true, basis: "Lecture 1 summary slide" });
+      expect(cardRows.every((c) => !("importId" in (c.body as object)))).toBe(true);
       // The stored body plus its columns parses back to the same card.
       const back = parseCard({ type: match.type, ...(match.body as object), concepts: ["x"], source: match.source });
       expect(back.ok && contentHash(back.card)).toBe(match.contentHash);
@@ -336,6 +477,7 @@ describe("applyImport", () => {
         pages: { created: 0, skipped: 1, updated: 0 },
         lectureConcepts: { created: 0, skipped: 3, updated: 0 },
         cards: { created: 0, skipped: 5, updated: 0 },
+        documents: { created: 0, skipped: 1, updated: 0 },
         aiPolicy: { created: 0, skipped: 0, updated: 0 },
       });
       expect(await rowCounts()).toEqual(before);
@@ -344,10 +486,106 @@ describe("applyImport", () => {
   );
 
   it(
+    "a re-import of cards first imported with body.importId (M3-51) updates them in place and keeps her memory",
+    async () => {
+      await applyImport(t.db, her, plan, { now: NOW });
+      // Put the account back to how M3-51 left it: the id inside the body, no extras, no slugs,
+      // nothing on the exam, no documents.
+      for (const c of await t.db.select().from(cards).where(eq(cards.userId, her))) {
+        const { quote: _q, fromFigure: _f, beyondSlides: _b, basis: _s, ...body } = c.body as Record<string, unknown>;
+        void [_q, _f, _b, _s];
+        await t.db.update(cards).set({ importId: null, body: { ...body, importId: c.importId } }).where(eq(cards.id, c.id));
+      }
+      await t.db.update(concepts).set({ slug: null }).where(eq(concepts.userId, her));
+      await t.db.update(exams).set({ studyMap: null, startNewOn: null, gradeTarget: null }).where(eq(exams.userId, her));
+      await t.db.delete(examDocuments);
+      // She has studied tf-1 since.
+      const [tf1] = await t.db.select().from(cards).where(sql`${cards.body}->>'importId' = 'tf-1'`);
+      const reviewed = new Date("2026-11-25T09:00:00Z");
+      await t.db
+        .update(cardStates)
+        .set({ fsrs: { marker: "her memory" }, dueAt: new Date("2026-11-28T09:00:00Z"), lapses: 2, lastReviewAt: reviewed })
+        .where(eq(cardStates.cardId, tf1.id));
+      const idsBefore = (await t.db.select({ id: cards.id }).from(cards)).map((r) => r.id).sort();
+      const statesBefore = await t.db.select().from(cardStates).orderBy(cardStates.id);
+      const linksBefore = await t.db.select().from(cardConcepts);
+      const conceptIdsBefore = (await t.db.select({ id: concepts.id }).from(concepts)).map((r) => r.id).sort();
+
+      const again = await applyImport(t.db, her, plan, { now: new Date("2026-11-26T09:00:00Z") });
+      expect(again.counts).toMatchObject({
+        exam: { created: 0, skipped: 0, updated: 1 },
+        concepts: { created: 0, skipped: 0, updated: 3 },
+        cards: { created: 0, skipped: 0, updated: 5 },
+        documents: { created: 1, skipped: 0, updated: 0 },
+      });
+      expect(again.problems).toHaveLength(2); // the same two skipped cards, nothing new
+
+      const rows = await t.db.select().from(cards).where(eq(cards.userId, her));
+      expect(rows.map((r) => r.id).sort()).toEqual(idsBefore);
+      expect(rows.map((r) => r.importId).sort()).toEqual(["tf-1", "tf-2", "tf-3", "tf-4", "tf-5"]);
+      expect(rows.every((r) => !("importId" in (r.body as object)))).toBe(true);
+      expect(rows.find((r) => r.importId === "tf-3")!.body).toMatchObject({ quote: "MAE keeps the units of the series." });
+      // Her memory of every card is the same row with the same content.
+      expect(await t.db.select().from(cardStates).orderBy(cardStates.id)).toEqual(statesBefore);
+      const [state] = await t.db.select().from(cardStates).where(eq(cardStates.cardId, tf1.id));
+      expect(state).toMatchObject({ fsrs: { marker: "her memory" }, lapses: 2, lastReviewAt: reviewed });
+      expect((await t.db.select().from(cardConcepts)).map((l) => [l.cardId, l.conceptId]).sort()).toEqual(
+        linksBefore.map((l) => [l.cardId, l.conceptId]).sort(),
+      );
+      // The concepts are the same rows, now with their slugs; the exam has its map again.
+      const conceptRows = await t.db.select().from(concepts);
+      expect(conceptRows.map((c) => c.id).sort()).toEqual(conceptIdsBefore);
+      expect(conceptRows.map((c) => c.slug).sort()).toEqual(["error-measures", "moving-average", "trend-season"]);
+      const [exam] = await t.db.select().from(exams).where(eq(exams.userId, her));
+      expect(exam).toMatchObject({ studyMap: MAP, startNewOn: "2026-11-24", gradeTarget: 4 });
+
+      const third = await applyImport(t.db, her, plan, { now: NOW });
+      expect(third.counts).toMatchObject({
+        exam: { created: 0, skipped: 1, updated: 0 },
+        concepts: { created: 0, skipped: 3, updated: 0 },
+        cards: { created: 0, skipped: 5, updated: 0 },
+        documents: { created: 0, skipped: 1, updated: 0 },
+      });
+    },
+    T,
+  );
+
+  it(
+    "matches a renamed concept by its slug, updates an edited document, and updates a card whose accept changed",
+    async () => {
+      await applyImport(t.db, her, plan, { now: NOW });
+      const before = await rowCounts();
+      const edited = planImport({
+        ...course,
+        seed: { ...course.seed, concepts: course.seed.concepts.map((c) => (c.slug === "trend-season" ? { ...c, name: "Trend and seasons" } : c)) },
+        examDocs: course.examDocs.map((d) => (d.text ? { ...d, text: `${d.text}\nOne more line.\n` } : d)),
+        decks: course.decks.map((d) => ({
+          ...d,
+          cards: d.cards.map((c) => ((c as { id?: string }).id === "tf-2" ? { ...(c as object), accept: ["seasonal"] } : c)),
+        })),
+      });
+      const result = await applyImport(t.db, her, edited, { now: NOW });
+      expect(result.counts).toMatchObject({
+        concepts: { created: 0, skipped: 2, updated: 1 },
+        documents: { created: 0, skipped: 0, updated: 1 },
+        cards: { created: 0, skipped: 4, updated: 1 },
+      });
+      expect(await rowCounts()).toEqual(before);
+      const [concept] = await t.db.select().from(concepts).where(eq(concepts.slug, "trend-season"));
+      expect(concept.name).toBe("Trend and seasons");
+      const [tf2] = await t.db.select().from(cards).where(eq(cards.importId, "tf-2"));
+      expect((tf2.body as { accept: unknown }).accept).toEqual({ seasonality: ["seasonal"] });
+      const [docRow] = await t.db.select().from(examDocuments);
+      expect(docRow.bodyMd).toContain("One more line.");
+    },
+    T,
+  );
+
+  it(
     "matches an edited card by its stable id: updated in place, memory kept",
     async () => {
       await applyImport(t.db, her, plan, { now: NOW });
-      const [before] = await t.db.select().from(cards).where(sql`${cards.body}->>'importId' = 'tf-1'`);
+      const [before] = await t.db.select().from(cards).where(eq(cards.importId, "tf-1"));
       const [stateBefore] = await t.db.select().from(cardStates).where(eq(cardStates.cardId, before.id));
 
       const edited = planImport({
