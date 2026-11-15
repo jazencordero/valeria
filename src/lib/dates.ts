@@ -132,9 +132,15 @@ export function startOfWeek(date: DateInput): Date {
   return fromLocal(monday.getUTCFullYear(), monday.getUTCMonth() + 1, monday.getUTCDate());
 }
 
-/** Short date for lists: `TUE 17 · 23:59`. */
-export function listDate(due: DateInput): string {
-  return `${weekdayOf(due)} ${localParts(due).day} · ${clock(due)}`;
+/**
+ * Short date for lists: `TUE 17 · 23:59`. With `now`, a date more than six calendar days away
+ * (either way) also names its month, `SAT 5 DEC · 23:59`: a bare weekday and number is only
+ * clear within the week.
+ */
+export function listDate(due: DateInput, now?: DateInput): string {
+  const { day, month } = localParts(due);
+  const far = now !== undefined && Math.abs(daysBetween(now, due)) > 6;
+  return `${weekdayOf(due)} ${day}${far ? ` ${MONTHS[month - 1]}` : ""} · ${clock(due)}`;
 }
 
 /**
@@ -142,16 +148,17 @@ export function listDate(due: DateInput): string {
  * - today: `DUE TODAY 21:00`
  * - tomorrow: `DUE TOMORROW 09:00`
  * - 2 to 6 calendar days ahead: `DUE TUE 23:59` (the weekday is unambiguous)
- * - 7 or more days ahead, or already past: the list style, `TUE 17 · 23:59`
+ * - 7 or more days ahead, or already past: the list style, `TUE 17 · 23:59`, with the month
+ *   when it is more than six days away (`SAT 5 DEC · 23:59`)
  *   (lateness is told by `timeLeft`, not here).
  */
 export function dueLabel(due: DateInput, now: DateInput): string {
-  if (toDate(due).getTime() < toDate(now).getTime()) return listDate(due);
+  if (toDate(due).getTime() < toDate(now).getTime()) return listDate(due, now);
   const days = daysBetween(now, due);
   if (days === 0) return `DUE TODAY ${clock(due)}`;
   if (days === 1) return `DUE TOMORROW ${clock(due)}`;
   if (days < 7) return `DUE ${weekdayOf(due)} ${clock(due)}`;
-  return listDate(due);
+  return listDate(due, now);
 }
 
 /**

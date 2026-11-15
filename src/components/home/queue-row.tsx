@@ -26,6 +26,8 @@ export type QueueRowProps = {
   course: string;
   /** Null when the LMS gives no due date; the date line is then left out. */
   dueAt: DateInput | null;
+  /** The current time: with it, a date more than six days away also shows its month. */
+  now?: DateInput;
   /** Estimated minutes of work. Missing or null hides the estimate. */
   estimateMin?: number | null;
   status: QueueStatus;
@@ -39,6 +41,7 @@ export function QueueRow({
   title,
   course,
   dueAt,
+  now,
   estimateMin,
   status,
   action,
@@ -60,7 +63,7 @@ export function QueueRow({
       <div className="min-w-0">
         <p className="text-[15px] font-medium [overflow-wrap:anywhere]">{title}</p>
         <p className="mt-0.5 text-[13px] text-ink-3">{course}</p>
-        {dueAt != null && <p className="mono mt-0.5 text-ink-3">{listDate(dueAt)}</p>}
+        {dueAt != null && <p className="mono mt-0.5 text-ink-3">{listDate(dueAt, now)}</p>}
       </div>
       <div className="flex flex-col items-end gap-1.5 text-right">
         {hasEstimate && (

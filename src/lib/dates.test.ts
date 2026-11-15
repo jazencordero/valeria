@@ -50,8 +50,8 @@ describe("dueLabel and listDate", () => {
     expect(dueLabel(d("2026-11-17T21:59:00Z"), NOW)).toBe("DUE TUE 23:59");
   });
 
-  it("due 7 or more days ahead uses the list style", () => {
-    expect(dueLabel(d("2026-11-21T10:00:00Z"), NOW)).toBe("SAT 21 · 12:00");
+  it("due 7 or more days ahead uses the list style, with its month", () => {
+    expect(dueLabel(d("2026-11-21T10:00:00Z"), NOW)).toBe("SAT 21 NOV · 12:00");
   });
 
   it("already past uses the list style", () => {
@@ -61,6 +61,16 @@ describe("dueLabel and listDate", () => {
   it("just after midnight counts as tomorrow at 23:59", () => {
     const lateEvening = d("2026-11-14T21:59:00Z"); // 23:59
     expect(dueLabel(d("2026-11-14T22:30:00Z"), lateEvening)).toBe("DUE TOMORROW 00:30");
+  });
+
+  it("names the month when the date is more than six days away, either way", () => {
+    const now = d("2026-11-28T10:00:00Z");
+    expect(listDate(d("2026-12-04T21:59:00Z"), now)).toBe("FRI 4 · 23:59");
+    expect(listDate(d("2026-12-05T21:59:00Z"), now)).toBe("SAT 5 DEC · 23:59");
+    expect(listDate(d("2026-11-10T10:00:00Z"), now)).toBe("TUE 10 NOV · 12:00");
+    expect(listDate(d("2026-12-05T21:59:00Z"))).toBe("SAT 5 · 23:59");
+    expect(dueLabel(d("2026-12-05T21:59:00Z"), now)).toBe("SAT 5 DEC · 23:59");
+    expect(dueLabel(d("2026-12-03T21:59:00Z"), now)).toBe("DUE THU 23:59");
   });
 
   it("listDate writes midnight as 00:00", () => {

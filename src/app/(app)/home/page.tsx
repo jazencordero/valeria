@@ -387,6 +387,7 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
                   title={view.first.title}
                   course={view.first.course}
                   dueAt={view.first.dueAt}
+                  now={now}
                   estimateMin={view.first.estimateMin}
                   status={view.first.status}
                   action={
@@ -408,6 +409,7 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
                   title={a.title}
                   course={a.course}
                   dueAt={a.dueAt}
+                  now={now}
                   estimateMin={a.estimateMin}
                   status={a.status}
                   action={

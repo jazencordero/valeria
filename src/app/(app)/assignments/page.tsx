@@ -67,6 +67,7 @@ async function AssignmentLists({ searchParams }: { searchParams: SearchParams })
               title={a.title}
               course={a.course}
               dueAt={a.dueAt}
+              now={now}
               estimateMin={a.estimateMin}
               status={a.status}
               action={
