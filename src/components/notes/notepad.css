@@ -1,0 +1,106 @@
+/*
+ * Notepad: floating button and drawer (M9-13).
+ * Source: prototype merged.html CSS 1106-1144 (.pad-fab, .np*).
+ * The prototype's frame is a phone box, so `absolute` there is `fixed` here.
+ * Wide-screen values (bottom 24 px, the 380 px side panel) are ours: the
+ * prototype range covers the phone sheet only.
+ */
+
+.pad-fab {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  /* Above the 58 px tab bar. */
+  bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  min-width: 56px;
+  height: 56px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--btn);
+  color: var(--btn-ink);
+  font-size: 15px;
+  font-weight: 600;
+  box-shadow: 0 3px 0 var(--btn-ledge), var(--shadow-lift);
+  cursor: pointer;
+  transition: translate var(--t-base) var(--e-out);
+}
+.pad-fab.high { translate: 0 -74px; }
+.pad-fab svg { width: 26px; height: 26px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
+.pad-fab:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--btn-ledge), var(--shadow-card); }
+.pad-fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.pad-fab-word { padding-right: 4px; white-space: nowrap; animation: np-fade var(--t-base) var(--e-out); }
+@media (min-width: 700px) {
+  .pad-fab { right: 24px; bottom: 24px; }
+}
+
+.np-scrim { position: fixed; inset: 0; z-index: 51; background: var(--scrim); }
+
+.np {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 52;
+  height: 85dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 8px var(--pad) max(16px, env(safe-area-inset-bottom, 0px));
+  border-radius: 26px 26px 0 0;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-sheet);
+}
+@media (min-width: 700px) {
+  .np {
+    left: auto;
+    top: 0;
+    width: 380px;
+    height: auto;
+    padding: 16px 24px 20px;
+    border-radius: 0;
+    border-left: 1px solid var(--line);
+    box-shadow: var(--shadow-lift);
+  }
+}
+.np-handle { flex: none; width: 36px; height: 4px; margin: 0 auto 12px; border-radius: 999px; background: var(--line); }
+.np-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.np-chip { display: inline-block; min-width: 0; max-width: 100%; min-height: 28px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--ink-2); }
+.np-saved { flex: none; margin-left: auto; color: var(--ink-3); animation: np-fade 200ms linear; }
+.np-saved.failed { color: var(--due); }
+.np-saved.instant { animation: none; }
+.np-head .np-close { margin-right: -10px; }
+.np-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(-1 * var(--pad)); padding: 0 var(--pad) 8px; }
+@media (min-width: 700px) {
+  .np-scroll { margin: 0 -24px; padding: 0 24px 8px; }
+}
+.np-tw { position: relative; margin-top: 12px; }
+.np-mark { position: absolute; left: -4px; right: -4px; top: 30%; bottom: 10%; border-radius: 6px; background: var(--butter); }
+.np-mark.wipe { animation: np-wipe 300ms var(--e-out); }
+.np-title { position: relative; width: 100%; padding: 6px 0; border: 0; background: transparent; color: var(--ink); font-family: var(--display); font-size: 22px; font-weight: 600; font-variation-settings: "SOFT" 100; }
+.np-title::placeholder, .np-body::placeholder { color: var(--ink-3); }
+.np-title:focus-visible, .np-body:focus-visible { outline: none; }
+.np-tw:focus-within::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; border-radius: 2px; background: var(--accent); }
+.np-quote { margin: 10px 0 0; padding: 8px 12px; border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0; background: var(--paper); color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+.np-body { --lh: 26px; display: block; width: 100%; min-height: calc(var(--lh) * 7); margin-top: 10px; padding: 0; border: 0; resize: none; overflow: hidden; color: var(--ink); font: inherit; font-size: 16px; line-height: var(--lh); background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--lh) - 1px), var(--line) calc(var(--lh) - 1px), var(--line) var(--lh)); background-attachment: local; }
+.np-tools { display: flex; gap: 6px; margin-top: 10px; }
+/* Chip look (ui/chip.tsx): 44 px target, 32 px pill. */
+.np-tool { display: inline-flex; min-height: 44px; align-items: center; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.np-pill { display: inline-flex; min-height: 32px; align-items: center; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-2); font-size: 13px; transition: border-color var(--t-quick) var(--e-out), background-color var(--t-quick) var(--e-out), color var(--t-quick) var(--e-out); }
+.np-tool:hover .np-pill { color: var(--ink); }
+.np-tool:focus-visible { outline: none; }
+.np-tool:focus-visible .np-pill { outline: 2px solid var(--accent); outline-offset: 2px; }
+.np-tool[aria-pressed="true"] .np-pill { background: var(--butter); border-color: var(--ink-3); color: var(--ink); }
+.np-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+
+@keyframes np-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes np-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pad-fab { transition: none; }
+  .np-mark.wipe { animation: np-fade 150ms linear; }
+}

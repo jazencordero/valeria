@@ -33,12 +33,20 @@
  * React `cache`, so the side nav and the tab bar share one load. A hand-in's
  * action calls `refresh()`, which re-renders this layout, so the numbers roll.
  *
+ * Notes (M9-13): `shellCounts` also counts her notes (`countNotes`, M9-11)
+ * for the sidebar's Notes item; the notepad's actions call `refresh()` when a
+ * note is created or deleted. The notepad itself (floating button and drawer)
+ * is mounted once here, outside the grid: it is fixed to the viewport, reads
+ * the path on its own and hides itself during a study session (`/study/...`).
+ * It sits in its own Suspense because it reads the path.
+ *
  * A demo user (M1-37, `users.settings.demo`) gets a thin "Demo data" line at
  * the top of the page area, with "Restart demo" (GET /demo?reset=1).
  */
 import { asc, and, count, eq, gte, inArray, isNull, not } from "drizzle-orm";
 import { connection } from "next/server";
 import { cache, Suspense, type ReactNode } from "react";
+import { Notepad } from "@/components/notes/notepad";
 import { PageTransition } from "@/components/shell/page-transition";
 import {
   SideNav,
@@ -54,6 +62,7 @@ import { db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { exams } from "@/server/db/schema/study";
 import { assignments } from "@/server/db/schema/work";
+import { countNotes } from "@/server/notes/store";
 
 async function signedInUser(): Promise<User> {
   try {
@@ -75,7 +84,7 @@ type ShellCounts = SideCounts & { dueToday: number };
 /** The badge counts for one user, read once per request. */
 const shellCounts = cache(async (userId: string): Promise<ShellCounts> => {
   const now = new Date();
-  const [open, [upcoming]] = await Promise.all([
+  const [open, [upcoming], notes] = await Promise.all([
     db
       .select({ dueAt: assignments.dueAt })
       .from(assignments)
@@ -101,10 +110,12 @@ const shellCounts = cache(async (userId: string): Promise<ShellCounts> => {
           gte(exams.at, now),
         ),
       ),
+    countNotes(userId),
   ]);
   return {
     assignments: open.length,
     exams: upcoming?.n ?? 0,
+    notes,
     dueToday: open.filter((a) => a.dueAt !== null && sameDay(a.dueAt, now)).length,
   };
 });
@@ -183,6 +194,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <TabBarForUser />
         </Suspense>
       </div>
+      <Suspense fallback={null}>
+        <Notepad />
+      </Suspense>
     </>
   );
 }

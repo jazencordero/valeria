@@ -6,7 +6,13 @@
  *
  * Wordmark with the tiny cap, the main links, her courses and a user chip
  * that opens Settings. Current page gets `aria-current="page"`.
- * Cut (M9-13): Notes.
+ *
+ * Notes (M9-13) sits between Exams and Grades with a live count of her notes
+ * (the notepad's create and delete call `refresh()`, so it rolls). The list
+ * is put together here (`MAIN_ITEMS`) so `nav-items.ts`, and the tab
+ * transition order it feeds, stay as they are. Folded, Notes gets no rose
+ * dot: a note is not something waiting for her, so the count lives only in
+ * the tooltip and the link's name ("Notes, 3 notes").
  *
  * Theme button (M4-05, main-flow.html CSS 592-595): at the bottom, right of
  * the user chip. Folded, it sits above the chip, left-aligned with the icons.
@@ -46,13 +52,15 @@ import { ThemeButton } from "@/components/ui/theme-button";
 import { Vitonen } from "@/components/vitonen";
 import { useMotionMode } from "@/lib/motion/use-calm";
 import {
+  ICONS,
   SETTINGS_HREF,
   SIDE_ITEMS,
   courseHref,
   currentCourseId,
-  sideCurrent,
+  isUnder,
   type IconShape,
   type NavId,
+  type NavItem,
 } from "./nav-items";
 import { tabTransitionTypes } from "./page-transition";
 import { useSide } from "./use-side";
@@ -74,7 +82,20 @@ export type SideCounts = {
   assignments: number;
   /** Upcoming exams (`at >= now`, visible courses). */
   exams: number;
+  /** All her notes (M9-13). */
+  notes?: number;
 };
+
+const NOTES_ITEM: NavItem = { id: "notes", label: "Notes", href: "/notes", icon: ICONS.notes };
+
+/** The sidebar's main links: `SIDE_ITEMS` with Notes after Exams. */
+const MAIN_ITEMS: readonly NavItem[] = SIDE_ITEMS.flatMap((item) =>
+  item.id === "exams" ? [item, NOTES_ITEM] : [item],
+);
+
+function mainCurrent(pathname: string | null): NavId | null {
+  return MAIN_ITEMS.find((i) => isUnder(pathname, i.href))?.id ?? null;
+}
 
 export type SideNavProps = {
   courses: readonly SideCourse[];
@@ -83,10 +104,17 @@ export type SideNavProps = {
 };
 
 /** The count a main link shows, and how its name says it. */
-function badgeOf(id: NavId, counts: SideCounts | null | undefined): { n: number; words: string } | null {
+function badgeOf(
+  id: NavId,
+  counts: SideCounts | null | undefined,
+): { n: number; words: string; dot: boolean } | null {
   if (!counts) return null;
-  if (id === "assignments" && counts.assignments > 0) return { n: counts.assignments, words: `${counts.assignments} open` };
-  if (id === "exams" && counts.exams > 0) return { n: counts.exams, words: `${counts.exams} upcoming` };
+  if (id === "assignments" && counts.assignments > 0)
+    return { n: counts.assignments, words: `${counts.assignments} open`, dot: true };
+  if (id === "exams" && counts.exams > 0) return { n: counts.exams, words: `${counts.exams} upcoming`, dot: true };
+  const notes = counts.notes ?? 0;
+  if (id === "notes" && notes > 0)
+    return { n: notes, words: notes === 1 ? "1 note" : `${notes} notes`, dot: false };
   return null;
 }
 
@@ -148,13 +176,13 @@ export function SideNavView({
   counts,
   pathname,
 }: SideNavProps & { pathname: string | null }) {
-  const current = sideCurrent(pathname);
+  const current = mainCurrent(pathname);
   const courseId = currentCourseId(pathname);
   const initial = user?.firstName?.charAt(0).toUpperCase() ?? "";
   const sideRef = useRef<HTMLElement>(null);
   const { collapsed, toggle } = useSide(sideRef);
   const mode = useMotionMode();
-  const markerRow = SIDE_ITEMS.findIndex((item) => item.id === current);
+  const markerRow = MAIN_ITEMS.findIndex((item) => item.id === current);
   /** Tooltip for a link whose label is folded away. */
   const tip = (label: string) => (collapsed ? label : undefined);
 
@@ -191,7 +219,7 @@ export function SideNavView({
       </div>
 
       <nav aria-label="Main" className="relative grid gap-0.5">
-        {SIDE_ITEMS.map((item) => {
+        {MAIN_ITEMS.map((item) => {
           const badge = badgeOf(item.id, counts);
           return (
             <Link
@@ -207,7 +235,7 @@ export function SideNavView({
             >
               <span className="relative flex flex-none">
                 <NavIcon shapes={item.icon} className="!h-5 !w-5" />
-                {badge ? (
+                {badge?.dot ? (
                   <i
                     aria-hidden="true"
                     data-testid={`side-dot-${item.id}`}
