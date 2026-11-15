@@ -311,3 +311,112 @@ test('in a study session: "Ask about this card" only once answered; the panel ov
   // The new card is not answered yet: no entry.
   await expect(askCard).toHaveCount(0);
 });
+
+// ---------------------------------------------------------------------------
+// M2-28 QA (a real account at 390 px): room for the chat, the new answer from its first line,
+// the split remembered, and a card's note attached to its exam.
+
+/** A long answer: its first line is the marker, then paragraphs enough to fill the chat twice. */
+const FIRST_LINE = "FIRSTLINE of the answer.";
+const LONG_REPLY = [FIRST_LINE, ...Array.from({ length: 14 }, (_, i) => `Paragraph ${i + 1}: present value discounts a later amount back to today at the rate.`)].join("\n\n");
+
+test("on a phone at 390 px: a question gives the chat most of the sheet, and the new answer shows from its first line", async ({ page }) => {
+  test.skip((page.viewportSize()?.width ?? 0) >= 700, "phones only: the sheet");
+  const fake = await script();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/demo?reset=1");
+  await expect(page).toHaveURL(/\/home$/);
+  await openPad(page);
+
+  const sheet = pad(page);
+  const chat = sheet.getByTestId("notepad-chat");
+  const heightOf = async (l: ReturnType<Page["locator"]>) => (await l.boundingBox())!.height;
+  const before = await heightOf(chat);
+
+  for (const route of ROUTES) await fake.setDefault(route, { text: LONG_REPLY });
+  const question = `What is present value? (${test.info().project.name}, room)`;
+  await sheet.getByRole("textbox", { name: "Ask the tutor" }).fill(question);
+  await sheet.getByRole("button", { name: "Ask", exact: true }).click();
+  const answer = sheet.getByTestId("tutor-answer").filter({ hasText: FIRST_LINE });
+  await expect(answer).toBeVisible();
+  const log = sheet.getByRole("log", { name: "Tutor conversation" });
+  await expect(log).toHaveAttribute("aria-busy", "false");
+  await expect(answer).toContainText("Paragraph 14");
+
+  // The note folded to its title and quote: the chat has most of the sheet.
+  await expect(sheet.getByRole("button", { name: "Show note" })).toHaveAttribute("aria-expanded", "false");
+  const after = await heightOf(chat);
+  const whole = await heightOf(sheet);
+  expect(after, "the chat grew").toBeGreaterThan(before);
+  expect(after / whole, `chat ${after}px of a ${whole}px sheet`).toBeGreaterThan(0.6);
+
+  // The answer's first line is inside the chat's visible area, under the handle.
+  const line = (await answer.boundingBox())!;
+  const area = (await log.boundingBox())!;
+  const handle = (await sheet.getByTestId("notepad-split").boundingBox())!;
+  expect(line.y, "first line not above the chat's top").toBeGreaterThanOrEqual(area.y - 1);
+  expect(line.y, "first line below the handle").toBeGreaterThanOrEqual(handle.y + handle.height - 1);
+  expect(line.y + 20, "first line not below the chat's bottom").toBeLessThanOrEqual(area.y + area.height);
+  // And the chat is not scrolled to its very end (the answer is longer than the chat).
+  const scrolled = await log.evaluate((el) => ({ top: el.scrollTop, max: el.scrollHeight - el.clientHeight }));
+  expect(scrolled.top).toBeLessThan(scrolled.max);
+
+  // One tap shows the whole note again, its words kept.
+  await sheet.getByRole("button", { name: "Show note" }).click();
+  await expect(sheet.getByRole("textbox", { name: "Note" })).toBeVisible();
+});
+
+test("the split handle's place survives a reload", async ({ page }) => {
+  await page.goto("/demo?reset=1");
+  await expect(page).toHaveURL(/\/home$/);
+  await openPad(page);
+  const split = pad(page).getByRole("separator", { name: "Resize the note and the tutor" });
+  await expect(split).toHaveAttribute("aria-valuenow", "45");
+  const box = (await split.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 80, { steps: 6 });
+  await page.mouse.up();
+  const moved = await split.getAttribute("aria-valuenow");
+  expect(Number(moved)).toBeGreaterThan(45);
+
+  await page.reload();
+  await openPad(page);
+  await expect(pad(page).getByRole("separator", { name: "Resize the note and the tutor" })).toHaveAttribute("aria-valuenow", moved!);
+  const wide = (page.viewportSize()?.width ?? 0) >= 700;
+  const key = wide ? "ready-notes-split" : "ready-notes-split-phone";
+  expect(await page.evaluate((k) => localStorage.getItem(k), key)).toBe(moved);
+});
+
+test('a note made from "Ask about this card" is attached to the card\'s exam, and the chip says so', async ({ page }) => {
+  await page.goto("/demo?reset=1");
+  await expect(page).toHaveURL(/\/home$/);
+  await page.getByRole("link", { name: /-minute bite for / }).click();
+  await expect(page).toHaveURL(/\/study\/[^/?]+$/);
+  await expect(page.getByTestId("session-card")).toBeVisible();
+  await answerCard(page);
+  await page.getByRole("button", { name: ASK_CARD, exact: true }).click();
+  await expect(pad(page)).toBeVisible();
+
+  // The chip names the exam (as the exam's own page does), never General.
+  const chip = pad(page).getByTestId("notepad-chip");
+  await expect(chip).toHaveText(/\S+ · \S+/);
+  await expect(chip).not.toHaveText("General");
+  const label = (await chip.textContent())!.trim();
+  // The card is still the quote.
+  await expect(pad(page).locator(".np-quote")).not.toBeEmpty();
+
+  const words = `Why this answer? (${test.info().project.name}, attach)`;
+  await pad(page).getByRole("textbox", { name: "Note" }).fill(words);
+  await expect(pad(page).getByTestId("notepad-saved")).toHaveText("Saved");
+  await page.keyboard.press("Escape");
+  await expect(pad(page)).toHaveCount(0);
+
+  // Stored on the exam: the Notes tab shows it with the exam as its attachment.
+  await page.goto("/notes");
+  const card = page.locator("[data-note]").filter({ hasText: words });
+  await expect(card).toBeVisible();
+  // The Notes tab shows the course's short name (the part before the first comma); the chip the full one.
+  await expect(card).toContainText(label.split(",")[0]);
+  await expect(card).not.toContainText("General");
+});

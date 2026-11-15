@@ -18,6 +18,11 @@
  * - `removeNote(id)` (M9-14): deletes one of her notes, from the Notes tab's
  *   card menu. A note that is not hers (or already gone) answers not_found.
  *
+ * A study session (`/study/<sessionId>`, M2-28 "Ask about this card"): a new note made over it
+ * attaches to the session's exam, read here from the session id and only when the session and
+ * the exam are hers. The page itself is general to `attachFromPath` (a session id is not an
+ * exam id), and no exam id from the browser is ever trusted.
+ *
  * Creating or deleting a note changes the sidebar's Notes count, so those two
  * call `refresh()` (the app layout re-reads `countNotes`). A plain edit does
  * not, so typing never re-renders the page.
@@ -35,7 +40,7 @@ import { currentUser, NotSignedIn } from "@/server/auth/session";
 import { db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { lectures } from "@/server/db/schema/learn";
-import { exams } from "@/server/db/schema/study";
+import { exams, studySessions } from "@/server/db/schema/study";
 import { assignments } from "@/server/db/schema/work";
 import { deleteNote, NoteNotFound, saveNote } from "@/server/notes/store";
 
@@ -70,8 +75,31 @@ async function userIdOrNull(): Promise<string | null> {
 
 type Attach = { kind: NoteAttachKind; id?: string | null };
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** `/study/<sessionId>` (a query, hash or trailing slash ignored): the session id, else null. */
+function studySessionIdOf(path: string): string | null {
+  const [section, id, ...rest] = path.split(/[?#]/, 1)[0].split("/").filter(Boolean);
+  return section === "study" && id && UUID.test(id) && rest.length === 0 ? id : null;
+}
+
+/** The exam of her study session, or null when the session (or its exam) is not hers. */
+async function sessionExamOf(userId: string, sessionId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ examId: exams.id })
+    .from(studySessions)
+    .innerJoin(exams, eq(exams.id, studySessions.examId))
+    .where(and(eq(studySessions.id, sessionId), eq(studySessions.userId, userId), eq(exams.userId, userId)));
+  return row?.examId ?? null;
+}
+
 /** What a new note on `path` attaches to, as `saveNote` takes it. Lectures resolve to their id. */
 async function attachOf(userId: string, path: string): Promise<Attach> {
+  const sessionId = studySessionIdOf(path);
+  if (sessionId) {
+    const examId = await sessionExamOf(userId, sessionId);
+    return examId ? { kind: "exam", id: examId } : { kind: "general" };
+  }
   const at = attachFromPath(path);
   if (at.kind === "general") return { kind: "general" };
   if (at.kind !== "lecture") return { kind: at.kind, id: at.id };

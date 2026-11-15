@@ -51,7 +51,16 @@
  * (src/app/api/ai/tutor/route.ts) and reads its UI message stream by hand (the AI SDK stays in
  * src/server/ai, tests/arch/ai-boundary.test.ts).
  */
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
+} from "react";
 import { GRADE_GROUP_LABEL } from "@/components/session/grade-buttons";
 import { Button } from "@/components/ui/button";
 import {
@@ -120,6 +129,8 @@ export type TutorChatViewProps = {
   /** The one question about the course's study rule, while it is unknown (null: none). */
   studyAsk?: { courseName: string; saving: boolean } | null;
   onStudyAnswer?: (answer: StudyAnswer) => void;
+  /** The box took focus (the notepad gives the chat more room). */
+  onBoxFocus?: () => void;
 };
 
 /** Her answer to `STUDY_ASK_LINE`. */
@@ -139,6 +150,92 @@ const LINK =
   "decoration-line decoration-2 underline-offset-4 hover:text-ink disabled:cursor-default disabled:no-underline " +
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]";
 
+/**
+ * Where the log scrolls so `el` starts at its top (4 px of air above it), never past the end.
+ * Pure, for tests: the tops are screen positions (getBoundingClientRect), as the browser gives.
+ */
+export function scrollTopFor(
+  el: { top: number },
+  log: { top: number; scrollTop: number; scrollHeight: number; clientHeight: number },
+): number {
+  const want = el.top - log.top + log.scrollTop - ANCHOR_AIR;
+  return Math.max(0, Math.min(Math.round(want), log.scrollHeight - log.clientHeight));
+}
+
+const ANCHOR_AIR = 4;
+
+/**
+ * The chat's scroll (M2-28 QA): a new answer starts at the top of the chat, never scrolled to its
+ * end with its first lines out of sight. When an answer starts, the log follows it as its words
+ * arrive until its first line reaches the top, and then stays put so she reads from the start. If
+ * she scrolls herself meanwhile (wheel, touch, keys, the scrollbar), it stops following and never
+ * moves under her. A stored chat that loads shows its latest question at the top, its answer below.
+ */
+function useAnswerScroll(logRef: RefObject<HTMLDivElement | null>, turns: ChatTurn[], busy: boolean): void {
+  const seen = useRef<Set<string>>(new Set());
+  /** The turn to keep at the top, while she has not scrolled away. */
+  const anchor = useRef<string | null>(null);
+  /** Where this hook last put the log, to tell her scrolling from ours. */
+  const placed = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    const log = logRef.current;
+    const before = seen.current;
+    seen.current = new Set(turns.map((t) => t.id));
+    const fresh = turns.find((t) => t.role === "assistant" && !before.has(t.id));
+    if (busy && fresh) {
+      // She asked: show the new answer from its first line.
+      anchor.current = fresh.id;
+    } else if (before.size === 0 && turns.length > 0 && !busy) {
+      // A stored chat loaded: the latest question at the top, its answer under it.
+      anchor.current = [...turns].reverse().find((t) => t.role === "user")?.id ?? null;
+    }
+    const id = anchor.current;
+    if (!log || !id) return;
+    const el = Array.from(log.querySelectorAll<HTMLElement>("[data-turn]")).find((e) => e.dataset.turn === id);
+    if (!el) {
+      anchor.current = null;
+      return;
+    }
+    const r = log.getBoundingClientRect();
+    const top = scrollTopFor(el.getBoundingClientRect(), {
+      top: r.top,
+      scrollTop: log.scrollTop,
+      scrollHeight: log.scrollHeight,
+      clientHeight: log.clientHeight,
+    });
+    if (Math.abs(log.scrollTop - top) > 1) log.scrollTop = top;
+    placed.current = log.scrollTop;
+    // Once the answer is complete (or a loaded chat is shown) there is nothing more to follow.
+    if (!busy) anchor.current = null;
+  }, [logRef, turns, busy]);
+
+  useEffect(() => {
+    const log = logRef.current;
+    if (!log) return;
+    const herself = () => {
+      anchor.current = null;
+    };
+    const onScroll = () => {
+      // Not where this hook put it: she moved it.
+      if (placed.current !== null && Math.abs(log.scrollTop - placed.current) > 2) herself();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(e.key)) herself();
+    };
+    log.addEventListener("scroll", onScroll, { passive: true });
+    log.addEventListener("wheel", herself, { passive: true });
+    log.addEventListener("touchmove", herself, { passive: true });
+    log.addEventListener("keydown", onKey);
+    return () => {
+      log.removeEventListener("scroll", onScroll);
+      log.removeEventListener("wheel", herself);
+      log.removeEventListener("touchmove", herself);
+      log.removeEventListener("keydown", onKey);
+    };
+  }, [logRef]);
+}
+
 export function TutorChatView(props: TutorChatViewProps) {
   const { turns, busy, draft, status, deeperAvailable, aboutQuote, studyAsk, meter } = props;
   const headingId = useId();
@@ -147,11 +244,7 @@ export function TutorChatView(props: TutorChatViewProps) {
   const logRef = useRef<HTMLDivElement>(null);
   const streaming = busy ? [...turns].reverse().find((t) => t.role === "assistant") : undefined;
 
-  // Keep the newest words in view.
-  useEffect(() => {
-    const log = logRef.current;
-    if (log && typeof log.scrollTo === "function") log.scrollTo({ top: log.scrollHeight });
-  }, [turns]);
+  useAnswerScroll(logRef, turns, busy);
 
   const onBoxKey = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -232,6 +325,7 @@ export function TutorChatView(props: TutorChatViewProps) {
               turn.role === "user" ? (
                 <li
                   key={turn.id}
+                  data-turn={turn.id}
                   className="ml-8 self-end rounded-[18px] rounded-br-[6px] bg-paper px-3.5 py-2.5 text-[15px] whitespace-pre-wrap [overflow-wrap:anywhere]"
                   data-testid="tutor-mine"
                 >
@@ -239,7 +333,7 @@ export function TutorChatView(props: TutorChatViewProps) {
                   {turn.text}
                 </li>
               ) : (
-                <li key={turn.id} className="mr-2 text-[15px] leading-[1.55]" data-testid="tutor-answer">
+                <li key={turn.id} data-turn={turn.id} className="mr-2 text-[15px] leading-[1.55]" data-testid="tutor-answer">
                   <span className="sr-only">Tutor: </span>
                   <span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{turn.text}</span>
                   {turn === streaming ? (
@@ -288,6 +382,7 @@ export function TutorChatView(props: TutorChatViewProps) {
           placeholder="Ask the tutor"
           onChange={(e) => props.onDraft(e.target.value)}
           onKeyDown={onBoxKey}
+          onFocus={props.onBoxFocus}
           data-testid="tutor-box"
           className="block w-full resize-none rounded-[14px] border border-line bg-paper px-3.5 py-2 text-[16px] text-ink placeholder:text-ink-3 focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
         />
@@ -548,9 +643,17 @@ export type TutorChatProps = {
   onSaveToNote: (text: string) => void;
   /** About the study card on screen: the card's chat, and `quote` (the card) is not sent. */
   card?: boolean;
+  /**
+   * She is chatting (the notepad gives the chat most of a phone's sheet): "messages" when a stored
+   * chat with messages loads, "focus" when the box takes focus, "ask" when a question goes out
+   * (typed or a starter).
+   */
+  onActive?: (why: ChatActivity) => void;
   api?: TutorApi;
   preview?: TutorPreview;
 };
+
+export type ChatActivity = "messages" | "focus" | "ask";
 
 let turnSeq = 0;
 const localId = () => `turn-${++turnSeq}`;
@@ -558,7 +661,17 @@ const localId = () => `turn-${++turnSeq}`;
 /** The chat's key: undecided, the note's id, or the place (null). */
 type Key = { decided: false } | { decided: true; noteId: string | null };
 
-export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, card = false, api = DEFAULT_API, preview }: TutorChatProps) {
+export function TutorChat({
+  noteId,
+  quote,
+  where,
+  resolveNoteId,
+  onSaveToNote,
+  card = false,
+  onActive,
+  api = DEFAULT_API,
+  preview,
+}: TutorChatProps) {
   const [turns, setTurns] = useState<ChatTurn[]>(preview?.turns ?? []);
   const [draft, setDraft] = useState(preview?.draft ?? "");
   const [busy, setBusy] = useState(preview?.busy ?? false);
@@ -601,7 +714,10 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
 
   // The stored chat (and whether "Go deeper" can be offered), once per note.
   useEffect(() => {
-    if (preview) return;
+    if (preview) {
+      if (preview.turns.length > 0) onActive?.("messages");
+      return;
+    }
     const controller = new AbortController();
     const body: Record<string, unknown> = { mode: "load", where: where() };
     if (noteId) body.noteId = noteId;
@@ -615,6 +731,7 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
       if (quote && !noteId && !card) return;
       const messages = Array.isArray(loaded.messages) ? loaded.messages : [];
       if (messages.length > 0) {
+        onActive?.("messages");
         if (!key.current.decided) key.current = { decided: true, noteId: null };
         setTurns(
           messages.map((m) =>
@@ -643,6 +760,7 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
       if (!question || busyRef.current) return;
       const mine: ChatTurn = { id: localId(), role: "user", text: question };
       const answer: ChatTurn = { id: localId(), role: "assistant", text: "" };
+      onActive?.("ask");
       setTurns((list) => [...list, mine, answer]);
       setDraft("");
       setStatus(null);
@@ -673,7 +791,7 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
       setDraft((now) => (now.trim() ? now : question));
       setStatus(out.line);
     },
-    [api.fetch, card, chatNoteId, deeperAvailable, level, quote, setBusyBoth, where],
+    [api.fetch, card, chatNoteId, deeperAvailable, level, onActive, quote, setBusyBoth, where],
   );
 
   const deeper = useCallback(
@@ -783,6 +901,7 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
       onCopy={() => void copy()}
       studyAsk={study ? { courseName: study.courseName, saving: studySaving } : null}
       onStudyAnswer={(a) => void answerStudy(a)}
+      onBoxFocus={() => onActive?.("focus")}
     />
   );
 }

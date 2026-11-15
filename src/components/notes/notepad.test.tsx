@@ -575,3 +575,187 @@ describe("Notepad beside the page on wide screens", () => {
   });
 });
 
+
+describe("Notepad with the tutor on a phone: room for the chat, the split remembered (M2-28 QA)", () => {
+  const STREAM = [
+    { type: "start", messageMetadata: { model: "groq:openai/gpt-oss-120b", answerId: NOTE_ID, questionId: "q", deeper: false } },
+    { type: "text-start", id: "0" },
+    { type: "text-delta", id: "0", delta: "PV is today's worth." },
+    { type: "text-end", id: "0" },
+    { type: "finish" },
+  ];
+  function api(stored: { id: string; role: "user" | "assistant"; text: string; model: string | null }[] = []) {
+    const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const b = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (b.mode === "load") return Response.json({ messages: stored, deeperAvailable: false });
+      return new Response(STREAM.map((l) => `data: ${JSON.stringify(l)}\n\n`).join(""), { status: 200 });
+    });
+    return { fetch: fetch as unknown as typeof globalThis.fetch, writeClipboard: vi.fn(async () => {}) };
+  }
+  const top = () => screen.getByTestId("notepad-top");
+  const more = () => document.getElementById("np-more")!;
+  const STORED = [
+    { id: "q1", role: "user" as const, text: "What is PV?", model: null },
+    { id: "a1", role: "assistant" as const, text: "Today's worth.", model: "groq:x" },
+  ];
+
+  it("a question folds the note to its title and quote; Show note unfolds it with the words kept; a save still goes", async () => {
+    const actions = fakeActions();
+    render(<NotepadView pathname="/home" actions={actions} tutor tutorApi={api()} />);
+    act(() => openNotepad({ quote: "PV = FV / (1 + r)^t" }));
+    await flush(20);
+    // Not chatting yet: the note at its share, no fold control.
+    expect(top().className).toBe("np-top");
+    expect(top().style.flexBasis).toBe("calc(45% - 12px)");
+    expect(screen.queryByTestId("notepad-fold")).toBeNull();
+
+    fireEvent.change(title(), { target: { value: "PV" } });
+    fireEvent.change(body(), { target: { value: "My line" } });
+    fireEvent.click(screen.getByRole("button", { name: "Explain this simply" }));
+    await flush(20);
+    expect(top().className).toBe("np-top folded");
+    expect(top().style.flexBasis).toBe("");
+    expect(more().hasAttribute("inert")).toBe(true);
+    expect(screen.getByRole("textbox", { name: "Title" })).toBeTruthy();
+    expect(top().querySelector(".np-quote")?.textContent).toBe("PV = FV / (1 + r)^t");
+    const toggle = screen.getByRole("button", { name: "Show note" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.getAttribute("aria-controls")).toBe("np-more");
+
+    // Her words still save while folded.
+    await flush(SAVE_PAUSE_MS);
+    expect(actions.save).toHaveBeenLastCalledWith(expect.objectContaining({ title: "PV", body: "My line" }));
+
+    fireEvent.click(toggle);
+    expect(top().className).toBe("np-top");
+    expect(more().hasAttribute("inert")).toBe(false);
+    expect((body() as HTMLTextAreaElement).value).toBe("My line");
+    const shrink = screen.getByRole("button", { name: "Shrink note" });
+    expect(shrink.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(shrink);
+    expect(top().className).toBe("np-top folded");
+  });
+
+  it("the chat's box taking focus folds the note; moving the split handle unfolds it", async () => {
+    render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api()} />);
+    await openPad();
+    fireEvent.focus(screen.getByRole("textbox", { name: "Ask the tutor" }));
+    expect(top().className).toBe("np-top folded");
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the note and the tutor" }), { key: "ArrowDown" });
+    expect(top().className).toBe("np-top");
+    expect(top().style.flexBasis).toBe("calc(50% - 12px)");
+  });
+
+  it("a stored chat with messages folds an empty note, never one with words of hers", async () => {
+    const { unmount } = render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api(STORED)} />);
+    await openPad();
+    await flush(20);
+    expect(screen.getByText("What is PV?")).toBeTruthy();
+    expect(top().className).toBe("np-top folded");
+    unmount();
+
+    render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api(STORED)} />);
+    act(() =>
+      openNotepad({ note: { id: NOTE_ID, title: "PV", body: "My own words", quote: null, highlighted: false, label: "General" } }),
+    );
+    await flush(20);
+    expect(screen.getByText("What is PV?")).toBeTruthy();
+    expect(top().className).toBe("np-top");
+    // She is chatting, though: the control to fold it is there.
+    expect(screen.getByRole("button", { name: "Shrink note" })).toBeTruthy();
+  });
+
+  it("wide screens never fold", async () => {
+    wide = true;
+    render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api()} />);
+    await openPad();
+    fireEvent.focus(screen.getByRole("textbox", { name: "Ask the tutor" }));
+    expect(top().className).toBe("np-top");
+    expect(screen.queryByTestId("notepad-fold")).toBeNull();
+  });
+
+  it("the split is remembered on this device, one value per layout", async () => {
+    const { unmount } = render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api()} />);
+    await openPad();
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the note and the tutor" }), { key: "ArrowUp" });
+    expect(localStorage.getItem("ready-notes-split-phone")).toBe("40");
+    expect(localStorage.getItem("ready-notes-split")).toBeNull();
+    unmount();
+
+    // Again on the phone: where she left it.
+    const second = render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api()} />);
+    await openPad();
+    expect(screen.getByRole("separator", { name: "Resize the note and the tutor" }).getAttribute("aria-valuenow")).toBe("40");
+    second.unmount();
+
+    // The laptop's panel keeps its own (45 until moved), and remembers it separately.
+    wide = true;
+    render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api()} />);
+    await openPad();
+    const split = screen.getByRole("separator", { name: "Resize the note and the tutor" });
+    expect(split.getAttribute("aria-valuenow")).toBe("45");
+    fireEvent.keyDown(split, { key: "End" });
+    expect(localStorage.getItem("ready-notes-split")).toBe("80");
+    expect(localStorage.getItem("ready-notes-split-phone")).toBe("40");
+  });
+
+  it("a dragged split is stored when the drag ends", async () => {
+    render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api()} />);
+    await openPad();
+    const box = document.querySelector<HTMLElement>(".np-split")!;
+    box.getBoundingClientRect = () => ({ top: 100, height: 400, bottom: 500, left: 0, right: 390, width: 390, x: 0, y: 100, toJSON: () => ({}) });
+    const handle = screen.getByRole("separator", { name: "Resize the note and the tutor" });
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientY: 280 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 220 });
+    expect(handle.getAttribute("aria-valuenow")).toBe("30");
+    expect(localStorage.getItem("ready-notes-split-phone")).toBeNull();
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+    expect(localStorage.getItem("ready-notes-split-phone")).toBe("30");
+  });
+
+  it("storage that throws: the split still moves, starting at 45", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    try {
+      render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api()} />);
+      await openPad();
+      const split = screen.getByRole("separator", { name: "Resize the note and the tutor" });
+      expect(split.getAttribute("aria-valuenow")).toBe("45");
+      fireEvent.keyDown(split, { key: "ArrowDown" });
+      expect(split.getAttribute("aria-valuenow")).toBe("50");
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});
+
+describe("Notepad: Ask about this card attaches to the session's exam (M2-28 QA)", () => {
+  const SESSION = "/study/5b1d2c3e-0000-4000-8000-000000000001";
+  const CARD = "6c2e3d4f-0000-4000-8000-00000000000a";
+  const api = {
+    fetch: vi.fn(async () => Response.json({ messages: [], deeperAvailable: false })) as unknown as typeof globalThis.fetch,
+    writeClipboard: vi.fn(async () => {}),
+  };
+
+  it("the chip never says General while the server reads the session's exam, then names the exam; saves go with the session's path", async () => {
+    let answer: (r: NotepadContextResult) => void = () => {};
+    const actions = fakeActions();
+    actions.context.mockImplementation(() => new Promise<NotepadContextResult>((r) => (answer = r)));
+    render(<NotepadView pathname={SESSION} actions={actions} tutor tutorApi={api} />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent("ready:notepad", { detail: { quote: "Q?\n\nAnswer: A.", card: { id: CARD } } }));
+    });
+    await flush(20);
+    expect(actions.context).toHaveBeenCalledWith(SESSION);
+    expect(screen.getByTestId("notepad-chip").textContent).not.toContain("General");
+    await act(async () => answer({ ok: true, label: "Exam · Strategic IT Management" }));
+    expect(screen.getByTestId("notepad-chip").textContent).toBe("Exam · Strategic IT Management");
+    fireEvent.change(body(), { target: { value: "Why A?" } });
+    await flush(SAVE_PAUSE_MS);
+    expect(actions.save).toHaveBeenLastCalledWith(expect.objectContaining({ path: SESSION, quote: "Q?\n\nAnswer: A.", body: "Why A?" }));
+  });
+});

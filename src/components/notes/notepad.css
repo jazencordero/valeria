@@ -84,7 +84,8 @@
 @media (min-width: 700px) {
   .np-scroll { margin: 0 -24px; padding: 0 24px 8px; }
 }
-.np-tw { position: relative; margin-top: 12px; }
+.np-title-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.np-tw { position: relative; flex: 1; min-width: 0; }
 .np-mark { position: absolute; left: -4px; right: -4px; top: 30%; bottom: 10%; border-radius: 6px; background: var(--butter); }
 .np-mark.wipe { animation: np-wipe 300ms var(--e-out); }
 .np-title { position: relative; width: 100%; padding: 6px 0; border: 0; background: transparent; color: var(--ink); font-family: var(--display); font-size: 22px; font-weight: 600; font-variation-settings: "SOFT" 100; }
@@ -117,6 +118,13 @@
 .np-split-handle:focus-visible { outline: none; }
 .np-split-handle:focus-visible span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .np-chat { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+/* Phones while she chats: the note folds to its title and two lines of its quote. */
+.np-fold { flex: none; }
+.np-top.folded .np-more, .np-top.folded .np-actions { display: none; }
+.np-top.folded { flex: none; }
+.np-top.folded .np-scroll { flex: none; overflow: hidden; padding-bottom: 4px; }
+.np-top.folded .np-title-row { margin-top: 4px; }
+.np-top.folded .np-quote { margin-top: 4px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .np-edge { position: absolute; top: 0; bottom: 0; left: -8px; width: 16px; z-index: 1; cursor: col-resize; touch-action: none; user-select: none; }
 .np-edge::after { content: ""; position: absolute; left: 6px; top: 50%; width: 4px; height: 44px; margin-top: -22px; border-radius: 999px; background: var(--line); transition: background-color var(--t-quick) var(--e-out); }
 .np-edge:hover::after { background: var(--ink-3); }

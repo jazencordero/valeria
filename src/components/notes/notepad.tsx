@@ -64,6 +64,18 @@
  * note holds words, then by the note's id, fixed at the first question).
  * Without the switch none of this renders: the panel is exactly as above.
  *
+ * Room for the chat (M2-28 QA, a phone at 390 px): the split is remembered on this device, one
+ * value per layout, because a share of the phone's sheet and a share of the laptop's full-height
+ * panel are different things (and one browser can be both, a tablet turned or a narrow window):
+ * localStorage['ready-notes-split'] from 700 px and ['ready-notes-split-phone'] under it, set when
+ * she drags the handle or moves it with the keys; 45% until then. On a phone, once she is chatting
+ * (a question goes out, typed or a starter; the chat's box takes focus; or a stored chat with
+ * messages loads while the note's body is still empty) the note folds to its title and the first
+ * two lines of its quote, and the chat takes the rest of the sheet. "Show note" (in the title row,
+ * `aria-expanded`) unfolds it with one tap and "Shrink note" folds it again; the body is only
+ * hidden (out of view and inert), never dropped, and keeps saving (a "Save to note" while folded lands in it as usual).
+ * Moving the split handle also unfolds the note. Wide screens never fold.
+ *
  * Over a study session (M2-28 follow-up): with the switch on, the session offers "Ask about
  * this card" once a card is answered or revealed (src/components/session/ask-card.ts). That
  * opens the panel on a new note whose quote is the card in plain text, and the chat is the
@@ -97,7 +109,7 @@ import type { NotepadContextResult, NotepadSaveResult } from "@/app/(app)/notes/
 import { addCardsFromNote, noteCardExams } from "@/app/(app)/notes/card-actions";
 import type { AddCardsResult, ExamChoice, ExamChoicesResult } from "@/app/(app)/notes/card-actions";
 import { DraftCards, type DraftMessage } from "@/components/notes/draft-cards";
-import { TutorChat, whereFromPage, type TutorApi, type TutorPreview } from "@/components/tutor/tutor-chat";
+import { TutorChat, whereFromPage, type ChatActivity, type TutorApi, type TutorPreview } from "@/components/tutor/tutor-chat";
 import { NOTEPAD_CARD_GONE_EVENT, NOTEPAD_OPEN_EVENT, type CardAsk } from "@/components/session/ask-card";
 import { Button } from "@/components/ui/button";
 import { showToast } from "@/components/ui/toast";
@@ -174,8 +186,35 @@ const WIDTH_STEP = 24;
 export const WIDTH_KEY = "ready-notes-width";
 export const SPLIT_MIN = 20;
 export const SPLIT_MAX = 80;
-const SPLIT_DEFAULT = 45;
+export const SPLIT_DEFAULT = 45;
 const SPLIT_STEP = 5;
+/** Where she left the split handle, per layout (see the top of this file). */
+export const SPLIT_KEY = "ready-notes-split";
+export const SPLIT_PHONE_KEY = "ready-notes-split-phone";
+
+type Splits = { side: number; sheet: number };
+
+function storedSplit(key: string): number {
+  try {
+    const raw = localStorage.getItem(key);
+    const n = raw === null ? NaN : Number(raw);
+    return Number.isFinite(n) ? Math.round(clamp(n, SPLIT_MIN, SPLIT_MAX)) : SPLIT_DEFAULT;
+  } catch {
+    return SPLIT_DEFAULT;
+  }
+}
+
+function storedSplits(): Splits {
+  return { side: storedSplit(SPLIT_KEY), sheet: storedSplit(SPLIT_PHONE_KEY) };
+}
+
+function rememberSplit(key: string, share: number): void {
+  try {
+    localStorage.setItem(key, String(Math.round(share)));
+  } catch {
+    // Private window: the split is not remembered.
+  }
+}
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 /** The page keeps at least this much width for reading beside the open panel (px). */
@@ -532,7 +571,10 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
   const noteSeq = useRef(0);
   /** The tutor's chat: one per note opened (`seq` remounts it), and the note's stored id then. */
   const [chat, setChat] = useState<{ seq: number; noteId: string | null }>({ seq: 0, noteId: null });
-  const [split, setSplit] = useState(SPLIT_DEFAULT);
+  const [splits, setSplits] = useState<Splits>(storedSplits);
+  /** Phones: she is chatting, and the note is folded to its title and quote. */
+  const [chatOn, setChatOn] = useState(false);
+  const [fold, setFold] = useState(false);
   const [width, setWidth] = useState(storedWidth);
   const splitRef = useRef<HTMLDivElement | null>(null);
   const draftRef = useRef<Draft>(EMPTY);
@@ -605,8 +647,11 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
         ? { title: stored.title, body: stored.body, quote: stored.quote, highlighted: stored.highlighted }
         : { ...EMPTY, quote };
       setDraft(fresh);
+      draftRef.current = fresh;
       setSaveState("idle");
       setChat({ seq, noteId: stored?.id ?? null });
+      setChatOn(false);
+      setFold(false);
       setCardAnchor(cardId ? { id: cardId, path } : null);
       const onState = (s: SaveState) => {
         if (noteSeq.current === seq) setSaveState(s);
@@ -615,7 +660,9 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
         setLabel(stored.label);
         saver.current = new NoteSaver(path, fresh, actions.save, onState, stored.id);
       } else {
-        setLabel(attachFromPath(path).kind === "general" ? GENERAL : null);
+        // Over a study session the note goes to the session's exam (resolved on the server): no
+        // "General" in the chip while that answer is on its way.
+        setLabel(!cardId && attachFromPath(path).kind === "general" ? GENERAL : null);
         saver.current = new NoteSaver(path, fresh, actions.save, onState);
         actions
           .context(path)
@@ -739,21 +786,45 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
   const resolveNoteId = useCallback(() => saver.current?.settled() ?? Promise.resolve(null), []);
   const tutorWhere = useCallback(() => whereFromPage(path, typeof document === "undefined" ? null : document), [path]);
 
-  // The split handle: drag it, or arrow keys (the note's share of the height).
+  // She is chatting: on a phone the note folds so the chat gets the sheet.
+  const onChatActive = useCallback(
+    (why: ChatActivity) => {
+      if (wide) return;
+      setChatOn(true);
+      // A stored chat on its own never hides words she has written in this note.
+      if (why === "messages" && draftRef.current.body.trim()) return;
+      setFold(true);
+    },
+    [wide],
+  );
+  const folded = tutor && !wide && fold;
+
+  // The split handle: drag it, or arrow keys (the note's share of the height), remembered per layout.
+  const split = wide ? splits.side : splits.sheet;
+  const splitKey = wide ? SPLIT_KEY : SPLIT_PHONE_KEY;
+  const setSplit = (share: number) => {
+    setFold(false);
+    setSplits((s) => (wide ? { ...s, side: share } : { ...s, sheet: share }));
+  };
   const onSplitDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     const box = splitRef.current;
     if (!box || e.button !== 0) return;
     e.preventDefault();
     const el = e.currentTarget;
     el.setPointerCapture?.(e.pointerId);
+    const key = splitKey;
+    let last: number | null = null;
     const move = (ev: PointerEvent) => {
       const r = box.getBoundingClientRect();
-      if (r.height > 0) setSplit(Math.round(clamp(((ev.clientY - r.top) / r.height) * 100, SPLIT_MIN, SPLIT_MAX)));
+      if (r.height <= 0) return;
+      last = Math.round(clamp(((ev.clientY - r.top) / r.height) * 100, SPLIT_MIN, SPLIT_MAX));
+      setSplit(last);
     };
     const up = () => {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
+      if (last !== null) rememberSplit(key, last);
     };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
@@ -768,7 +839,9 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
       : null;
     if (next === null) return;
     e.preventDefault();
-    setSplit(clamp(next, SPLIT_MIN, SPLIT_MAX));
+    const share = clamp(next, SPLIT_MIN, SPLIT_MAX);
+    setSplit(share);
+    rememberSplit(splitKey, share);
   };
 
   // On wide screens the panel sits beside the page, not on it: the app's main area keeps
@@ -909,7 +982,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
     if (!ta) return;
     ta.style.height = "auto";
     ta.style.height = `${ta.scrollHeight}px`;
-  }, [draft.body, open]);
+  }, [draft.body, open, folded]);
 
   const onPanelKey = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (!modal || e.key !== "Tab") return;
@@ -998,65 +1071,81 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
   const noteParts = (
     <>
       <div className="np-scroll" ref={scrollRef}>
-        <div className="np-tw">
-          {draft.highlighted ? (
-            <span className={`np-mark${full ? " wipe" : ""}`} aria-hidden="true" />
+        <div className="np-title-row">
+          <div className="np-tw">
+            {draft.highlighted ? (
+              <span className={`np-mark${full ? " wipe" : ""}`} aria-hidden="true" />
+            ) : null}
+            <label className="sr-only" htmlFor="np-title">
+              Title
+            </label>
+            <input
+              ref={titleRef}
+              id="np-title"
+              className="np-title"
+              type="text"
+              placeholder="Title"
+              autoComplete="off"
+              value={draft.title}
+              onChange={(e) => edit({ ...draft, title: e.target.value })}
+            />
+          </div>
+          {tutor && !wide && chatOn ? (
+            <button
+              type="button"
+              className="np-tool np-fold"
+              aria-expanded={!folded}
+              aria-controls="np-more"
+              data-testid="notepad-fold"
+              onClick={() => setFold(!folded)}
+            >
+              <span className="np-pill">{folded ? "Show note" : "Shrink note"}</span>
+            </button>
           ) : null}
-          <label className="sr-only" htmlFor="np-title">
-            Title
-          </label>
-          <input
-            ref={titleRef}
-            id="np-title"
-            className="np-title"
-            type="text"
-            placeholder="Title"
-            autoComplete="off"
-            value={draft.title}
-            onChange={(e) => edit({ ...draft, title: e.target.value })}
-          />
         </div>
         {draft.quote ? <blockquote className="np-quote">{draft.quote}</blockquote> : null}
-        <label className="sr-only" htmlFor="np-body">
-          Note
-        </label>
-        <textarea
-          ref={bodyRef}
-          id="np-body"
-          className="np-body"
-          rows={7}
-          placeholder="Write the thing you keep forgetting."
-          value={draft.body}
-          onChange={(e) => edit({ ...draft, body: e.target.value })}
-        />
-        <div className="np-tools" role="group" aria-label="Format">
-          <button type="button" className="np-tool" onClick={addListLine}>
-            <span className="np-pill">• List</span>
-          </button>
-          <button
-            type="button"
-            className="np-tool"
-            aria-pressed={draft.highlighted}
-            onClick={() => edit({ ...draft, highlighted: !draft.highlighted })}
-          >
-            <span className="np-pill">Highlight</span>
-          </button>
-        </div>
-        {cards ? (
-          <DraftCards
-            rows={cards.rows}
-            onRows={(rows) => setCards((c) => (c ? { ...c, rows } : c))}
-            exams={cards.exams}
-            examId={cards.examId}
-            onExam={(examId) => setCards((c) => (c ? { ...c, examId, message: null } : c))}
-            busy={cards.busy}
-            message={cards.message}
-            onAdd={addCards}
-            firstRef={firstFrontRef}
+        <div id="np-more" className="np-more" inert={folded}>
+          <label className="sr-only" htmlFor="np-body">
+            Note
+          </label>
+          <textarea
+            ref={bodyRef}
+            id="np-body"
+            className="np-body"
+            rows={7}
+            placeholder="Write the thing you keep forgetting."
+            value={draft.body}
+            onChange={(e) => edit({ ...draft, body: e.target.value })}
           />
-        ) : null}
+          <div className="np-tools" role="group" aria-label="Format">
+            <button type="button" className="np-tool" onClick={addListLine}>
+              <span className="np-pill">• List</span>
+            </button>
+            <button
+              type="button"
+              className="np-tool"
+              aria-pressed={draft.highlighted}
+              onClick={() => edit({ ...draft, highlighted: !draft.highlighted })}
+            >
+              <span className="np-pill">Highlight</span>
+            </button>
+          </div>
+          {cards ? (
+            <DraftCards
+              rows={cards.rows}
+              onRows={(rows) => setCards((c) => (c ? { ...c, rows } : c))}
+              exams={cards.exams}
+              examId={cards.examId}
+              onExam={(examId) => setCards((c) => (c ? { ...c, examId, message: null } : c))}
+              busy={cards.busy}
+              message={cards.message}
+              onAdd={addCards}
+              firstRef={firstFrontRef}
+            />
+          ) : null}
+        </div>
       </div>
-      <div className="np-actions">
+      <div className="np-actions" inert={folded}>
         <Button variant="secondary" onClick={() => showDrafts(draft.body, label)}>
           Turn into cards
         </Button>
@@ -1133,7 +1222,12 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
             </div>
             {tutor ? (
               <div className="np-split" ref={splitRef}>
-                <div className="np-top" id="np-top" style={{ flexBasis: `calc(${split}% - 12px)` }}>
+                <div
+                  className={folded ? "np-top folded" : "np-top"}
+                  id="np-top"
+                  data-testid="notepad-top"
+                  style={folded ? undefined : { flexBasis: `calc(${split}% - 12px)` }}
+                >
                   {noteParts}
                 </div>
                 <div
@@ -1153,7 +1247,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
                 >
                   <span aria-hidden="true" />
                 </div>
-                <div className="np-chat">
+                <div className="np-chat" data-testid="notepad-chat">
                   <TutorChat
                     key={chat.seq}
                     noteId={chat.noteId}
@@ -1162,6 +1256,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
                     where={tutorWhere}
                     resolveNoteId={resolveNoteId}
                     onSaveToNote={appendToBody}
+                    onActive={onChatActive}
                     api={tutorApi}
                     preview={tutorPreview}
                   />
