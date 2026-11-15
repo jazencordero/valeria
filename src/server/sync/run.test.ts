@@ -7,6 +7,7 @@ import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { events } from "@/server/db/schema/calendar";
 import { courses } from "@/server/db/schema/courses";
 import { moodleConnections } from "@/server/db/schema/moodle";
+import { gradeItems } from "@/server/db/schema/grades";
 import { exams } from "@/server/db/schema/study";
 import { jobs } from "@/server/db/schema/system";
 import { users } from "@/server/db/schema/users";
@@ -17,6 +18,7 @@ import { DEMO_KEY } from "@/server/moodle/fake-inline";
 import { getAssignments, getSubmissionStatus, type Assignment } from "@/server/moodle/read/assignments";
 import type { CalendarEvent, Quiz } from "@/server/moodle/read/calendar";
 import { getCourses } from "@/server/moodle/read/courses";
+import type { GradeItemRow } from "@/server/moodle/read/grades";
 import { ESTIMATE_KIND } from "@/server/ai/jobs/estimate";
 import { SYNC_FILES_KIND } from "./files";
 import { BUDGET_MS, CURSOR_KEY, CURSOR_MAX_AGE_MS, FRESH_MS, SLICE, cursorFrom, syncNow, type SyncNowDeps } from "./run";
@@ -65,8 +67,10 @@ function fakeMoodle(options: FakeOptions = {}) {
     clock: Date.parse("2026-11-14T08:00:00Z"),
     /** Assignment Moodle ids whose status call fails with MoodleDown while this is set. */
     downFor: new Set<number>(),
+    /** Every grade call fails with MoodleDown while this is set. */
+    gradesDown: false,
   };
-  const asked = { courses: 0, lists: 0, statusFor: [] as number[], dates: 0 };
+  const asked = { courses: 0, lists: 0, statusFor: [] as number[], dates: 0, gradesFor: [] as number[], order: [] as string[] };
   /** The fake's own assignment each copy was made from. */
   const baseOf = new Map<number, number>();
 
@@ -105,11 +109,22 @@ function fakeMoodle(options: FakeOptions = {}) {
     // The inline fake Moodle has no calendar, so these two answer made-up dates.
     getQuizzes: () => {
       asked.dates += 1;
+      asked.order.push("dates");
       return call(async () => QUIZZES);
     },
     getUpcoming: () => {
       asked.dates += 1;
+      asked.order.push("dates");
       return call(async () => CALENDAR);
+    },
+    // Nor grades: one made-up course of grades, the other courses have none.
+    getGradeItems: (_conn, courseMoodleId) => {
+      asked.gradesFor.push(courseMoodleId);
+      asked.order.push(`grades:${courseMoodleId}`);
+      return call(async () => {
+        if (state.gradesDown) throw new MoodleDown("HTTP 503");
+        return structuredClone(GRADES[courseMoodleId] ?? []);
+      });
     },
   };
   return { deps, asked, state };
@@ -126,6 +141,15 @@ const CALENDAR: CalendarEvent[] = [
   { moodleRef: "event:9201", courseMoodleId: 3101, title: "Tentti", startsAt: DEC_15, module: "other", url: null },
   { moodleRef: "event:9101", courseMoodleId: 3101, title: "Assignment 3 is due", startsAt: DEC_1, module: "assign", url: null },
 ];
+
+// Made-up grades in one of the fake's courses: one graded with a weight, one not graded yet.
+const GRADES: Record<number, GradeItemRow[]> = {
+  3101: [
+    { moodleRef: "gradeitem:6101", name: "Assignment 1", kind: "assign", max: 20, score: 17, percent: 85, weight: 0.2, gradedAt: DEC_1, hidden: false },
+    { moodleRef: "gradeitem:6103", name: "Exam", kind: "manual", max: 100, score: null, percent: null, weight: null, gradedAt: null, hidden: false },
+  ],
+};
+const COURSES = [3101, 3102, 3103, 3104];
 
 /** Calls again, a second later each time, until the sync says nothing is left. */
 async function finish(userId: string, deps: SyncNowDeps, state: { clock: number }, opts = {}) {
@@ -203,17 +227,33 @@ describe("syncNow", () => {
     state.clock += 1_000;
     const thirdStart = state.clock;
     const third = await syncNow(userId, {}, t.db, deps);
-    expect(third).toEqual({ ran: true, added: 0, status: "ok", more: false });
+    // The dates (4 s), then grades a course at a time (6 s, 8 s), then time is up.
+    expect(third).toEqual({ ran: true, added: 0, status: "ok", more: true });
     expect(state.clock - thirdStart).toBeLessThan(10_000);
+    expect(cursorFrom(await settingsOf(userId))).toEqual({
+      startedAt: firstStart,
+      done: range(9000, 20),
+      assignmentsDone: true,
+      datesDone: true,
+      gradesDone: [3101, 3102],
+    });
+
+    state.clock += 1_000;
+    const fourthStart = state.clock;
+    const fourth = await syncNow(userId, {}, t.db, deps);
+    expect(fourth).toEqual({ ran: true, added: 0, status: "ok", more: false });
+    expect(state.clock - fourthStart).toBeLessThan(10_000);
 
     // Nothing twice: the courses were read once, every hand-in status was asked
     // once, and the two calls together added each row once. The list is the one
     // thing each call reads again (see the header of run.ts).
     expect(asked.courses).toBe(1);
     expect([...asked.statusFor].sort((a, b) => a - b)).toEqual(range(9000, 20));
-    // The third call asked only for the dates, not the list again.
+    // The third call asked only for the dates and grades, not the list again;
+    // the fourth only for the grades left. Each course's grades once.
     expect(asked.lists).toBe(2);
     expect(asked.dates).toBe(2);
+    expect(asked.gradesFor).toEqual(COURSES);
     expect(first.added + second.added).toBe(4 + 20);
 
     const conn = await connectionOf(userId);
@@ -350,6 +390,8 @@ describe("syncNow", () => {
     expect((await settingsOf(userId)).moodleCalls).toEqual({ day: "2026-11-14", count: 7 });
     expect((await syncNow(userId, {}, t.db, deps)).more).toBe(true);
     expect((await settingsOf(userId)).moodleCalls).toEqual({ day: "2026-11-14", count: 7 });
+    expect((await syncNow(userId, {}, t.db, deps)).more).toBe(true);
+    expect((await settingsOf(userId)).moodleCalls).toEqual({ day: "2026-11-14", count: 7 });
     expect((await syncNow(userId, {}, t.db, deps)).more).toBe(false);
     expect(await settingsOf(userId)).toEqual({ moodleCalls: { day: "2026-11-14", count: 7 } });
   }, SLOW);
@@ -362,7 +404,10 @@ describe("syncNow", () => {
     expect((await syncNow(userId, {}, t.db, deps)).more).toBe(true);
     expect(await syncFilesJobs()).toEqual([]);
 
-    // The rest of the assignments, then the dates: one job, once the dates are in.
+    // The rest of the assignments, then the dates and grades: one job, once the grades are in.
+    state.clock += 1_000;
+    expect((await syncNow(userId, {}, t.db, deps)).more).toBe(true);
+    expect(await syncFilesJobs()).toEqual([]);
     state.clock += 1_000;
     expect((await syncNow(userId, {}, t.db, deps)).more).toBe(true);
     expect(await syncFilesJobs()).toEqual([]);
@@ -376,7 +421,7 @@ describe("syncNow", () => {
 
     // Another finished sync while that job still waits: still one job.
     state.clock += MINUTE;
-    expect(await finish(userId, deps, state, { force: true })).toBe(3);
+    expect(await finish(userId, deps, state, { force: true })).toBe(4);
     expect(await syncFilesJobs()).toEqual(queued);
 
     // A call that asks Moodle nothing adds nothing; once the job has run, the next finished sync adds a new one.
@@ -387,7 +432,7 @@ describe("syncNow", () => {
     expect((await syncNow(userId, {}, t.db, deps)).more).toBe(true);
     expect(await syncFilesJobs()).toHaveLength(1);
     state.clock += 1_000;
-    expect(await finish(userId, deps, state)).toBe(2);
+    expect(await finish(userId, deps, state)).toBe(3);
     expect((await syncFilesJobs()).map((j) => j.status)).toEqual(["done", "queued"]);
   }, SLOW);
 
@@ -400,7 +445,7 @@ describe("syncNow", () => {
     expect(await estimateJobs()).toEqual([]);
 
     state.clock += 1_000;
-    expect(await finish(userId, deps, state)).toBe(2);
+    expect(await finish(userId, deps, state)).toBe(3);
     const rows = await t.db.select({ id: assignments.id }).from(assignments).where(eq(assignments.userId, userId));
     expect(rows).toHaveLength(20);
     const queued = await estimateJobs();
@@ -458,7 +503,7 @@ describe("syncNow", () => {
       status: "not_connected",
       more: false,
     });
-    expect(asked).toEqual({ courses: 0, lists: 0, statusFor: [], dates: 0 });
+    expect(asked).toEqual({ courses: 0, lists: 0, statusFor: [], dates: 0, gradesFor: [], order: [] });
   }, SLOW);
 
   it("syncs her dates after the assignments: the quiz and the Tentti become exams once", async () => {
@@ -506,5 +551,47 @@ describe("syncNow", () => {
     expect({ courses: asked.courses, lists: asked.lists, statuses: asked.statusFor.length }).toEqual(before);
     expect(await t.db.select().from(exams).where(eq(exams.userId, userId))).toHaveLength(2);
     expect((await connectionOf(userId)).lastError).toBeNull();
+  }, SLOW);
+
+  it("syncs her grades after the dates, one Moodle call per visible course, and a manual weight survives", async () => {
+    const userId = await connectedUser();
+    const { deps, asked, state } = fakeMoodle();
+
+    expect(await syncNow(userId, {}, t.db, deps)).toEqual({ ran: true, added: 4 + 3, status: "ok", more: false });
+    expect(asked.order).toEqual(["dates", "dates", ...COURSES.map((c) => `grades:${c}`)]);
+    const rows = await t.db.select().from(gradeItems).where(eq(gradeItems.userId, userId)).orderBy(asc(gradeItems.position));
+    expect(rows.map((r) => [r.moodleRef, r.short, r.score, r.weight, r.weightSource])).toEqual([
+      ["gradeitem:6101", "A1", 17, 0.2, "moodle"],
+      ["gradeitem:6103", "Exam", null, null, null],
+    ]);
+
+    // She types the exam's weight; the next sync keeps it.
+    await t.db.update(gradeItems).set({ weight: 0.8, weightSource: "manual" }).where(eq(gradeItems.moodleRef, "gradeitem:6103"));
+    state.clock += MINUTE;
+    expect((await syncNow(userId, { force: true }, t.db, deps)).more).toBe(false);
+    expect(asked.gradesFor).toEqual([...COURSES, ...COURSES]);
+    const [exam] = await t.db.select().from(gradeItems).where(eq(gradeItems.moodleRef, "gradeitem:6103"));
+    expect(exam).toMatchObject({ weight: 0.8, weightSource: "manual" });
+  }, SLOW);
+
+  it("keeps the cursor with the dates done when Moodle is down for the grades, and the next call only asks for those", async () => {
+    const userId = await connectedUser();
+    const { deps, asked, state } = fakeMoodle();
+    state.gradesDown = true;
+
+    expect(await syncNow(userId, {}, t.db, deps)).toEqual({ ran: true, added: 4 + 3, status: "ok", more: false });
+    expect((await connectionOf(userId)).lastError).toBe("MoodleDown: HTTP 503");
+    expect((await connectionOf(userId)).lastSyncAt).toBeNull();
+    expect(cursorFrom(await settingsOf(userId))).toMatchObject({ assignmentsDone: true, datesDone: true, gradesDone: [] });
+    expect(await syncFilesJobs()).toEqual([]);
+
+    state.gradesDown = false;
+    state.clock += MINUTE;
+    const before = { courses: asked.courses, lists: asked.lists, statuses: asked.statusFor.length, dates: asked.dates };
+    expect(await syncNow(userId, {}, t.db, deps)).toEqual({ ran: true, added: 0, status: "ok", more: false });
+    expect({ courses: asked.courses, lists: asked.lists, statuses: asked.statusFor.length, dates: asked.dates }).toEqual(before);
+    expect(await t.db.select().from(gradeItems).where(eq(gradeItems.userId, userId))).toHaveLength(2);
+    expect((await connectionOf(userId)).lastError).toBeNull();
+    expect(await syncFilesJobs()).toHaveLength(1);
   }, SLOW);
 });

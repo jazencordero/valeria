@@ -1,5 +1,5 @@
 /*
- * Refreshes her Moodle data when she opens the app: courses, assignments, then dates.
+ * Refreshes her Moodle data when she opens the app: courses, assignments, dates, then grades.
  *
  *   const { ran, added, status, more } = await syncNow(userId, { force: false });
  *
@@ -15,18 +15,24 @@
  *    and writes its rows before the next slice starts.
  * 3. Dates (`syncEvents`, ./events): her calendar and quizzes, two Moodle
  *    calls (the calendar can be up to four pages), and the exams it suggests.
+ * 4. Grades (`syncGrades`, ./grades), one course at a time: one Moodle call
+ *    per visible course, and that course's rows are written before the next.
  *
  * Time: the clock is checked before every step. Once BUDGET_MS have passed no
  * new step starts, so no new Moodle call starts. One exception keeps a very
  * slow Moodle from looping for ever: a call that continues an unfinished sync
- * always runs its first slice, and a call that continues with only the dates
- * left always runs that step.
+ * always runs its first slice, a call that continues with only the dates
+ * (and grades) left always runs the dates, and a call that continues with only
+ * grades left always runs its first course.
  *
- * Where it was: `users.settings.syncCursor = { startedAt, done, assignmentsDone? }`,
+ * Where it was: `users.settings.syncCursor = { startedAt, done, assignmentsDone?, datesDone?, gradesDone? }`,
  * where `done` holds the Moodle ids of the assignments already synced. A cursor
  * means "courses are done, the rest is not"; `assignmentsDone: true` means only
- * the dates are left. The next call skips the courses and every assignment in
- * `done` (all of them, with `assignmentsDone`), so no course is written twice
+ * the dates and grades are left; `datesDone: true` means only grades are left,
+ * and `gradesDone` holds the Moodle ids of the courses whose grades are in.
+ * The next call skips the courses and every assignment in
+ * `done` (all of them, with `assignmentsDone`), the dates with `datesDone` and
+ * every course in `gradesDone`, so no course is written twice
  * and no hand-in status is asked twice. The assignment list itself is read again
  * by each call (one Moodle call); it is too big to keep in the cursor.
  * A cursor older than CURSOR_MAX_AGE_MS is thrown away and the sync starts
@@ -37,7 +43,7 @@
  * - `ran`: false when nothing was asked of Moodle (synced under 10 minutes
  *   ago and not forced, not connected, or the key is known to be rejected).
  * - `added`: course rows plus assignment rows this call added. Event and exam
- *   rows are not counted.
+ *   rows, and grade rows, are not counted.
  * - `status`: the connection's status after the call, or 'not_connected'.
  * - `more`: true when the caller should call again now.
  *
@@ -71,10 +77,12 @@ import { KeyRejected, MoodleError } from "@/server/moodle/client";
 import { getAssignments, getSubmissionStatus, type Assignment } from "@/server/moodle/read/assignments";
 import { getCourses } from "@/server/moodle/read/courses";
 import { getQuizzes, getUpcoming } from "@/server/moodle/read/calendar";
+import { getGradeItems } from "@/server/moodle/read/grades";
 import { syncAssignments, type SyncAssignmentsDeps } from "./assignments";
 import { NotConnected, syncCourses, type SyncCoursesDeps } from "./courses";
 import { syncEvents, type SyncEventsDeps } from "./events";
 import { SYNC_FILES_KIND } from "./files";
+import { coursesForGrades, syncGrades, type SyncGradesDeps } from "./grades";
 
 /** No new step, so no new Moodle call, starts after this much of one call. */
 export const BUDGET_MS = 8_000;
@@ -100,16 +108,24 @@ export type SyncNowResult = {
   more: boolean;
 };
 
-/** What the sync reads Moodle and the clock with. Tests pass their own. */
-export type SyncNowDeps = SyncCoursesDeps & SyncAssignmentsDeps & SyncEventsDeps;
+/**
+ * What the sync reads Moodle and the clock with. Tests pass their own.
+ * `getGradeItems` may be left out: callers written before grades (M6-02) then
+ * read grades with the real one.
+ */
+export type SyncNowDeps = SyncCoursesDeps & SyncAssignmentsDeps & SyncEventsDeps & Partial<SyncGradesDeps>;
 
 export type SyncCursor = {
   /** When the sync this cursor belongs to started (ms). */
   startedAt: number;
   /** Moodle ids of the assignments already synced. */
   done: number[];
-  /** Every assignment is synced; only the dates are left. Left out when false. */
+  /** Every assignment is synced; only the dates and grades are left. Left out when false. */
   assignmentsDone?: true;
+  /** The dates are synced too; only grades are left. Comes with `assignmentsDone`. Left out when false. */
+  datesDone?: true;
+  /** Moodle ids of the courses whose grades are synced. Only with `datesDone`. */
+  gradesDone?: number[];
 };
 
 const defaultDeps: SyncNowDeps = {
@@ -118,13 +134,14 @@ const defaultDeps: SyncNowDeps = {
   getSubmissionStatus,
   getUpcoming,
   getQuizzes,
+  getGradeItems,
   now: () => Date.now(),
 };
 
 /** The cursor saved in `settings`, or null when there is none or it is not one. */
 export function cursorFrom(settings: Record<string, unknown> | null | undefined): SyncCursor | null {
   const raw = settings?.[CURSOR_KEY] as
-    | { startedAt?: unknown; done?: unknown; assignmentsDone?: unknown }
+    | { startedAt?: unknown; done?: unknown; assignmentsDone?: unknown; datesDone?: unknown; gradesDone?: unknown }
     | null
     | undefined;
   if (!raw || typeof raw !== "object") return null;
@@ -132,6 +149,11 @@ export function cursorFrom(settings: Record<string, unknown> | null | undefined)
   if (!Array.isArray(raw.done) || !raw.done.every((id) => Number.isSafeInteger(id))) return null;
   const cursor: SyncCursor = { startedAt: raw.startedAt, done: raw.done as number[] };
   if (raw.assignmentsDone === true) cursor.assignmentsDone = true;
+  if (cursor.assignmentsDone && raw.datesDone === true) {
+    cursor.datesDone = true;
+    const graded = raw.gradesDone;
+    if (Array.isArray(graded) && graded.every((id) => Number.isSafeInteger(id))) cursor.gradesDone = graded as number[];
+  }
   return cursor;
 }
 
@@ -182,10 +204,13 @@ export async function syncNow(
   const syncStartedAt = cursor?.startedAt ?? callStartedAt;
   const done = new Set(cursor?.done ?? []);
   let assignmentsDone = cursor?.assignmentsDone === true;
+  let datesDone = cursor?.datesDone === true;
+  const graded = new Set(cursor?.gradesDone ?? []);
   const cursorNow = (): SyncCursor => ({
     startedAt: syncStartedAt,
     done: [...done],
     ...(assignmentsDone ? { assignmentsDone: true as const } : {}),
+    ...(datesDone ? { datesDone: true as const, gradesDone: [...graded] } : {}),
   });
   let coursesDone = cursor !== null;
   let added = 0;
@@ -240,12 +265,29 @@ export async function syncNow(
     }
 
     // Dates (M3-12). Skipped for the next call when time is up, unless this
-    // call continued a sync with only the dates left: then it is all it does.
-    if (!cursor?.assignmentsDone && outOfTime()) {
-      await saveCursor(database, userId, cursorNow());
-      return { ran: true, added, status: link.status, more: true };
+    // call continued a sync with only the dates left: then they run first.
+    if (!datesDone) {
+      if (!cursor?.assignmentsDone && outOfTime()) {
+        await saveCursor(database, userId, cursorNow());
+        return { ran: true, added, status: link.status, more: true };
+      }
+      await syncEvents(userId, database, { getUpcoming: deps.getUpcoming, getQuizzes: deps.getQuizzes, now: deps.now });
+      datesDone = true;
     }
-    await syncEvents(userId, database, { getUpcoming: deps.getUpcoming, getQuizzes: deps.getQuizzes, now: deps.now });
+
+    // Grades (M6-02), one course per step: one Moodle call, then its rows.
+    // A call that continued with only grades left always runs its first course.
+    let mayStopGrades = !cursor?.datesDone;
+    for (const courseMoodleId of await coursesForGrades(userId, database)) {
+      if (graded.has(courseMoodleId)) continue;
+      if (mayStopGrades && outOfTime()) {
+        await saveCursor(database, userId, cursorNow());
+        return { ran: true, added, status: link.status, more: true };
+      }
+      await syncGrades(userId, database, { getGradeItems: deps.getGradeItems ?? getGradeItems }, { courses: [courseMoodleId] });
+      graded.add(courseMoodleId);
+      mayStopGrades = true;
+    }
 
     // Her course files are listed in the background (./files, M2-08): one
     // `sync-files` job per user, so a sync that finishes while the last job
