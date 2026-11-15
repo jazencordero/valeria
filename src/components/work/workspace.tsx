@@ -144,16 +144,18 @@ const clock = (at: Date) => listDate(at).split(" · ")[1];
  * - Open, past due: `Due TUE 17 · 23:59 · late by 3 h`
  * - Open, no due date: `No due date`
  * - Handed in today: `Handed in 15:52`; another day: `Handed in TUE 10 · 15:52`
+ * A day more than six days away names its month (`Due SUN 6 DEC · 20:00 · 21 days left`),
+ * as on Home and the Assignments list: "SUN 6" alone could be this month's.
  */
 export function dueText(dueAt: Date | null, handedInAt: Date | null, now: Date): string {
-  if (handedInAt) return `Handed in ${sameDay(handedInAt, now) ? clock(handedInAt) : listDate(handedInAt)}`;
+  if (handedInAt) return `Handed in ${sameDay(handedInAt, now) ? clock(handedInAt) : listDate(handedInAt, now)}`;
   if (!dueAt) return "No due date";
-  return `Due ${sameDay(dueAt, now) ? clock(dueAt) : listDate(dueAt)} · ${timeLeft(dueAt, now)}`;
+  return `Due ${sameDay(dueAt, now) ? clock(dueAt) : listDate(dueAt, now)} · ${timeLeft(dueAt, now)}`;
 }
 
 /** The receipt line in the chat: "Handed in to <LMS> at 15:52." */
 export function receiptText(lms: string, at: Date, now: Date): string {
-  return `Handed in to ${lms} at ${sameDay(at, now) ? clock(at) : listDate(at)}.`;
+  return `Handed in to ${lms} at ${sameDay(at, now) ? clock(at) : listDate(at, now)}.`;
 }
 
 /**

@@ -56,7 +56,8 @@
 import { and, asc, eq, gte, inArray, isNull, lte, not } from "drizzle-orm";
 import { z } from "zod";
 import { assignmentHelp, type AiAssignments, type AiStudy } from "@/lib/ai-policy";
-import { listDate } from "@/lib/dates";
+// dateLine, not listDate: the tutor is told the month too ("MON 23 NOV · 09:00"), it has no calendar.
+import { dateLine } from "@/lib/dates";
 import { conceptMastery } from "@/lib/study/ladder";
 import { newCard } from "@/lib/study/memory";
 import { asData, DATA_RULE } from "@/server/ai/as-data";
@@ -364,7 +365,7 @@ async function examPlace(userId: string, examId: string, byId: Map<string, Cours
     .slice(0, WEAKEST)
     .map((c) => `${c.name} (${Math.round(c.mastery * 100)}% ready)`);
   const lines = [
-    `She is on the page of the exam "${exam.title}" (${course.name}), on ${listDate(exam.at)}${exam.at < now ? ", already past" : ""}.`,
+    `She is on the page of the exam "${exam.title}" (${course.name}), on ${dateLine(exam.at)}${exam.at < now ? ", already past" : ""}.`,
   ];
   if (scored.length) lines.push(`Its concepts: ${scored.map((c) => c.name).join("; ")}.`);
   if (weakest.length) lines.push(`Where she is weakest: ${weakest.join("; ")}.`);
@@ -434,7 +435,7 @@ async function assignmentPlace(userId: string, assignmentId: string, byId: Map<s
   }
   return {
     courseId: course.id,
-    where: `She is on the page of the assignment "${row.name}" (${course.name})${row.dueAt ? `, due ${listDate(row.dueAt)}` : ""}. You may explain the ideas it is about, never write any of it.`,
+    where: `She is on the page of the assignment "${row.name}" (${course.name})${row.dueAt ? `, due ${dateLine(row.dueAt)}` : ""}. You may explain the ideas it is about, never write any of it.`,
     material: null,
     note: null,
     anchor: GENERAL,
@@ -474,11 +475,11 @@ async function anywherePlace(userId: string, list: CourseRow[], database: Db, no
   ]);
   const lines = [`Her courses: ${visible.map((c) => c.name).join("; ")}.`];
   if (upcoming.length) {
-    lines.push(`Exams coming: ${upcoming.map((e) => `${e.title} (${name.get(e.courseId)}), ${listDate(e.at)}`).join("; ")}.`);
+    lines.push(`Exams coming: ${upcoming.map((e) => `${e.title} (${name.get(e.courseId)}), ${dateLine(e.at)}`).join("; ")}.`);
   }
   if (due.length) {
     lines.push(
-      `Due in the next ${DUE_DAYS} days: ${due.map((a) => `${a.name} (${name.get(a.courseId)})${a.dueAt ? `, ${listDate(a.dueAt)}` : ""}`).join("; ")}.`,
+      `Due in the next ${DUE_DAYS} days: ${due.map((a) => `${a.name} (${name.get(a.courseId)})${a.dueAt ? `, ${dateLine(a.dueAt)}` : ""}`).join("; ")}.`,
     );
   }
   return { courseId: null, where: lines.join("\n"), material: null, note: null, anchor: GENERAL };

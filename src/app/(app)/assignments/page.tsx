@@ -32,8 +32,9 @@ async function signedInUser(): Promise<User> {
 }
 
 function doneMeta(a: DoneAssignment, now: Date): string {
-  // Today: just the time, "15:52 · Forecasting Methods". Earlier: "TUE 10 · 15:52 · ...".
-  const when = sameDay(a.submittedAt, now) ? listDate(a.submittedAt).split(" · ")[1] : listDate(a.submittedAt);
+  // Today: just the time, "15:52 · Forecasting Methods". Earlier: "TUE 10 · 15:52 · ...",
+  // with the month once it is more than six days back ("TUE 3 NOV · 15:52 · ...").
+  const when = sameDay(a.submittedAt, now) ? listDate(a.submittedAt).split(" · ")[1] : listDate(a.submittedAt, now);
   return `${when} · ${a.course}`;
 }
 

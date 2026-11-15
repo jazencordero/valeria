@@ -211,12 +211,17 @@ describe("buildTutorContext", () => {
     expect(other).toContain("Finance 101");
     expect(other).toContain("ASSIGNMENT-NAME");
     expect(other).toContain("Midterm");
+    // Dates carry their month: "FRI 20 · 23:00" alone tells a model with no calendar nothing.
+    expect(text).toContain("due FRI 20 NOV · 23:00");
+    expect(other).toContain("FRI 20 NOV · 23:00");
+    expect(other).toContain("TUE 1 DEC · 11:00");
   });
 
   it("an exam: its concepts and where she is weakest", async () => {
     const s = await student();
     const text = all((await buildTutorContext(s.user.id, { kind: "exam", examId: s.exam.id }, { now: NOW }, t.db)).parts);
     expect(text).toContain('the exam "Midterm"');
+    expect(text).toContain("on TUE 1 DEC · 11:00");
     expect(text).toContain("Its concepts: Discounting; Annuities.");
     expect(text).toContain("Where she is weakest:");
   });

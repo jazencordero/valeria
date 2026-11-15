@@ -345,7 +345,7 @@ export function HandinSheet({
                         {dueAt.day} <span className="mono-in">{dueAt.time}</span>
                       </>
                     ) : (
-                      <span className="mono-in">{listDate(review.due)}</span>
+                      <span className="mono-in">{listDate(review.due, at)}</span>
                     )}
                   </span>
                   <span className="text-[13px] font-semibold ink-2">{early}</span>
