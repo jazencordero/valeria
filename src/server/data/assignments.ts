@@ -22,6 +22,7 @@ import { db as defaultDb, type Db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import { assignments, drafts } from "@/server/db/schema/work";
+import { shortNameOf } from "./courses";
 
 /** The first sync runs straight after connecting; anything first seen this close to it came with it. */
 export const FIRST_SYNC_WINDOW_MS = 10 * 60 * 1000;
@@ -130,7 +131,7 @@ export async function getAssignmentsView(
     id: a.id,
     title: a.name,
     courseId: a.courseId,
-    course: a.courseName,
+    course: shortNameOf(a.courseName),
     dueAt: a.dueAt,
     estimateMin: a.estimateMin,
     status: isNew(a, now)
@@ -148,9 +149,9 @@ export async function getAssignmentsView(
       id: a.id,
       title: a.name,
       courseId: a.courseId,
-      course: a.courseName,
+      course: shortNameOf(a.courseName),
       submittedAt: a.submitted_at,
     }));
 
-  return { courses: visible, course, open, done };
+  return { courses: visible.map((c) => ({ ...c, name: shortNameOf(c.name) })), course, open, done };
 }

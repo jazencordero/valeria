@@ -389,7 +389,7 @@ describe("an account file pulled by hand (M3-57 follow-up 2)", () => {
       account.courses[0].name = `${account.courses[0].code} - Intro to Forecasting, Contact teaching, 21.10.2026-2.12.2026`;
       account.courses[0].assignments = [
         { name: "Winter essay", due: "2026-11-20 23:59", cutoff: "2026-11-27 23:59", opens: "2026-11-01 08:00", maxFiles: 1 },
-        { name: "Summer essay", due: "2026-06-15 12:00" },
+        { name: "Summer essay", due: "2026-06-15 12:00", status: "new" },
         { name: "Zoned essay", due: "2026-11-20T23:59:00+02:00" },
         { name: "No date essay" },
       ];
@@ -413,6 +413,8 @@ describe("an account file pulled by hand (M3-57 follow-up 2)", () => {
 
       const [course] = (await t.db.select().from(courses).where(eq(courses.userId, r.userId))).filter((c) => c.code === account.courses[0].code);
       expect(course.name).toBe("Intro to Forecasting, Contact teaching, 21.10.2026-2.12.2026");
+      // On screen she sees the short name (the assignment page's loader cuts the rest off).
+      expect((await getAssignmentPage(r.userId, byName("Winter essay").id, t.db))?.course).toBe("Intro to Forecasting");
 
       // A second run on a corrected file updates the same rows in place.
       account.courses[0].assignments[0].due = "2026-11-21 23:59";
@@ -430,6 +432,101 @@ describe("an account file pulled by hand (M3-57 follow-up 2)", () => {
       await write(path.join(dir, "account.json"), account);
       const err = await loadSeed(dir, bundles).catch((e: unknown) => e);
       expect((err as SeedInvalid).problems.join("\n")).toContain("courses.0.assignments.0.due");
+    },
+    T,
+  );
+});
+
+describe("past-due assignments with no known hand-in status (M3-57 follow-up 3)", () => {
+  const HAND = [
+    { name: "Old essay", due: "2026-10-01 23:59" },
+    { name: "Old quiz prep", due: "2026-10-10 23:59" },
+    { name: "Old lab", due: "2026-10-20 23:59" },
+    { name: "Coming essay", due: "2026-11-25 23:59" },
+    { name: "No date task" },
+  ];
+  async function handDir(name: string) {
+    const dir = path.join(tmp, name);
+    const account = JSON.parse(await readFile(path.join(ACCOUNT, "account.json"), "utf8"));
+    account.courses[0].assignments = HAND;
+    await cp(ACCOUNT, dir, { recursive: true });
+    await write(path.join(dir, "account.json"), account);
+    return { dir, code: account.courses[0].code as string };
+  }
+  const namesOf = async (userId: string) =>
+    (await t.db.select().from(assignments).where(eq(assignments.userId, userId))).map((a) => a.name).sort();
+
+  it(
+    "skips them and says how many; upcoming and undated ones come in as open",
+    async () => {
+      const { dir } = await handDir("past-unknown");
+      const r = await applySeed(t.db, planSeed(await loadSeed(dir, bundles)), { name: "Testi", now: NOW });
+      const mine = (await namesOf(r.userId)).filter((n) => HAND.some((h) => h.name === n));
+      expect(mine).toEqual(["Coming essay", "No date task"]);
+      expect(r.skipped.join("\n")).toContain("3 assignments due before the files were pulled, with no hand-in status known: not created");
+    },
+    T,
+  );
+
+  it(
+    "uses the status files of account-status.mjs: handed in, graded and known-open ones are stored; only the unknown one is skipped",
+    async () => {
+      const { dir, code } = await handDir("past-known");
+      await write(path.join(dir, `${code}.json`), {
+        course: { id: 1, shortname: `${code}_invented-instance`, fullname: "Invented" },
+        assignments: [
+          { id: 1, name: "Old essay", status: "submitted", graded: false, submittedAt: "2026-09-30T10:00:00.000Z" },
+          { id: 2, name: "old quiz  prep", status: "submitted", graded: true },
+          { id: 3, name: "Old lab", status: null, graded: false, error: "accessexception: invented" },
+          { id: 4, name: "Coming essay", status: "new", graded: false },
+        ],
+        grades: [],
+        errors: [],
+      });
+      // Another course's file must not lend its statuses to this one.
+      await write(path.join(dir, "OTHER.json"), { course: { shortname: "OTHER-X1", fullname: "Other" }, assignments: [{ name: "Old lab", status: "submitted" }] });
+
+      const r = await applySeed(t.db, planSeed(await loadSeed(dir, bundles)), { name: "Testi", now: NOW });
+      const rows = await t.db.select().from(assignments).where(eq(assignments.userId, r.userId));
+      const stateOf = (n: string) => rows.find((a) => a.name === n)?.state;
+      expect(stateOf("Old essay")).toBe("submitted");
+      expect(rows.find((a) => a.name === "Old essay")?.submittedAt?.toISOString()).toBe("2026-09-30T10:00:00.000Z");
+      expect(stateOf("Old quiz prep")).toBe("graded");
+      expect(stateOf("Old lab")).toBeUndefined();
+      expect(stateOf("Coming essay")).toBe("open");
+      expect(r.skipped.join("\n")).toContain("1 assignment due before the files were pulled");
+    },
+    T,
+  );
+
+  it(
+    "a rerun removes the past-due rows an earlier run of the seed created, and nothing a sync wrote",
+    async () => {
+      const { dir } = await handDir("past-rerun");
+      // An earlier run, from before this rule: everything came in as open.
+      const input = await loadSeed(dir, bundles);
+      const longAgo = new Date("2026-01-01T00:00:00Z");
+      const early = planSeed({ ...input, account: { ...input.account, pulledAt: "2026-01-01T00:00:00.000Z" } }, longAgo);
+      const first = await applySeed(t.db, { ...early, pulledAt: input.account.pulledAt ?? null }, { name: "Testi", now: NOW });
+      expect((await namesOf(first.userId)).filter((n) => n.startsWith("Old"))).toHaveLength(3);
+      // A row a real sync wrote (a real, positive Moodle id) with the same kind of past date.
+      const [course] = await t.db.select().from(courses).where(eq(courses.userId, first.userId)).limit(1);
+      await t.db.insert(assignments).values({ userId: first.userId, courseId: course.id, moodleId: 555001, name: "Synced old task", dueAt: new Date("2026-10-05T10:00:00Z") });
+
+      const r = await applySeed(t.db, planSeed(input), { name: "Testi", now: NOW });
+      expect(r.userId).toBe(first.userId);
+      const left = await namesOf(r.userId);
+      expect(left.filter((n) => n.startsWith("Old"))).toEqual([]);
+      expect(left).toContain("Synced old task");
+      expect(left).toContain("Coming essay");
+      expect(r.notes.join("\n")).toContain("Removed 3 past-due assignments an earlier run created");
+
+      // And once more: nothing left to remove, nothing changes.
+      const before = await rowCounts();
+      const again = await applySeed(t.db, planSeed(input), { name: "Testi", now: NOW });
+      expect(await rowCounts()).toEqual(before);
+      expect(again.notes.join("\n")).not.toContain("Removed");
+      expect(touched(again)).toBe(0);
     },
     T,
   );

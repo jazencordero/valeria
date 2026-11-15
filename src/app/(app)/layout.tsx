@@ -63,6 +63,7 @@ import { TabBar, TabBarView } from "@/components/shell/tab-bar";
 import { Toaster } from "@/components/ui/toast";
 import { sameDay } from "@/lib/dates";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
+import { shortNameOf } from "@/server/data/courses";
 import { db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { exams } from "@/server/db/schema/study";
@@ -138,7 +139,8 @@ async function SideNavForUser() {
     shellCounts(user.id),
   ]);
   const chip: SideUser = { firstName: firstName(user.displayName), school: user.school };
-  return <SideNav courses={rows} user={chip} counts={counts} />;
+  // The sidebar shows the short course name, as every list does ("…, Lecture, 1.9.-18.12." cut off).
+  return <SideNav courses={rows.map((c) => ({ ...c, name: shortNameOf(c.name) }))} user={chip} counts={counts} />;
 }
 
 async function TabBarForUser() {

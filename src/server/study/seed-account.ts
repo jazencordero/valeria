@@ -332,8 +332,50 @@ export type BundleCourse =
   | { kind: "exam"; courseCode: string; folder: string; plan: ImportPlan }
   | { kind: "studyOnly"; courseCode: string; folder: string; plan: StudyOnlyPlan };
 
+/**
+ * One per-course status file as `scripts/moodle/account-status.mjs` (M0-16) writes it:
+ * `{ course: {id, shortname, fullname}, assignments: [{ id, name, status, graded, submittedAt,
+ * error? }] }`. Read leniently; a file of another shape is simply not a status file.
+ */
+const StatusFileSchema = z.looseObject({
+  course: z.looseObject({ shortname: z.string().nullish(), fullname: z.string().nullish() }),
+  assignments: z.array(
+    z.looseObject({
+      id: moodleIdOrNull,
+      name: z.string(),
+      status: z.string().nullish(),
+      graded: z.boolean().nullish(),
+      submittedAt: When,
+      error: z.unknown().optional(),
+    }),
+  ),
+});
+export type KnownStatus = { courseText: string; id: number | null; name: string; state: AssignmentState; submittedAt: Date | null };
+
+/** Every hand-in status the status files of <account-dir> know (an errored or empty one is not known). */
+async function loadStatusFiles(accountDir: string): Promise<KnownStatus[]> {
+  const out: KnownStatus[] = [];
+  const names = (await readdir(accountDir).catch(() => [] as string[])).filter((n) => n.endsWith(".json") && n !== "account.json").sort();
+  for (const n of names) {
+    const raw = await readFile(path.join(accountDir, n), "utf8")
+      .then((t) => JSON.parse(t) as unknown)
+      .catch(() => null);
+    const parsed = StatusFileSchema.safeParse(raw);
+    if (!parsed.success) continue;
+    const courseText = `${parsed.data.course.shortname ?? ""} ${parsed.data.course.fullname ?? ""}`.toUpperCase();
+    for (const a of parsed.data.assignments) {
+      if (a.error || (a.status == null && !a.graded)) continue;
+      out.push({ courseText, id: a.id != null ? Number(a.id) : null, name: normName(a.name), state: stateOf(a.status, a.graded), submittedAt: a.submittedAt ?? null });
+    }
+  }
+  return out;
+}
+const normName = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+
 export type SeedInput = {
   key: string;
+  /** Hand-in statuses from M0-16's per-course files, when <account-dir> holds them. */
+  statuses?: KnownStatus[];
   account: SeedAccount;
   bundlesAccount: BundlesAccount | null;
   /** Per course code (upper case): its AI rule from bundles account.json (either shape). */
@@ -414,7 +456,15 @@ export async function loadSeed(accountDir: string, bundlesDir: string): Promise<
     }
   }
 
-  return { key: seedKeyFor(accountRaw, await realpath(accountDir)), account, bundlesAccount, aiRules, bundles, bundleProblems };
+  return {
+    key: seedKeyFor(accountRaw, await realpath(accountDir)),
+    statuses: await loadStatusFiles(accountDir),
+    account,
+    bundlesAccount,
+    aiRules,
+    bundles,
+    bundleProblems,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -469,6 +519,11 @@ export type SeedPlan = {
   courses: PlannedCourse[];
   exams: PlannedExam[];
   bundles: BundleCourse[];
+  /**
+   * Moodle ids of past-due assignments left out because nobody knows whether she handed them in.
+   * A rerun removes these from her account when an earlier run of the seed created them.
+   */
+  skippedAssignmentIds: number[];
   /** Things left out on purpose: an exam with no date, a folder that could not be read. */
   skipped: string[];
   notStored: string[];
@@ -516,8 +571,13 @@ function gradeItemsOf(code: string, items: BundlesAccount["gradeWeights"][number
 
 const sameTitle = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-export function planSeed(input: SeedInput): SeedPlan {
+export function planSeed(input: SeedInput, now: Date = new Date()): SeedPlan {
   const skipped: string[] = [];
+  // "Past" is judged at the moment the files were pulled; without that, at `now`.
+  const pulled = toDate(input.account.pulledAt ?? null);
+  const cutOff = pulled instanceof Date ? pulled : now;
+  const statuses = input.statuses ?? [];
+  const skippedAssignmentIds: number[] = [];
   const notStored: string[] = [];
   const notes: string[] = [];
   const problems: string[] = [];
@@ -558,15 +618,28 @@ export function planSeed(input: SeedInput): SeedPlan {
         continue;
       }
       assignmentIds.set(id, `courses.${ci}.assignments.${ai}`);
+      const dueAt = a.dueAt ?? a.due ?? null;
+      // Her hand-in status: from the entry itself, else from a status file (by id, else by
+      // course and name), else unknown.
+      const own = a.status != null || a.graded != null;
+      const fromFile = own
+        ? undefined
+        : (statuses.find((s) => a.id != null && s.id === Number(a.id)) ??
+          statuses.find((s) => s.courseText.includes(code) && s.name === normName(a.name)));
+      if (!own && !fromFile && dueAt && dueAt.getTime() < cutOff.getTime()) {
+        // Past and unknown: never shown as overdue work, never claimed as handed in.
+        skippedAssignmentIds.push(id);
+        continue;
+      }
       planned.push({
         moodleId: id,
         cmid: a.cmid != null ? Number(a.cmid) : null,
         name: a.name.trim(),
-        dueAt: a.dueAt ?? a.due ?? null,
+        dueAt,
         cutoffAt: a.cutoffAt ?? a.cutoff ?? null,
         opensAt: a.opensAt ?? a.opens ?? null,
-        state: stateOf(a.status, a.graded),
-        submittedAt: a.submittedAt ?? null,
+        state: fromFile ? fromFile.state : stateOf(a.status, a.graded),
+        submittedAt: a.submittedAt ?? fromFile?.submittedAt ?? null,
         needsSubmitButton: a.requiresSubmitPress ?? false,
       });
     }
@@ -635,9 +708,16 @@ export function planSeed(input: SeedInput): SeedPlan {
 
   for (const p of input.bundleProblems) skipped.push(`Bundle folder ${p.folder}: not imported.\n    ${p.problems.join("\n    ")}`);
   if (problems.length) throw new SeedInvalid(problems);
+  if (skippedAssignmentIds.length) {
+    skipped.push(
+      `${plural(skippedAssignmentIds.length, "assignment")} due before the files were pulled, with no hand-in status known: not created ` +
+        "(run scripts/moodle/account-status.mjs into <account-dir> to bring them in with their real status).",
+    );
+  }
 
   return {
     key: input.key,
+    skippedAssignmentIds,
     pulledAt: account.pulledAt ?? null,
     courses: plannedCourses,
     exams: plannedExams,
@@ -715,8 +795,11 @@ export async function applySeed(
       const skipped = [...plan.skipped];
       const notes = [...plan.notes];
 
-      // The user.
-      const seededFrom = { key: plan.key, pulledAt: plan.pulledAt };
+      // The user. The marker also lists the assignments the seed wrote, so a later run can take
+      // back its own rows and nothing else.
+      const seededIds = plan.courses.flatMap((c) => c.assignments.map((a) => a.moodleId)).sort((a, b) => a - b);
+      const seededBefore = new Set<number>();
+      const seededFrom = { key: plan.key, pulledAt: plan.pulledAt, assignmentIds: seededIds };
       const name = options.name?.trim() || null;
       const found = await findSeededUser(tx, plan.key);
       let userId: string;
@@ -730,7 +813,8 @@ export async function applySeed(
         if (link) throw new SeedRefused("This student has connected MyCourses since; the sync owns her account now. Nothing was written.");
         const set: Partial<typeof users.$inferInsert> = {};
         if (name && found.displayName !== name) set.displayName = name;
-        const old = found.settings.seededFrom as { pulledAt?: unknown } | undefined;
+        const old = found.settings.seededFrom as { pulledAt?: unknown; assignmentIds?: unknown } | undefined;
+        if (Array.isArray(old?.assignmentIds)) for (const id of old.assignmentIds) if (typeof id === "number") seededBefore.add(id);
         if (old?.pulledAt !== plan.pulledAt) set.settings = { ...found.settings, seededFrom };
         if (Object.keys(set).length) {
           await tx.update(users).set(set).where(eq(users.id, userId));
@@ -794,6 +878,23 @@ export async function applySeed(
         else {
           await tx.update(assignments).set(a).where(eq(assignments.id, row.id));
           counts.assignments.updated += 1;
+        }
+      }
+
+      // Past-due assignments this run leaves out, that an earlier run of the seed created: remove
+      // them. Only the seed's own rows: ids it derived itself (negative) or listed in its marker.
+      const mine = plan.skippedAssignmentIds.filter((id) => id < 0 || seededBefore.has(id));
+      if (mine.length) {
+        const gone = await tx
+          .delete(assignments)
+          .where(and(eq(assignments.userId, userId), inArray(assignments.moodleId, mine)))
+          .returning({ id: assignments.id });
+        if (gone.length) notes.push(`Removed ${plural(gone.length, "past-due assignment")} an earlier run created (hand-in status unknown).`);
+      }
+      if (found) {
+        const old = (found.settings.seededFrom as { assignmentIds?: unknown } | undefined)?.assignmentIds;
+        if (JSON.stringify(old ?? null) !== JSON.stringify(seededIds)) {
+          await tx.update(users).set({ settings: { ...found.settings, seededFrom } }).where(eq(users.id, userId));
         }
       }
 

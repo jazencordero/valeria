@@ -108,7 +108,8 @@ async function assignment(
 describe("getHomeView", () => {
   it("puts the earliest due first and the rest under Then, in order", async () => {
     const u = await user();
-    const fm = await course(u.id, "Forecasting Methods", { code: "ISM-E1005" });
+    // A synced name carries the teaching form and dates; lists show the short name.
+    const fm = await course(u.id, "Forecasting Methods, Lecture, 1.9.2026-18.12.2026", { code: "ISM-E1005" });
     const sca = await course(u.id, "Supply Chain Analytics", { code: "ISM-E3003" });
     await assignment(u.id, sca.id, "No date");
     await assignment(u.id, sca.id, "Case memo 2", { dueAt: new Date("2026-11-17T23:59:00+02:00") });

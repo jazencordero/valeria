@@ -26,6 +26,7 @@ import { db as defaultDb, type Db } from "@/server/db/client";
 import { courseFiles, courses } from "@/server/db/schema/courses";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import { assignments, chats, drafts } from "@/server/db/schema/work";
+import { shortNameOf } from "./courses";
 import { listMessages, type ChatPart } from "@/server/chat/store";
 import { LMS_NAME, lmsAssignmentUrl } from "@/server/handin/prepare";
 
@@ -150,7 +151,7 @@ export async function getAssignmentPage(
   return {
     id: row.id,
     title: row.name,
-    course: row.courseName,
+    course: shortNameOf(row.courseName),
     courseId: row.courseId,
     aiAssignments: row.aiAssignments,
     messages: messages.map((m) => ({ id: m.id, role: m.role, parts: m.parts })),
@@ -165,7 +166,7 @@ export async function getAssignmentPage(
       id: f.id,
       name: f.name,
       mime: f.mime,
-      course: row.courseName,
+      course: shortNameOf(row.courseName),
       readable: f.textStatus !== "failed",
     })),
     acceptsFiles: row.acceptsFiles,
