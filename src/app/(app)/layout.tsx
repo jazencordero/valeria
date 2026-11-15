@@ -24,18 +24,36 @@
  * the new heading. The demo line has its own view-transition name so it stays
  * put, above the pages, while they change.
  *
+ * Count badges (M4-04): `shellCounts` reads, per request, her open
+ * assignments (one query) and upcoming exams (one count). The rules are the
+ * tabs' own: open is not handed in (`submitted_at` unset and state not
+ * submitted or graded, as `getAssignmentsView`), upcoming is `at >= now`
+ * (as `getExamsView`), and hidden courses count for neither. Due today is an
+ * open assignment due on today's Helsinki day (`sameDay`). It is wrapped in
+ * React `cache`, so the side nav and the tab bar share one load. A hand-in's
+ * action calls `refresh()`, which re-renders this layout, so the numbers roll.
+ *
  * A demo user (M1-37, `users.settings.demo`) gets a thin "Demo data" line at
  * the top of the page area, with "Restart demo" (GET /demo?reset=1).
  */
-import { asc, and, eq } from "drizzle-orm";
+import { asc, and, count, eq, gte, inArray, isNull, not } from "drizzle-orm";
 import { connection } from "next/server";
-import { Suspense, type ReactNode } from "react";
+import { cache, Suspense, type ReactNode } from "react";
 import { PageTransition } from "@/components/shell/page-transition";
-import { SideNav, SideNavView, type SideCourse, type SideUser } from "@/components/shell/side-nav";
+import {
+  SideNav,
+  SideNavView,
+  type SideCounts,
+  type SideCourse,
+  type SideUser,
+} from "@/components/shell/side-nav";
 import { TabBar, TabBarView } from "@/components/shell/tab-bar";
+import { sameDay } from "@/lib/dates";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
+import { exams } from "@/server/db/schema/study";
+import { assignments } from "@/server/db/schema/work";
 
 async function signedInUser(): Promise<User> {
   try {
@@ -52,17 +70,66 @@ function firstName(displayName: string | null): string | null {
   return first ? first : null;
 }
 
+type ShellCounts = SideCounts & { dueToday: number };
+
+/** The badge counts for one user, read once per request. */
+const shellCounts = cache(async (userId: string): Promise<ShellCounts> => {
+  const now = new Date();
+  const [open, [upcoming]] = await Promise.all([
+    db
+      .select({ dueAt: assignments.dueAt })
+      .from(assignments)
+      .innerJoin(courses, eq(courses.id, assignments.courseId))
+      .where(
+        and(
+          eq(assignments.userId, userId),
+          eq(courses.userId, userId),
+          eq(courses.hidden, false),
+          isNull(assignments.submittedAt),
+          not(inArray(assignments.state, ["submitted", "graded"])),
+        ),
+      ),
+    db
+      .select({ n: count() })
+      .from(exams)
+      .innerJoin(courses, eq(courses.id, exams.courseId))
+      .where(
+        and(
+          eq(exams.userId, userId),
+          eq(courses.userId, userId),
+          eq(courses.hidden, false),
+          gte(exams.at, now),
+        ),
+      ),
+  ]);
+  return {
+    assignments: open.length,
+    exams: upcoming?.n ?? 0,
+    dueToday: open.filter((a) => a.dueAt !== null && sameDay(a.dueAt, now)).length,
+  };
+});
+
 async function SideNavForUser() {
   // Per-request from here on (session check uses the current time).
   await connection();
   const user = await signedInUser();
-  const rows: SideCourse[] = await db
-    .select({ id: courses.id, name: courses.name, color: courses.color })
-    .from(courses)
-    .where(and(eq(courses.userId, user.id), eq(courses.hidden, false)))
-    .orderBy(asc(courses.name));
+  const [rows, counts]: [SideCourse[], ShellCounts] = await Promise.all([
+    db
+      .select({ id: courses.id, name: courses.name, color: courses.color })
+      .from(courses)
+      .where(and(eq(courses.userId, user.id), eq(courses.hidden, false)))
+      .orderBy(asc(courses.name)),
+    shellCounts(user.id),
+  ]);
   const chip: SideUser = { firstName: firstName(user.displayName), school: user.school };
-  return <SideNav courses={rows} user={chip} />;
+  return <SideNav courses={rows} user={chip} counts={counts} />;
+}
+
+async function TabBarForUser() {
+  await connection();
+  const user = await signedInUser();
+  const { dueToday } = await shellCounts(user.id);
+  return <TabBar dueToday={dueToday} />;
 }
 
 async function DemoBanner() {
@@ -113,7 +180,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <PageTransition>{children}</PageTransition>
         </main>
         <Suspense fallback={<TabBarView pathname={null} />}>
-          <TabBar />
+          <TabBarForUser />
         </Suspense>
       </div>
     </>

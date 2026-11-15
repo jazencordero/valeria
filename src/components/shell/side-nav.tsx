@@ -6,7 +6,15 @@
  *
  * Wordmark with the tiny cap, the main links, her courses and a user chip
  * that opens Settings. Current page gets `aria-current="page"`.
- * Cut (M4, M9-13): badges, the theme button and Notes.
+ * Cut (M4, M9-13): the theme button and Notes.
+ *
+ * Count badges (M4-04, merged-2.html HTML 1685-1686, CSS 410): Assignments
+ * shows her open assignments and Exams her upcoming exams, as a rolling
+ * number, so a hand-in rolls 3 to 2 after the action's refresh. Zero shows no
+ * badge. The badge is hidden from screen readers; the link's `aria-label` says it
+ * in words ("Assignments, 3 open"). Folded, the badge fades with the labels and a
+ * small rose dot on the icon says there is something (the number is in the
+ * tooltip).
  *
  * A 3 px rose marker sits at the left of the main links and springs to the
  * current one (M4-02, main-flow.html JS 3968-3979: bounce 0.2, 250 ms).
@@ -28,6 +36,7 @@ import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
+import { RollingNumber } from "@/components/ui/rolling-number";
 import { Vitonen } from "@/components/vitonen";
 import { useMotionMode } from "@/lib/motion/use-calm";
 import {
@@ -37,6 +46,7 @@ import {
   currentCourseId,
   sideCurrent,
   type IconShape,
+  type NavId,
 } from "./nav-items";
 import { tabTransitionTypes } from "./page-transition";
 import { useSide } from "./use-side";
@@ -52,10 +62,27 @@ export type SideUser = {
   school: string | null;
 };
 
+/** Badge counts; missing or 0 means no badge. */
+export type SideCounts = {
+  /** Open assignments (not handed in, visible courses). */
+  assignments: number;
+  /** Upcoming exams (`at >= now`, visible courses). */
+  exams: number;
+};
+
 export type SideNavProps = {
   courses: readonly SideCourse[];
   user: SideUser | null;
+  counts?: SideCounts | null;
 };
+
+/** The count a main link shows, and how its name says it. */
+function badgeOf(id: NavId, counts: SideCounts | null | undefined): { n: number; words: string } | null {
+  if (!counts) return null;
+  if (id === "assignments" && counts.assignments > 0) return { n: counts.assignments, words: `${counts.assignments} open` };
+  if (id === "exams" && counts.exams > 0) return { n: counts.exams, words: `${counts.exams} upcoming` };
+  return null;
+}
 
 /** A 24x24 stroke icon drawn from `nav-items.ts` shapes. */
 export function NavIcon({ shapes, className = "" }: { shapes: readonly IconShape[]; className?: string }) {
@@ -112,6 +139,7 @@ export function SideNav(props: SideNavProps) {
 export function SideNavView({
   courses,
   user,
+  counts,
   pathname,
 }: SideNavProps & { pathname: string | null }) {
   const current = sideCurrent(pathname);
@@ -157,21 +185,43 @@ export function SideNavView({
       </div>
 
       <nav aria-label="Main" className="relative grid gap-0.5">
-        {SIDE_ITEMS.map((item) => (
-          <Link
-            key={item.id}
-            href={item.href}
-            transitionTypes={
-              mode === "instant" ? undefined : tabTransitionTypes(pathname, item.href)
-            }
-            aria-current={current === item.id ? "page" : undefined}
-            title={tip(item.label)}
-            className={`${ROW} px-3.5 text-[15px] font-medium`}
-          >
-            <NavIcon shapes={item.icon} className="!h-5 !w-5" />
-            <span className={FADE}>{item.label}</span>
-          </Link>
-        ))}
+        {SIDE_ITEMS.map((item) => {
+          const badge = badgeOf(item.id, counts);
+          return (
+            <Link
+              key={item.id}
+              href={item.href}
+              transitionTypes={
+                mode === "instant" ? undefined : tabTransitionTypes(pathname, item.href)
+              }
+              aria-current={current === item.id ? "page" : undefined}
+              aria-label={badge ? `${item.label}, ${badge.words}` : undefined}
+              title={tip(badge ? `${item.label}, ${badge.words}` : item.label)}
+              className={`${ROW} px-3.5 text-[15px] font-medium`}
+            >
+              <span className="relative flex flex-none">
+                <NavIcon shapes={item.icon} className="!h-5 !w-5" />
+                {badge ? (
+                  <i
+                    aria-hidden="true"
+                    data-testid={`side-dot-${item.id}`}
+                    className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-accent opacity-[var(--side-c,0)] shadow-[0_0_0_2px_var(--paper)] transition-opacity duration-quick ease-out"
+                  />
+                ) : null}
+              </span>
+              <span className={FADE}>{item.label}</span>
+              {badge ? (
+                <span
+                  aria-hidden="true"
+                  data-testid={`side-badge-${item.id}`}
+                  className={`ml-auto inline-grid h-5 min-w-[22px] flex-none place-items-center overflow-hidden rounded-full bg-line px-1.5 font-mono text-[11px] font-medium leading-5 text-ink-2 tabular-nums ${FADE}`}
+                >
+                  <RollingNumber value={badge.n} />
+                </span>
+              ) : null}
+            </Link>
+          );
+        })}
         {/* Mounted only on a main page, so it appears in place and only springs between items. */}
         {markerRow >= 0 ? (
           <motion.span

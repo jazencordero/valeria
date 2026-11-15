@@ -7,7 +7,13 @@
  * Home, Courses, Exams, Notes as links, then More, which opens the More
  * sheet. Which tab is lit is `tabCurrent` in `nav-items.ts`: a course or a
  * lecture lights Courses; Assignments, Grades and Calendar light More.
- * Cut (M4): tab transitions and badges.
+ * Cut (M4): tab transitions.
+ *
+ * Due today (M4-04): Assignments is not a tab here (it lives in the More
+ * sheet), so when an open assignment is due today in Helsinki a small rose
+ * dot sits on the More icon, and the button's name says it ("More, 1 due
+ * today"). The count comes from the app layout. The More sheet's own
+ * Assignments row has no badge yet (`more-sheet.tsx`, another ticket).
  *
  * `TabBar` reads the path and owns the sheet; `TabBarView` is the bare row,
  * used as the layout's Suspense fallback and by previews.
@@ -39,9 +45,11 @@ export type TabBarViewProps = {
   pathname: string | null;
   moreOpen?: boolean;
   onMore?: () => void;
+  /** Open assignments due today (Helsinki); 0 or missing shows no dot. */
+  dueToday?: number;
 };
 
-export function TabBarView({ pathname, moreOpen = false, onMore }: TabBarViewProps) {
+export function TabBarView({ pathname, moreOpen = false, onMore, dueToday = 0 }: TabBarViewProps) {
   const current = tabCurrent(pathname);
   return (
     <nav
@@ -66,10 +74,20 @@ export function TabBarView({ pathname, moreOpen = false, onMore }: TabBarViewPro
         aria-haspopup="dialog"
         aria-expanded={moreOpen}
         aria-current={current === "more" ? "page" : undefined}
+        aria-label={dueToday > 0 ? `${MORE_LABEL}, ${dueToday} due today` : undefined}
         onClick={onMore}
         className={ITEM}
       >
-        <NavIcon shapes={MORE_ICON} className="!h-[22px] !w-[22px]" />
+        <span className="relative flex">
+          <NavIcon shapes={MORE_ICON} className="!h-[22px] !w-[22px]" />
+          {dueToday > 0 ? (
+            <i
+              aria-hidden="true"
+              data-testid="more-due-dot"
+              className="absolute top-0 -right-0.5 h-2 w-2 rounded-full bg-accent shadow-[0_0_0_2px_var(--surface)]"
+            />
+          ) : null}
+        </span>
         <span className={LABEL}>{MORE_LABEL}</span>
         <Dot />
       </button>
@@ -77,12 +95,12 @@ export function TabBarView({ pathname, moreOpen = false, onMore }: TabBarViewPro
   );
 }
 
-export function TabBar() {
+export function TabBar({ dueToday = 0 }: { dueToday?: number }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   return (
     <>
-      <TabBarView pathname={pathname} moreOpen={open} onMore={() => setOpen(true)} />
+      <TabBarView pathname={pathname} moreOpen={open} onMore={() => setOpen(true)} dueToday={dueToday} />
       <MoreSheet open={open} onClose={() => setOpen(false)} pathname={pathname} />
     </>
   );
