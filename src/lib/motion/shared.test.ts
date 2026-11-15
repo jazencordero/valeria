@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CLOSE_EXAM,
   CLOSE_MS,
@@ -9,6 +9,7 @@ import {
   OPEN_EXAM,
   OPEN_MS,
   OPEN_WORK,
+  PAGE_WAIT_MS,
   WORK_NAME,
   WORK_SOURCE_ATTR,
   WORK_TRANSITION_CSS,
@@ -16,10 +17,16 @@ import {
   cardArrival,
   cardRevealPending,
   closeCardPage,
+  closeWork,
   hasViewTransitions,
   insetFor,
   leaveCardPage,
+  openCardLink,
   openCardPage,
+  openWork,
+  playArrival,
+  pageFetched,
+  prefetchOnPress,
   workMotion,
   workSource,
 } from "./shared";
@@ -188,5 +195,330 @@ describe("a page that opens out of its card (exams, M4-14)", () => {
     closeCardPage(e, root.querySelector("a")!, "instant", root, (path) => went.push(path), "/exams");
     expect(e.defaultPrevented).toBe(false);
     expect(went).toEqual([]);
+  });
+});
+
+describe("the wait for the new page is capped (M8-71)", () => {
+  /**
+   * A stand-in for document.startViewTransition: runs the update step and
+   * reports what happened. As in the browser, a skip before the update step
+   * has returned means no picture of the new state is taken and `ready`
+   * rejects; the screen is live again from the skip on.
+   */
+  type Run = {
+    updateDone: boolean;
+    skipped: boolean;
+    /** Skipped while the update step was still running: the screen was held no longer. */
+    skippedInUpdate: boolean;
+    ready: Promise<void>;
+    finished: Promise<void>;
+  };
+  let runs: Run[] = [];
+
+  /** Next has prefetched these paths (the route tree and the page: two `_rsc` requests each); none when empty. */
+  function fetched(...paths: string[]) {
+    const entries = paths.flatMap((p) => [
+      { name: `${window.location.origin}${p}?_rsc=tree` },
+      { name: `${window.location.origin}${p}?_rsc=page` },
+    ]);
+    (performance as unknown as { getEntriesByType: (t: string) => unknown[] }).getEntriesByType = (t) =>
+      t === "resource" ? entries : [];
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    runs = [];
+    (document as unknown as { startViewTransition: unknown }).startViewTransition = (update: () => Promise<void> | void) => {
+      const run = { updateDone: false, skipped: false, skippedInUpdate: false } as Run;
+      const done = Promise.resolve().then(update).then(() => {
+        run.updateDone = true;
+      });
+      run.ready = done.then(() => {
+        if (run.skippedInUpdate) throw new DOMException("Skipped", "AbortError");
+      });
+      run.ready.catch(() => {});
+      // The animations take a while; skipping ends them at once.
+      run.finished = done.then(() => new Promise((r) => setTimeout(r, run.skipped ? 0 : 400)));
+      runs.push(run);
+      return {
+        ready: run.ready,
+        finished: run.finished,
+        skipTransition: () => {
+          run.skipped = true;
+          if (!run.updateDone) run.skippedInUpdate = true;
+        },
+      };
+    };
+  });
+
+  afterEach(async () => {
+    // Let the last transition end, so the next test is not refused as busy.
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+    document.documentElement.removeAttribute(WORK_VT_ATTR);
+    fetched();
+  });
+
+  /** Lets promises run, then moves the clock on by `ms`. */
+  async function tick(ms: number) {
+    await vi.advanceTimersByTimeAsync(ms);
+  }
+
+  /** Home with one card, its box measurable. */
+  function home(key: string) {
+    document.body.innerHTML = `<main id="main"><article ${WORK_SOURCE_ATTR}="${key}"><a href="${key}">Start</a></article></main>`;
+    const main = document.getElementById("main")!;
+    const card = main.querySelector("article")! as HTMLElement;
+    card.getBoundingClientRect = () => ({ left: 20, top: 100, width: 300, height: 200 }) as DOMRect;
+    return { main, card, link: card.querySelector("a")! };
+  }
+
+  function click(link: Element) {
+    const e = {
+      defaultPrevented: false,
+      button: 0,
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      currentTarget: link,
+      preventDefault: () => {
+        e.defaultPrevented = true;
+      },
+      stopPropagation: () => {},
+    };
+    return e as unknown as Parameters<typeof openWork>[0];
+  }
+
+  /** A page root that records the animations played on it. */
+  function page(main: HTMLElement, id: string) {
+    main.innerHTML = `<div id="${id}"><a href="/home">Back</a></div>`;
+    const root = document.getElementById(id)!;
+    const played: Keyframe[][] = [];
+    root.animate = ((frames: Keyframe[]) => {
+      played.push(frames);
+      return { finished: Promise.resolve(), cancel: () => {} };
+    }) as unknown as HTMLElement["animate"];
+    return { root, played };
+  }
+
+  it("is short: a prefetched page commits inside it, and the held screen stays under 120 ms", () => {
+    expect(PAGE_WAIT_MS).toBeGreaterThanOrEqual(30);
+    // About 40 ms of taking the old picture comes on top.
+    expect(PAGE_WAIT_MS).toBeLessThanOrEqual(70);
+  });
+
+  it("grows the exam page out of its card when it arrives in time", async () => {
+    const { main, card } = home("card-a");
+    openCardPage(card, "full", () => {});
+    expect(document.documentElement.getAttribute(WORK_VT_ATTR)).toBe(OPEN_EXAM);
+    await tick(PAGE_WAIT_MS / 3);
+    // The first commit: the card is gone.
+    const { root } = page(main, "exam");
+    await tick(0);
+    expect(runs[0].updateDone).toBe(true);
+    expect(runs[0].skipped).toBe(false);
+    expect(cardRevealPending()).toBe(true);
+    expect(cardArrival(root)).toBeGreaterThan(0);
+  });
+
+  it("stops waiting for a late exam page at the cap, skips the clip and slides it in", async () => {
+    const { main, card } = home("card-b");
+    let went = 0;
+    openCardPage(card, "full", () => went++);
+    await tick(PAGE_WAIT_MS - 1);
+    expect(went).toBe(1);
+    expect(runs[0].updateDone).toBe(false);
+    await tick(1);
+    expect(runs[0].updateDone).toBe(true);
+    expect(runs[0].skippedInUpdate).toBe(true);
+    expect(cardRevealPending()).toBe(false);
+    // The page lands a second later and slides in, with nothing left to wait for.
+    await tick(1000);
+    const { root, played } = page(main, "exam");
+    expect(cardArrival(root)).toBe(0);
+    expect(played).toEqual([[{ transform: "translateX(100%)" }, { transform: "none" }]]);
+  });
+
+  it("grows the workspace out of Start's card when its page was prefetched and commits in time", async () => {
+    fetched("/assignments/a0");
+    const { main, link } = home("/assignments/a0");
+    window.history.replaceState(null, "", "/home");
+    const e = click(link);
+    openWork(e, "full");
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.documentElement.getAttribute(WORK_VT_ATTR)).toBe(OPEN_WORK);
+    await tick(PAGE_WAIT_MS / 3);
+    main.innerHTML = "";
+    await tick(0);
+    expect(runs[0].updateDone).toBe(true);
+    expect(runs[0].skipped).toBe(false);
+    expect(document.documentElement.style.getPropertyValue("--work-clip")).toContain("inset(");
+  });
+
+  it("starts no transition at all for a Start whose page is not fetched yet: the link navigates, the workspace slides in", async () => {
+    const { main, link } = home("/assignments/a3");
+    window.history.replaceState(null, "", "/home");
+    const e = click(link);
+    openWork(e, "full");
+    // Nothing holds the screen: the click goes on to <Link> as usual.
+    expect(e.defaultPrevented).toBe(false);
+    expect(runs).toEqual([]);
+    expect(document.documentElement.hasAttribute(WORK_VT_ATTR)).toBe(false);
+    window.history.replaceState(null, "", "/assignments/a3");
+    const { root, played } = page(main, "work");
+    playArrival(root);
+    expect(played).toEqual([[{ transform: "translateX(100%)" }, { transform: "none" }]]);
+  });
+
+  it("the same for a card link whose page is not fetched yet", async () => {
+    document.body.innerHTML = `<main id="main"><a ${WORK_SOURCE_ATTR}="/exams/e4" href="/exams/e4">Exam</a></main>`;
+    const main = document.getElementById("main")!;
+    const card = main.querySelector("a")!;
+    card.getBoundingClientRect = () => ({ left: 20, top: 100, width: 300, height: 200 }) as DOMRect;
+    const e = click(card);
+    openCardLink(e, "full");
+    expect(runs).toEqual([]);
+    expect(document.documentElement.hasAttribute(WORK_VT_ATTR)).toBe(false);
+    const { root, played } = page(main, "exam");
+    expect(cardArrival(root)).toBe(0);
+    expect(played).toEqual([[{ transform: "translateX(100%)" }, { transform: "none" }]]);
+  });
+
+  it("does the same for the workspace that opens from Start", async () => {
+    fetched("/assignments/a1");
+    const { main, link } = home("/assignments/a1");
+    window.history.replaceState(null, "", "/home");
+    const e = click(link);
+    openWork(e, "full");
+    expect(e.defaultPrevented).toBe(true);
+    await tick(PAGE_WAIT_MS);
+    expect(runs[0].updateDone).toBe(true);
+    expect(runs[0].skippedInUpdate).toBe(true);
+    window.history.replaceState(null, "", "/assignments/a1");
+    const { root, played } = page(main, "work");
+    playArrival(root);
+    expect(played).toEqual([[{ transform: "translateX(100%)" }, { transform: "none" }]]);
+  });
+
+  it("caps the close too: a late card page skips the shrink and the page slides out", async () => {
+    document.body.innerHTML = `<main id="main"></main>`;
+    const main = document.getElementById("main")!;
+    window.history.replaceState(null, "", "/exams/e9");
+    const { root, played } = page(main, "exam");
+    const back = root.querySelector("a")!;
+    const went: string[] = [];
+    closeCardPage(click(back), back, "full", root, (path) => went.push(path), "/exams");
+    expect(document.documentElement.getAttribute(WORK_VT_ATTR)).toBe(CLOSE_EXAM);
+    await tick(PAGE_WAIT_MS - 1);
+    expect(went).toEqual(["/exams"]);
+    expect(runs[0].updateDone).toBe(false);
+    await tick(1);
+    expect(runs[0].updateDone).toBe(true);
+    expect(runs[0].skippedInUpdate).toBe(true);
+    expect(played).toEqual([[{ transform: "translateX(0%)" }, { transform: "translateX(100%)" }]]);
+  });
+
+  it("after a late close, puts the scroll and focus back once the card's page is there, not before", async () => {
+    // Opened from a card on a scrolled Exams page.
+    const { main, card } = home("card-late");
+    window.history.replaceState(null, "", "/exams");
+    main.scrollTop = 300;
+    openCardPage(card, "full", () => window.history.replaceState(null, "", "/exams/e11"));
+    const { root: exam } = page(main, "exam");
+    await tick(0);
+    cardArrival(exam);
+    await vi.runAllTimersAsync();
+    main.scrollTop = 40;
+    const back = exam.querySelector("a")!;
+    back.focus();
+    closeCardPage(click(back), back, "full", exam, () => {}, "/exams");
+    await tick(PAGE_WAIT_MS);
+    expect(runs[1].skippedInUpdate).toBe(true);
+    // The exam page is still there and slides out: its own scroll is left alone.
+    expect(main.scrollTop).toBe(40);
+    await tick(500);
+    main.innerHTML = `<article ${WORK_SOURCE_ATTR}="card-late"><button>Exam</button></article>`;
+    await tick(0);
+    expect(main.scrollTop).toBe(300);
+    expect(document.activeElement).toBe(main.querySelector("button"));
+  });
+
+  it("caps the workspace's close the same way", async () => {
+    document.body.innerHTML = `<main id="main"></main>`;
+    const main = document.getElementById("main")!;
+    window.history.replaceState(null, "", "/assignments/a2");
+    const { root, played } = page(main, "work");
+    closeWork(click(root.querySelector("a")!) as Parameters<typeof closeWork>[0], "full", root);
+    await tick(PAGE_WAIT_MS);
+    expect(runs[0].updateDone).toBe(true);
+    expect(runs[0].skippedInUpdate).toBe(true);
+    expect(played).toEqual([[{ transform: "translateX(0%)" }, { transform: "translateX(100%)" }]]);
+  });
+
+  it("still shrinks into the card when it is back in time", async () => {
+    document.body.innerHTML = `<main id="main"></main>`;
+    const main = document.getElementById("main")!;
+    window.history.replaceState(null, "", "/exams/e10");
+    const { root, played } = page(main, "exam");
+    const back = root.querySelector("a")!;
+    closeCardPage(click(back), back, "full", root, () => {
+      main.innerHTML = `<article ${WORK_SOURCE_ATTR}="/exams/e10"></article>`;
+      const card = main.querySelector("article")!;
+      card.getBoundingClientRect = () => ({ left: 20, top: 100, width: 300, height: 200 }) as DOMRect;
+    }, "/exams");
+    await tick(0);
+    expect(runs[0].updateDone).toBe(true);
+    expect(runs[0].skipped).toBe(false);
+    expect(document.documentElement.style.getPropertyValue("--work-clip")).toContain("inset(");
+    expect(played).toEqual([]);
+  });
+});
+
+describe("prefetchOnPress", () => {
+  it("prefetches the page when the card is pressed", () => {
+    const prefetch = vi.fn();
+    const { onPointerDown } = prefetchOnPress("/exams/e1", prefetch);
+    onPointerDown({ button: 0, isPrimary: true } as Parameters<typeof onPointerDown>[0]);
+    expect(prefetch).toHaveBeenCalledWith("/exams/e1");
+  });
+
+  it("ignores a second finger and other buttons", () => {
+    const prefetch = vi.fn();
+    const { onPointerDown } = prefetchOnPress("/exams/e1", prefetch);
+    onPointerDown({ button: 2, isPrimary: true } as Parameters<typeof onPointerDown>[0]);
+    onPointerDown({ button: 0, isPrimary: false } as Parameters<typeof onPointerDown>[0]);
+    expect(prefetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("pageFetched", () => {
+  afterEach(() => {
+    delete (performance as unknown as { getEntriesByType?: unknown }).getEntriesByType;
+  });
+
+  function list(...names: string[]) {
+    (performance as unknown as { getEntriesByType: (t: string) => unknown[] }).getEntriesByType = (t) =>
+      t === "resource" ? names.map((name) => ({ name })) : [];
+  }
+
+  it("is true once both of <Link>'s prefetch requests for the page are back", () => {
+    const o = window.location.origin;
+    list(`${o}/assignments/x?_rsc=a`);
+    expect(pageFetched("/assignments/x")).toBe(false);
+    list(`${o}/assignments/x?_rsc=a`, `${o}/assignments/x?_rsc=b`);
+    expect(pageFetched("/assignments/x")).toBe(true);
+    expect(pageFetched(`${o}/assignments/x`)).toBe(true);
+  });
+
+  it("counts only the router's requests for that very page", () => {
+    const o = window.location.origin;
+    list(`${o}/assignments/x`, `${o}/assignments/x.css`, `${o}/assignments/xy?_rsc=a`, `${o}/assignments/xy?_rsc=b`);
+    expect(pageFetched("/assignments/x")).toBe(false);
+  });
+
+  it("is false where there is no resource timing to ask", () => {
+    expect(pageFetched("/assignments/x")).toBe(false);
   });
 });

@@ -21,9 +21,23 @@
  *   commit only (Home gone, the page area empty). The empty page area then
  *   grows out of the card over the old picture of Home, and the workspace
  *   fades into it when it arrives (`playArrival`).
- * - close: the transition waits (up to `CLOSE_WAIT_MS`) for Home's card to be
- *   on screen, so the workspace can shrink into where the card really is. If
- *   the card does not show up in time the workspace slides out to the right.
+ * - close: the transition waits for Home's card to be on screen, so the
+ *   workspace can shrink into where the card really is. If Home is back but
+ *   the card is not, the workspace slides out to the right.
+ * The screen never waits for the network (M8-71). While the update step runs
+ * the browser shows a still picture and taps do nothing, so:
+ * - an open whose link's page has not been fetched yet (`pageFetched`: a tap
+ *   right after Home loads, before <Link>'s prefetch is back) starts no
+ *   transition at all: the link navigates as usual and the page slides in
+ *   when it arrives, with the screen live meanwhile;
+ * - otherwise both waits are capped at `PAGE_WAIT_MS`, only long enough for a
+ *   page that is already there to commit. A page that is later after all does
+ *   not get the clip: the transition is skipped right there, inside the update
+ *   step (no second picture is taken, the screen is live again at once), and
+ *   the page comes in (or the old one leaves) with the slide instead.
+ * A Start or card link is prefetched by Next's <Link> (in view, and on touch
+ * and hover); a card that opens through `navigate` has no link to look at, so
+ * it always tries, capped, and can spread `prefetchOnPress`.
  * The page area (`#main`) is the shared element: it is given the
  * view-transition name while `<html data-work-vt>` is set, which is this
  * transition's own type (`open-work`, `close-work`). It is an attribute and
@@ -48,7 +62,7 @@
  * timings (360 ms open, 320 ms close). It also remembers where the card was
  * (page and scroll position) so Back returns there.
  */
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { calmDurationMs, durationMs, ease } from "./tokens";
 import type { MotionMode } from "./use-calm";
 
@@ -85,10 +99,22 @@ export const SLIDE_MS = durationMs.base;
 /** The card's corner radius, which the clip starts from and ends at. */
 export const CARD_RADIUS_PX = 20;
 
-/** How long the open waits for the navigation to commit before giving up on the transition. */
-const OPEN_WAIT_MS = 2500;
-/** How long the close waits for Home's card before sliding out instead. */
-const CLOSE_WAIT_MS = 1500;
+/**
+ * The longest the update step of an open or close waits for the new page
+ * (M8-71). The screen is a still picture from the click until the update step
+ * ends (taking the old picture costs another 35 to 55 ms on a slow phone), so
+ * it is kept short: a prefetched page commits in 25 to 45 ms on the audit's
+ * slow-phone profile; one that is not there by now skips the clip and slides.
+ * The audit asked for "about 300 ms", but a wait that long is the frozen
+ * screen it measured (250 ms).
+ */
+export const PAGE_WAIT_MS = 60;
+/**
+ * How long tidying up after a navigation keeps watching for the page (no
+ * view transition is running then, so nothing is held): undoing a leave
+ * animation, putting the scroll back once the card is there.
+ */
+const SETTLE_MS = 2500;
 /** A Start click older than this no longer animates the workspace that mounts. */
 const OPENING_FRESH_MS = 8000;
 
@@ -99,6 +125,94 @@ const FULL_CLIP = "inset(0px 0px 0px 0px round 0px)";
 /** Spread onto the card: `<article {...workSource(href)}>`. */
 export function workSource(href: string): { [WORK_SOURCE_ATTR]: string } {
   return { [WORK_SOURCE_ATTR]: href };
+}
+
+/** Paths Next's router has fetched for this page (`_rsc` requests), and how many times. */
+const rscFetches = new Map<string, number>();
+let watchingFetches = false;
+
+function countRsc(entries: PerformanceEntryList): void {
+  for (const e of entries) {
+    let url: URL;
+    try {
+      url = new URL(e.name);
+    } catch {
+      continue;
+    }
+    if (url.origin !== window.location.origin || !url.searchParams.has("_rsc")) continue;
+    if (rscFetches.size > 500) rscFetches.clear();
+    rscFetches.set(url.pathname, (rscFetches.get(url.pathname) ?? 0) + 1);
+  }
+}
+
+/**
+ * Starts counting Next's router fetches. An observer, not just the timeline,
+ * because the browser's resource timeline stops taking entries once it holds
+ * 250; `buffered` picks up the ones from before. Safe to call often.
+ */
+function watchFetches(): void {
+  if (watchingFetches || typeof window === "undefined" || typeof PerformanceObserver === "undefined") return;
+  watchingFetches = true;
+  try {
+    new PerformanceObserver((list) => countRsc(list.getEntries())).observe({ type: "resource", buffered: true });
+  } catch {
+    // No resource timing: `pageFetched` then answers from the timeline alone.
+  }
+}
+watchFetches();
+
+/**
+ * True when Next's router already has `href`'s page (M8-71), so a navigation
+ * to it commits at once and can grow out of the card. Read from resource
+ * timing: <Link>'s prefetch of a page is two `_rsc` requests, the route tree
+ * and then the page itself (a visit before also counts). Before both are back
+ * the navigation would wait on the network, with the screen held still.
+ * A guess either way costs little: "fetched" when it was not still has
+ * `PAGE_WAIT_MS` as its cap; "not fetched" when it was gives the slide.
+ */
+export function pageFetched(href: string): boolean {
+  if (typeof window === "undefined") return false;
+  let path: string;
+  try {
+    path = new URL(href, window.location.href).pathname;
+  } catch {
+    return false;
+  }
+  watchFetches();
+  const heard = rscFetches.get(path) ?? 0;
+  if (heard >= 2 || typeof performance === "undefined" || typeof performance.getEntriesByType !== "function") {
+    return heard >= 2;
+  }
+  // The observer hears of a fetch a moment after it ends; the timeline has it at once.
+  let listed = 0;
+  for (const e of performance.getEntriesByType("resource")) {
+    try {
+      const url = new URL(e.name);
+      if (url.pathname === path && url.searchParams.has("_rsc")) listed++;
+    } catch {
+      // Not a URL.
+    }
+  }
+  return listed >= 2;
+}
+
+/**
+ * Prefetches `href` the moment the card is pressed, before the click (M8-71),
+ * so the page is more likely to be there inside `PAGE_WAIT_MS` and grow out
+ * of the card. For a card that opens through `openCardPage(…, navigate)`
+ * rather than a <Link> (a <Link> prefetches on touch and hover by itself):
+ * `<ExamCard {...prefetchOnPress(href, router.prefetch)} …>`.
+ */
+export function prefetchOnPress(
+  href: string,
+  prefetch: (href: string) => void,
+): { onPointerDown: (e: ReactPointerEvent<Element>) => void } {
+  return {
+    onPointerDown: (e) => {
+      if (e.button !== 0 || e.isPrimary === false) return;
+      prefetch(href);
+    },
+  };
 }
 
 /* ---------- Pure helpers ---------- */
@@ -266,6 +380,60 @@ function endTransition(): void {
   busy = false;
 }
 
+/**
+ * Starts a view transition whose update step can end it early: `skip` skips
+ * the transition from inside the update step, so the browser takes no picture
+ * of the new state and shows the page live again at once (`ready` rejects,
+ * `finished` resolves when the update step returns).
+ */
+function startSkippable(
+  start: StartViewTransition,
+  update: (skip: () => void) => Promise<void>,
+): Finished {
+  let transition: Finished | null = null;
+  let skipped = false;
+  const skip = () => {
+    skipped = true;
+    transition?.skipTransition();
+  };
+  transition = start(() => update(skip));
+  if (skipped) transition.skipTransition();
+  return transition;
+}
+
+/** Puts focus on `el` once its page is back, unless she has already put it somewhere on screen. */
+function focusLater(el: HTMLElement | null | undefined): void {
+  if (!el) return;
+  const now = document.activeElement;
+  if (now && now !== document.body && isShown(now)) return;
+  el.focus({ preventScroll: true });
+}
+
+/** What opened a card's page: the card itself when it is a link or button, else the first one in it. */
+function openerIn(card: HTMLElement | null): HTMLElement | null {
+  if (!card) return null;
+  return card.matches("a[href], button") ? card : card.querySelector<HTMLElement>("button, a[href]");
+}
+
+/**
+ * The page leaves to the right (the slide), outside any view transition: a
+ * close whose destination was late, or a browser without view transitions.
+ * Undone once the page is gone, as it may be kept, hidden, for browser back.
+ */
+function slideOut(main: HTMLElement, root: HTMLElement): Promise<void> {
+  if (typeof root.animate !== "function") return Promise.resolve();
+  const leave = root.animate([{ transform: "translateX(0%)" }, { transform: "translateX(100%)" }], {
+    duration: SLIDE_MS,
+    easing: E_INOUT,
+    fill: "forwards",
+  });
+  void waitFor(main, SETTLE_MS, () => (isShown(root) ? null : true)).then(() => leave.cancel());
+  return leave.finished.then(
+    () => {},
+    () => {},
+  );
+}
+
 /* ---------- Open ---------- */
 
 type Opening = {
@@ -301,7 +469,9 @@ export function openWork(e: ReactMouseEvent<HTMLAnchorElement>, mode: MotionMode
     at: performance.now(),
     grewAt: null,
   };
-  if (how !== "clip" || start === null) {
+  // Not fetched yet: no transition to hold the screen while it loads; the workspace slides in.
+  if (how === "clip" && !pageFetched(link.href)) mine.how = "slide";
+  if (mine.how !== "clip" || start === null) {
     opening = mine;
     return;
   }
@@ -319,11 +489,15 @@ export function openWork(e: ReactMouseEvent<HTMLAnchorElement>, mode: MotionMode
     return;
   }
   html.setAttribute(WORK_VT_ATTR, OPEN_WORK);
-  let left = false;
-  const transition = start(async () => {
+  const transition = startSkippable(start, async (skip) => {
     replayClick(link);
-    left = (await waitFor(main, OPEN_WAIT_MS, () => (isShown(source) ? null : true))) === true;
-    if (!left) return;
+    const left = (await waitFor(main, PAGE_WAIT_MS, () => (isShown(source) ? null : true))) === true;
+    if (!left) {
+      // Late: no clip. The workspace slides in when it mounts (`playArrival`).
+      mine.how = "slide";
+      skip();
+      return;
+    }
     // From here the tab bar is gone, so the page area has its final size.
     if (!html.hasAttribute(WORK_ATTR)) {
       html.setAttribute(WORK_ATTR, "opening");
@@ -336,8 +510,7 @@ export function openWork(e: ReactMouseEvent<HTMLAnchorElement>, mode: MotionMode
   });
   transition.ready.then(
     () => {
-      if (!left) transition.skipTransition();
-      else mine.grewAt = performance.now();
+      mine.grewAt = performance.now();
     },
     () => {},
   );
@@ -426,7 +599,7 @@ export function closeWork(
       busy = false;
       replayClick(link);
       // The page may be kept, hidden, for browser back: do not leave it faded out.
-      void waitFor(main, OPEN_WAIT_MS, () => (isShown(root) ? null : true)).then(() => leave.cancel());
+      void waitFor(main, SETTLE_MS, () => (isShown(root) ? null : true)).then(() => leave.cancel());
     };
     leave.finished.then(go, go);
     return;
@@ -436,14 +609,15 @@ export function closeWork(
   const key = window.location.pathname;
   const from = main.getBoundingClientRect();
   const selector = `[${WORK_SOURCE_ATTR}="${CSS.escape(key)}"]`;
+  const findCard = (): HTMLElement | null => {
+    for (const el of main.querySelectorAll<HTMLElement>(selector)) if (isShown(el)) return el;
+    return null;
+  };
   let card: HTMLElement | null = null;
   html.setAttribute(WORK_VT_ATTR, CLOSE_WORK);
-  const transition = start(async () => {
+  const transition = startSkippable(start, async (skip) => {
     replayClick(link);
-    card = await waitFor(main, CLOSE_WAIT_MS, () => {
-      for (const el of main.querySelectorAll<HTMLElement>(selector)) if (isShown(el)) return el;
-      return null;
-    });
+    card = await waitFor(main, PAGE_WAIT_MS, findCard);
     const box = card?.getBoundingClientRect();
     if (box && box.width > 0) {
       const to = main.getBoundingClientRect();
@@ -452,6 +626,16 @@ export function closeWork(
         "--work-clip",
         insetFor(box, { left: to.left, top: to.top, width: from.width, height: from.height }),
       );
+      return;
+    }
+    if (!card) {
+      // Focus goes back to Start once Home is there.
+      void waitFor(main, SETTLE_MS, findCard).then((c) => focusLater(c?.querySelector<HTMLElement>("a[href]")));
+    }
+    if (isShown(root)) {
+      // Home is late: no clip. The workspace slides out on its own, live.
+      skip();
+      void slideOut(main, root);
     } else {
       html.setAttribute(WORK_VT_ATTR, CLOSE_WORK_SLIDE);
     }
@@ -535,13 +719,16 @@ const cardPaths = new WeakMap<HTMLElement, string>();
 
 /**
  * Opens a page out of `source` (the card, marked with `workSource`).
- * `navigate` starts the navigation; it is always called, once.
+ * `navigate` starts the navigation; it is always called, once. `href`, when
+ * known, is the page's address: if Next has not fetched it yet the page
+ * slides in instead of holding the screen (`pageFetched`).
  */
 export function openCardPage(
   source: HTMLElement,
   mode: MotionMode,
   navigate: () => void,
   page: CardPage = EXAM_PAGE,
+  href?: string,
 ): void {
   const main = document.getElementById("main");
   const start = viewTransitionStarter();
@@ -560,7 +747,9 @@ export function openCardPage(
     return;
   }
   const mine: CardOpening = { how, at, grewAt: null, ms: page.openMs };
-  if (how !== "clip" || start === null) {
+  // The link's page is not fetched yet: no transition to hold the screen while it loads; it slides in.
+  if (how === "clip" && href !== undefined && !pageFetched(href)) mine.how = "slide";
+  if (mine.how !== "clip" || start === null) {
     cardOpening = mine;
     navigate();
     return;
@@ -575,20 +764,20 @@ export function openCardPage(
 
   const html = document.documentElement;
   html.setAttribute(WORK_VT_ATTR, page.open);
-  let left = false;
-  const transition = start(async () => {
+  const transition = startSkippable(start, async (skip) => {
     navigate();
-    left = (await waitFor(main, OPEN_WAIT_MS, () => (isShown(source) ? null : true))) === true;
-    if (left) html.style.setProperty("--work-clip", insetFor(card, main.getBoundingClientRect()));
+    const left = (await waitFor(main, PAGE_WAIT_MS, () => (isShown(source) ? null : true))) === true;
+    if (left) {
+      html.style.setProperty("--work-clip", insetFor(card, main.getBoundingClientRect()));
+      return;
+    }
+    // Late: no clip. The page slides in when it mounts (`cardArrival`).
+    mine.how = "slide";
+    skip();
   });
   transition.ready.then(
     () => {
-      if (left) {
-        mine.grewAt = performance.now();
-        return;
-      }
-      if (cardOpening === mine) cardOpening = null;
-      transition.skipTransition();
+      mine.grewAt = performance.now();
     },
     () => {},
   );
@@ -606,7 +795,7 @@ export function openCardLink(
   const source = link.closest<HTMLElement>(`[${WORK_SOURCE_ATTR}]`);
   if (!source) return;
   e.preventDefault();
-  openCardPage(source, mode, () => replayClick(link), page);
+  openCardPage(source, mode, () => replayClick(link), page, link.href);
 }
 
 /** True while a page is growing out of a card and has not mounted yet. Safe to read while rendering. */
@@ -698,7 +887,7 @@ export function closeCardPage(
   };
   /** The card's page is back: put the scroll where it was. Resolves with the card, if it is there. */
   const land = async (): Promise<HTMLElement | null> => {
-    const card = await waitFor(main, CLOSE_WAIT_MS, findCard);
+    const card = await waitFor(main, SETTLE_MS, findCard);
     main.scrollTop = from.scroll;
     return card;
   };
@@ -746,9 +935,11 @@ export function closeCardPage(
   const before = main.getBoundingClientRect();
   let card: HTMLElement | null = null;
   html.setAttribute(WORK_VT_ATTR, page.close);
-  const transition = start(async () => {
+  const transition = startSkippable(start, async (skip) => {
     navigate(from.path);
-    card = await land();
+    card = await waitFor(main, PAGE_WAIT_MS, findCard);
+    // Only once the card's page is back: before that the scroll is still the old page's.
+    if (card) main.scrollTop = from.scroll;
     const box = card?.getBoundingClientRect();
     if (box && box.width > 0) {
       const to = main.getBoundingClientRect();
@@ -757,6 +948,16 @@ export function closeCardPage(
         "--work-clip",
         insetFor(box, { left: to.left, top: to.top, width: before.width, height: before.height }),
       );
+      return;
+    }
+    if (!card) {
+      // No card in time: keep watching for it, after the transition, to put the scroll and focus back.
+      void land().then((c) => focusLater(openerIn(c)));
+    }
+    if (isShown(root)) {
+      // The card's page is late: no clip. The page slides out on its own, live.
+      skip();
+      void slideOut(main, root);
     } else {
       html.setAttribute(WORK_VT_ATTR, page.closeSlide);
     }
@@ -764,8 +965,7 @@ export function closeCardPage(
   const after = () => {
     endTransition();
     // As in the prototype: focus goes back to what opened the page.
-    const opener = card?.matches("a[href], button") ? card : card?.querySelector<HTMLElement>("button, a[href]");
-    opener?.focus({ preventScroll: true });
+    openerIn(card)?.focus({ preventScroll: true });
   };
   transition.finished.then(after, after);
 }
