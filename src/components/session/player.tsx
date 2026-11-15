@@ -2,9 +2,10 @@
 
 /**
  * The study session player (M3-43): runs the session reducer (M3-09) over the
- * frame (M3-31), the five card types (M3-32, M3-33, M3-35, match below), the
- * grade buttons or the feedback strip, the keys (M3-36) and the card menu
- * (M3-39); saves after every card and ends on the done screen (M3-38).
+ * frame (M3-31), the card stack (M3-37), the five card types (M3-32, M3-33,
+ * M3-34, M3-35), the grade buttons or the feedback strip, the keys (M3-36) and
+ * the card menu (M3-39); saves after every card and ends on the done screen
+ * (M3-38).
  *
  *   <SessionPlayer sessionId={id} examId={examId} mode="bite" cards={cards}
  *     reviews={stored} … />
@@ -48,20 +49,28 @@
  * The whole screen is the frame (fixed, everything behind it inert), and the
  * done screen is the same kind of full-screen layer.
  *
- * Match cards: M3-34's `CardMatch` is not on this branch yet, so `MatchCard`
- * below is a small stand-in with the same rules (tap a term, then what it
- * means; a wrong pair is a slip; grade 3 with no slips, else 2). Swap it for
- * `CardMatch` when that lands. The M3-37 stage is not on this branch either:
- * cards change with a plain cross-fade until it does.
+ * - The stack. Cards sit on `SessionStage`: the card that was showing leaves
+ *   as its grade says (1 sinks behind as a miss, 2 nudges down as hard, 3-4
+ *   lift off as a pass; a dropped card lifts off too), with one or two edges
+ *   behind for the cards left, and a boss card arriving asks the cap to cheer.
+ *   Reduced motion cross-fades, and the test switch (?fast=1 or READY_FAST)
+ *   moves at once; the stage reads both. While a card leaves it stays in the
+ *   page for its exit, inert: only the card in place carries
+ *   `data-testid="session-card"`, and a leaving card sends nothing.
+ * - Match cards are M3-34's `CardMatch`, which keeps its own pairs and slips
+ *   and reports once when the last pair is in. Its result is replayed into
+ *   the reducer as `match` events (`matchEvents`: one wrong pair per slip,
+ *   then each pair), so the grade (3 with no slips, else 2) and the feedback
+ *   line come from the reducer as for every other card. Keys: terms and
+ *   meanings are plain buttons (Tab, Enter or Space); `useSessionKeys` does
+ *   nothing on a match card's front, and Enter on the feedback strip goes on.
  */
-import { motion } from "motion/react";
+import { useIsPresent } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { DoodleDefs } from "@/components/doodle";
 import { Button } from "@/components/ui/button";
 import { useInertOthers } from "@/lib/a11y/inert";
-import { calmDuration } from "@/lib/motion/tokens";
-import { useMotionMode } from "@/lib/motion/use-calm";
 import { daysBetween } from "@/lib/dates";
 import { biteMinutes, type CardType, type SectionKind } from "@/lib/study/bite";
 import type { McqOption, MatchPair, RubricPoint } from "@/lib/study/card-schema";
@@ -88,12 +97,14 @@ import { CardBasic } from "./card-basic";
 import { CardCloze } from "./card-cloze";
 import { CardExplain, type CardExplainHandle, type ExplainCheck } from "./card-explain";
 import { CardHead } from "./card-head";
+import { CardMatch, MatchPrompt, matchSub, type MatchResult } from "./card-match";
 import { CardMcq, PickPrompt } from "./card-mcq";
 import { CardMenu, DROP_TOAST_TEXT } from "./card-menu";
 import { SessionDone } from "./done";
 import { FeedbackStrip } from "./feedback-strip";
 import { SessionFrame, type SessionCounts, type SessionFrameHandle } from "./frame";
 import { GradeButtons } from "./grade-buttons";
+import { SessionStage, type StageExit } from "./stage";
 import { useSessionKeys } from "./use-session-keys";
 
 // ---------------------------------------------------------------------------
@@ -104,7 +115,6 @@ export const FINISHING_TEXT = "Saving your session…";
 export const FINISH_FAILED_TEXT = "Could not finish the session. Check your connection.";
 export const TRY_AGAIN = "Try again";
 export const BACK_LABEL = "Back to the exam";
-export const MATCH_PROMPT = "Tap a term, then what it means.";
 
 /** Retries after the first failed save. */
 export const SAVE_RETRIES = 3;
@@ -271,10 +281,22 @@ export function intervalsOf(memory: MemoryState | null, examAt: number, now: num
   return out;
 }
 
-/** "2 slips. Close enough to move on." (M3-34); nothing without slips. */
-export function matchSub(slips: number): string | undefined {
-  if (slips <= 0) return undefined;
-  return `${slips} ${slips === 1 ? "slip" : "slips"}. Close enough to move on.`;
+/**
+ * A finished match card as reducer events: one wrong pair per slip, then
+ * every pair right, so the reducer lands on the feedback strip with
+ * `CardMatch`'s grade (3 with no slips, else 2) and its slips.
+ */
+export function matchEvents(result: Pick<MatchResult, "slips">, pairs: number, at: number): SessionEvent[] {
+  const slips = Math.max(0, Math.floor(result.slips));
+  const out: SessionEvent[] = [];
+  for (let i = 0; i < slips; i++) out.push({ type: "match", a: "slip", b: "", at });
+  for (let i = 0; i < Math.max(1, pairs); i++) out.push({ type: "match", a: String(i), b: String(i), at });
+  return out;
+}
+
+/** How a graded card leaves the stack: 1 is a miss, 2 hard, 3 and 4 a pass. */
+export function exitOf(g: Grade): StageExit {
+  return g === 1 ? "miss" : g === 2 ? "hard" : "pass";
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +416,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
   );
   const [footer, setFooter] = useState<HTMLDivElement | null>(null);
   const [dropToast, setDropToast] = useState(0);
+  const [exit, setExit] = useState<StageExit>("pass");
   const frame = useRef<SessionFrameHandle>(null);
   const explainRef = useRef<CardExplainHandle>(null);
   const saver = useSaver(sessionId, saveProgress, retryMs);
@@ -439,6 +462,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
         const r = next.reviews[next.reviews.length - 1];
         const at = next.lastAt;
         void saver.push({ ...r, at });
+        setExit(exitOf(r.grade));
         setMemory((m) => ({ ...m, [r.cardId]: gradeMemory(m[r.cardId] ?? newCard(new Date(at)), r.grade, new Date(at)) }));
         const f = frame.current;
         if (r.grade === 1) {
@@ -449,8 +473,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
           if (climbed) f?.climb(concepts[climbed]?.name ?? climbed, rungOf(next.mastery[climbed] ?? 0));
           if (r.firstTry && r.grade >= 3) f?.react("nod");
         }
-        const card = currentCard(next);
-        if (card?.boss && !currentCard(prev)?.boss) f?.react("cheer");
+        // A boss arriving cheers through the stage's onBossEnter.
       }
       if (next.over && !prev.over && !next.stopped) void finish();
     },
@@ -470,6 +493,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
     if (next === prev) return;
     sRef.current = next;
     setS(next);
+    setExit("pass");
     setDropToast((n) => n + 1);
     if (next.over && !prev.over) void finish();
   }, [finish, now]);
@@ -537,11 +561,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
     } else if (card.type === "mcq") {
       actions = <PickPrompt />;
     } else if (card.type === "match") {
-      actions = (
-        <p className="grid min-h-[52px] place-items-center text-[13px] text-ink-3" data-testid="match-prompt">
-          {MATCH_PROMPT}
-        </p>
-      );
+      actions = <MatchPrompt />;
     }
   }
 
@@ -576,11 +596,17 @@ export function SessionPlayer(props: SessionPlayerProps) {
         {view.kind === "finishing" ? (
           <Finishing failed={view.failed} onRetry={() => void finish()} />
         ) : card && pc ? (
-          <CardFade key={cardKey}>
-            <div className="mt-10" data-testid="session-card" data-card-id={card.id} data-card-type={card.type}>
-              <CardBody
+          <>
+            <SessionStage
+              className="mt-10"
+              cardKey={cardKey}
+              after={Math.max(0, s.queue.length - 1)}
+              exit={exit}
+              boss={card.boss}
+              onBossEnter={() => frame.current?.react("cheer")}
+            >
+              <StagedCard
                 pc={pc}
-                state={s}
                 section={card.section}
                 conceptNames={names(card.conceptIds)}
                 rung={rung}
@@ -590,11 +616,11 @@ export function SessionPlayer(props: SessionPlayerProps) {
                 send={send}
                 now={now}
               />
-            </div>
+            </SessionStage>
             <div className="mt-2 flex justify-end">
-              <CardMenu cardId={card.id} action={dropCard} onDrop={onDrop} />
+              <CardMenu key={cardKey} cardId={card.id} action={dropCard} onDrop={onDrop} />
             </div>
-          </CardFade>
+          </>
         ) : null}
       </SessionFrame>
     </>
@@ -603,19 +629,6 @@ export function SessionPlayer(props: SessionPlayerProps) {
 
 // ---------------------------------------------------------------------------
 // Pieces
-
-function CardFade({ children }: { children: ReactNode }) {
-  const mode = useMotionMode();
-  return (
-    <motion.div
-      initial={mode === "instant" ? false : { opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: mode === "full" ? 0.18 : calmDuration }}
-    >
-      {children}
-    </motion.div>
-  );
-}
 
 function Finishing({ failed, onRetry }: { failed: boolean; onRetry: () => void }) {
   return (
@@ -632,20 +645,8 @@ function Finishing({ failed, onRetry }: { failed: boolean; onRetry: () => void }
   );
 }
 
-function CardBody({
-  pc,
-  state,
-  section,
-  conceptNames,
-  rung,
-  actionsEl,
-  explainRef,
-  check,
-  send,
-  now,
-}: {
+type CardBodyProps = {
   pc: PlayerCard;
-  state: SessionState;
   section: SectionKind;
   conceptNames: string[];
   rung: number;
@@ -654,7 +655,45 @@ function CardBody({
   check?: ExplainCheck;
   send: (e: SessionEvent) => void;
   now: () => number;
-}) {
+};
+
+/**
+ * The card on the stage. Once it starts leaving (the stage keeps it for its
+ * exit) it drops the test id, stops portalling into the footer and sends
+ * nothing, so only the card in place is played.
+ */
+function StagedCard(props: CardBodyProps) {
+  const present = useIsPresent();
+  const { pc, send } = props;
+  const live = useRef(present);
+  useEffect(() => {
+    live.current = present;
+  }, [present]);
+  const guarded = useCallback((e: SessionEvent) => {
+    if (live.current) send(e);
+  }, [send]);
+  return (
+    <div
+      data-testid={present ? "session-card" : undefined}
+      data-card-id={pc.id}
+      data-card-type={pc.type}
+    >
+      <CardBody {...props} actionsEl={present ? props.actionsEl : null} send={guarded} />
+    </div>
+  );
+}
+
+function CardBody({
+  pc,
+  section,
+  conceptNames,
+  rung,
+  actionsEl,
+  explainRef,
+  check,
+  send,
+  now,
+}: CardBodyProps) {
   const b = bodyOf(pc);
   const common = { section, conceptNames, rung, actionsEl, autoFocus: true };
   const source = pc.source ?? "";
@@ -704,117 +743,19 @@ function CardBody({
           onRevealed={() => {}}
         />
       );
-    case "match":
+    case "match": {
+      const pairs = Array.isArray(b.pairs) ? (b.pairs as MatchPair[]) : [];
       return (
-        <MatchCard
+        <CardMatch
+          card={{ q: str(b.q), pairs, order: Array.isArray(b.order) ? (b.order as number[]) : [] }}
           head={head}
-          q={str(b.q)}
-          pairs={Array.isArray(b.pairs) ? (b.pairs as MatchPair[]) : []}
-          order={Array.isArray(b.order) ? (b.order as number[]) : []}
-          matched={state.matched}
-          onPair={(a, m) => send({ type: "match", a: String(a), b: String(m), at: now() })}
+          onResult={(r) => {
+            for (const e of matchEvents(r, pairs.length, now())) send(e);
+          }}
         />
       );
+    }
   }
-}
-
-/**
- * Stand-in for M3-34's CardMatch (see the header): terms on the left, meanings
- * in the card's `order` on the right. Tap (or Tab and Enter) a term, then a
- * meaning. A right pair turns mint and is disabled; a wrong one flashes.
- */
-function MatchCard({
-  head,
-  q,
-  pairs,
-  order,
-  matched,
-  onPair,
-}: {
-  head: ReactNode;
-  q: string;
-  pairs: readonly MatchPair[];
-  order: readonly number[];
-  matched: readonly string[];
-  onPair: (term: number, meaning: number) => void;
-}) {
-  const [term, setTerm] = useState<number | null>(null);
-  const [wrong, setWrong] = useState<number | null>(null);
-  const right = order.length === pairs.length ? order : pairs.map((_, i) => i);
-  const done = (i: number) => matched.includes(String(i));
-
-  useEffect(() => {
-    if (wrong === null) return;
-    const t = setTimeout(() => setWrong(null), 420);
-    return () => clearTimeout(t);
-  }, [wrong]);
-
-  const pickMeaning = (m: number) => {
-    if (term === null) return;
-    onPair(term, m);
-    if (term !== m) setWrong(m);
-    setTerm(null);
-  };
-
-  const cell =
-    "min-h-[48px] rounded-2xl border border-solid px-3 py-2 text-left text-[15px] leading-snug transition-colors duration-quick " +
-    "disabled:cursor-default";
-  return (
-    <article
-      data-testid="card-match"
-      className="relative min-h-[280px] rounded-[24px] border border-solid border-line bg-surface px-6 py-7 shadow-[var(--shadow-card)]"
-    >
-      {head}
-      <h2 className="mt-3.5 font-display text-[24px] leading-[1.3] font-semibold tracking-[-0.01em] [font-variation-settings:'SOFT'_100] [text-wrap:pretty]">
-        {q}
-      </h2>
-      <div className="mt-5 grid grid-cols-2 gap-2">
-        <div role="group" aria-label="Terms" className="grid content-start gap-2">
-          {pairs.map(([t], i) => (
-            <button
-              key={i}
-              type="button"
-              data-testid={`match-term-${i}`}
-              aria-pressed={term === i}
-              disabled={done(i)}
-              onClick={() => setTerm(i)}
-              className={
-                cell +
-                (done(i)
-                  ? " border-mint bg-mint text-ink"
-                  : term === i
-                    ? " border-ink bg-paper text-ink"
-                    : " border-line bg-surface text-ink")
-              }
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-        <div role="group" aria-label="Meanings" className="grid content-start gap-2">
-          {right.map((i) => (
-            <button
-              key={i}
-              type="button"
-              data-testid={`match-meaning-${i}`}
-              disabled={done(i)}
-              onClick={() => pickMeaning(i)}
-              className={
-                cell +
-                (done(i)
-                  ? " border-mint bg-mint text-ink"
-                  : wrong === i
-                    ? " border-due bg-accent-wash text-ink"
-                    : " border-line bg-surface text-ink-2")
-              }
-            >
-              {pairs[i]?.[1]}
-            </button>
-          ))}
-        </div>
-      </div>
-    </article>
-  );
 }
 
 function DoneLayer({

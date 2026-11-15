@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -31,9 +31,12 @@ import { GET } from "@/app/(app)/study/new/route";
 import { NotSignedIn } from "@/server/auth/session";
 import { beginSession, type BegunSession, type DoneScreen, type SavedProgress } from "@/server/study/actions";
 import { StudyNotFound } from "@/server/study/store";
+import { initSession, step } from "@/lib/study/session";
 import {
   SAVE_FAILED_TEXT,
   SessionPlayer,
+  exitOf,
+  matchEvents,
   resumeSession,
   seedOf,
   toSessionCard,
@@ -78,6 +81,26 @@ const MCQ: PlayerCard = {
   },
   why: "A second source keeps parts coming when one fails.",
   source: "Lecture 3, slide 9",
+  memory: null,
+};
+
+const MATCH: PlayerCard = {
+  id: "card-p",
+  type: "match",
+  boss: false,
+  section: "learn",
+  conceptIds: ["c1"],
+  body: {
+    q: "Match each term to what it means.",
+    pairs: [
+      ["Single sourcing", "One supplier on purpose"],
+      ["Dual sourcing", "Two suppliers for one item"],
+      ["Framework", "Terms now, orders later"],
+    ],
+    order: [2, 0, 1],
+  },
+  why: null,
+  source: "Lecture 2, slide 5",
   memory: null,
 };
 
@@ -209,6 +232,102 @@ describe("SessionPlayer: a missed card", () => {
     expect(saveProgress.mock.calls[0][1]).toEqual([expect.objectContaining({ cardId: "card-m", grade: 1, firstTry: true })]);
     expect(cardOnScreen()).toBe("card-b");
     expect(segments()).toHaveLength(3);
+  });
+});
+
+describe("SessionPlayer: the match card", () => {
+  const term = (name: string) => within(screen.getByTestId("match-terms")).getByRole("button", { name });
+  const meaning = (name: string) => within(screen.getByTestId("match-meanings")).getByRole("button", { name });
+
+  it("is the real CardMatch: a clean run grades 3 and Enter goes on", async () => {
+    const { user, saveProgress } = setup({ cards: [MATCH, B] });
+    expect(screen.getByTestId("session-card").getAttribute("data-card-type")).toBe("match");
+    expect(screen.getByTestId("card-match")).toBeTruthy();
+    expect(screen.getByTestId("match-prompt").textContent).toBe("Tap a term, then what it means.");
+
+    // As the whole-flow test plays it: focus a term, Enter, focus its meaning, Enter.
+    for (const [t, m] of (MATCH.body as { pairs: [string, string][] }).pairs) {
+      term(t).focus();
+      await user.keyboard("{Enter}");
+      meaning(m).focus();
+      await user.keyboard("{Enter}");
+    }
+    expect(await screen.findByTestId("fb-strip")).toBeTruthy();
+    // Enter on the last meaning matched it; it did not also go on.
+    expect(cardOnScreen()).toBe("card-p");
+    expect(saveProgress).not.toHaveBeenCalled();
+
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(saveProgress).toHaveBeenCalledTimes(1));
+    expect(saveProgress.mock.calls[0][1]).toEqual([expect.objectContaining({ cardId: "card-p", grade: 3, firstTry: true })]);
+    expect(cardOnScreen()).toBe("card-b");
+  });
+
+  it("counts a wrong pair as a slip: grade 2 and the slips line", async () => {
+    const { user, saveProgress } = setup({ cards: [MATCH, B] });
+    await user.click(term("Single sourcing"));
+    await user.click(meaning("Two suppliers for one item")); // wrong
+    expect(screen.getByTestId("card-match").getAttribute("data-slips")).toBe("1");
+    await user.click(term("Single sourcing"));
+    await user.click(meaning("One supplier on purpose"));
+    await user.click(term("Dual sourcing"));
+    await user.click(meaning("Two suppliers for one item"));
+    await user.click(term("Framework"));
+    await user.click(meaning("Terms now, orders later"));
+
+    const strip = await screen.findByTestId("fb-strip");
+    expect(strip.textContent).toContain("1 slip. Close enough to move on.");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(saveProgress).toHaveBeenCalledTimes(1));
+    expect(saveProgress.mock.calls[0][1]).toEqual([expect.objectContaining({ cardId: "card-p", grade: 2 })]);
+  });
+
+  it("matchEvents brings the reducer to CardMatch's grade", () => {
+    const cards = [toSessionCard(MATCH)];
+    const run = (slips: number) =>
+      matchEvents({ slips }, 3, T0).reduce(
+        (s, e) => step(s, e),
+        initSession({ cards, mode: "bite", seed: 1, at: T0, masteries: {} }),
+      );
+    expect(run(0)).toMatchObject({ phase: "fb", fbGrade: 3, fbSlips: 0 });
+    expect(run(2)).toMatchObject({ phase: "fb", fbGrade: 2, fbSlips: 2 });
+  });
+});
+
+describe("SessionPlayer: the stage", () => {
+  it("holds the current card, with edges for the cards left", async () => {
+    const { user } = setup();
+    const stage = screen.getByTestId("ss-stage");
+    expect(within(stage).getByTestId("session-card").getAttribute("data-card-id")).toBe("card-a");
+    expect(stage.getAttribute("data-edges")).toBe("2");
+
+    await answer(user, "2");
+    expect(within(screen.getByTestId("ss-stage")).getByTestId("session-card").getAttribute("data-card-id")).toBe("card-b");
+    expect(screen.getByTestId("ss-stage").getAttribute("data-edges")).toBe("1");
+    // Only the card in place is the session card, even while the last one leaves.
+    expect(screen.getAllByTestId("session-card")).toHaveLength(1);
+
+    await answer(user, "2");
+    expect(screen.getByTestId("ss-stage").getAttribute("data-edges")).toBe("0");
+  });
+
+  it("keeps a leaving card inert and without the session-card id (full motion)", async () => {
+    delete document.documentElement.dataset.fast;
+    const { user } = setup();
+    await answer(user, "1"); // Missed: card-a sinks behind card-b
+    const layers = document.querySelectorAll("[data-stage-key]");
+    expect(layers).toHaveLength(2);
+    expect(screen.getAllByTestId("session-card")).toHaveLength(1);
+    expect(cardOnScreen()).toBe("card-b");
+    expect(document.querySelector('[data-leaving] [data-card-id="card-a"]')).toBeTruthy();
+    await waitFor(() => expect(document.querySelectorAll("[data-stage-key]")).toHaveLength(1));
+  });
+
+  it("leaves as the grade says", () => {
+    expect(exitOf(1)).toBe("miss");
+    expect(exitOf(2)).toBe("hard");
+    expect(exitOf(3)).toBe("pass");
+    expect(exitOf(4)).toBe("pass");
   });
 });
 
