@@ -227,3 +227,44 @@ describe("SessionFrame in-a-row pill", () => {
     expect(burst).toHaveBeenCalledTimes(2);
   });
 });
+
+/** Stubs prefers-reduced-motion: `reduce` matches when `calm` is true. */
+function stubReducedMotion(calm: boolean) {
+  vi.stubGlobal(
+    "matchMedia",
+    (query: string) =>
+      ({
+        matches: calm && query.includes("prefers-reduced-motion"),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }) as unknown as MediaQueryList,
+  );
+}
+
+describe("SessionFrame progress segments and motion", () => {
+  // jsdom applies no Tailwind and no media queries, so these read the classes
+  // the segments get: `transition-transform` is the only transform transition.
+  const fills = () => Array.from(screen.getByTestId("ss-prog").querySelectorAll("b"));
+
+  it("with reduced motion, no segment has a transform transition", () => {
+    delete document.documentElement.dataset.fast;
+    stubReducedMotion(true);
+    render(frame({ index: 2 }));
+    expect(fills()).toHaveLength(4);
+    for (const b of fills()) expect(b.className).not.toMatch(/transition/);
+    vi.unstubAllGlobals();
+  });
+
+  it("with motion on, segments grow, and the CSS also stops it under reduced motion", () => {
+    delete document.documentElement.dataset.fast;
+    stubReducedMotion(false);
+    render(frame({ index: 2 }));
+    for (const b of fills()) {
+      expect(b.className).toContain("transition-transform");
+      // Before hydration reads the setting (server render), CSS turns it off.
+      expect(b.className).toContain("motion-reduce:transition-none");
+    }
+    vi.unstubAllGlobals();
+  });
+});

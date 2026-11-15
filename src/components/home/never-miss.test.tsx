@@ -269,3 +269,17 @@ describe("NeverMiss turning on", () => {
     );
   });
 });
+
+describe("NeverMiss switch knob and motion", () => {
+  it("drops the knob's transform transition under reduced motion", async () => {
+    const { user } = setup();
+    await openSheet(user);
+    const sw = screen.getByRole("switch", { name: "Remind me by email" });
+    const knob = sw.querySelector("span > span");
+    expect(knob).not.toBeNull();
+    // jsdom applies no Tailwind or media queries: check the class Tailwind
+    // compiles to `@media (prefers-reduced-motion: reduce) { transition-property: none }`.
+    expect(knob!.className).toContain("transition-transform");
+    expect(knob!.className).toContain("motion-reduce:transition-none");
+  });
+});

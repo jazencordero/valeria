@@ -148,6 +148,28 @@ describe("LeftRows", () => {
     expect(text("swing-ex")).toBe("grade 2.3 to 5.0");
   });
 
+  it("places the swing bar on the 0 to 5 scale with transforms only", () => {
+    render(<Page items={SOME} />);
+    // Exam: grade 2.3 to 5.0 (shown rounded); the bar spans the unrounded range.
+    const bar = screen.getByTestId("swing-bar-ex");
+    const fill = screen.getByTestId("swing-fill-ex");
+    const lo = Number(bar.style.transform.match(/^translateX\((-?[\d.]+)%\)$/)?.[1]);
+    const back = Number(fill.style.transform.match(/^translateX\((-?[\d.]+)%\)$/)?.[1]);
+    // Left end at the low grade, right end (lo + 100 + back) at the high grade.
+    expect((lo / 100) * 5).toBeCloseTo(2.3, 1);
+    expect(((lo + 100 + back) / 100) * 5).toBeCloseTo(5, 5);
+    for (const el of [bar, fill]) {
+      expect(el.style.left).toBe("");
+      expect(el.style.width).toBe("");
+      expect(el.className).not.toMatch(/transition-\[|left|width/);
+    }
+    // Nothing to show yet: the fill sits fully outside its window.
+    cleanup();
+    render(<Page items={NONE} />);
+    expect(screen.getByTestId("swing-bar-ex").style.transform).toBe("translateX(0%)");
+    expect(screen.getByTestId("swing-fill-ex").style.transform).toBe("translateX(-100%)");
+  });
+
   it("renders nothing when everything is graded", () => {
     const { container } = render(
       <LeftRows items={SOME.slice(0, 2)} whatIfs={{}} onRelease={() => {}} onReset={() => {}} />,

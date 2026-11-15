@@ -305,7 +305,7 @@ export function SessionFrame({
                 <b
                   className={
                     `absolute inset-0 origin-left rounded-[inherit] ${SECTION_FILL[c.section]} ` +
-                    (instant ? "" : "transition-transform duration-base ease-out ") +
+                    (mode === "full" ? "transition-transform duration-base ease-out motion-reduce:transition-none " : "") +
                     (on ? "scale-x-100" : "scale-x-0")
                   }
                 />

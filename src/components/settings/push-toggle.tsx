@@ -212,7 +212,7 @@ export function PushToggle({ publicKey, demo = false }: PushToggleProps) {
           className="group grid h-11 w-[52px] flex-none place-items-center rounded-full border-0 bg-transparent p-0 aria-disabled:opacity-50"
         >
           <span className="relative h-[26px] w-11 rounded-full bg-line transition-colors duration-quick ease-out group-aria-checked:bg-ink">
-            <span className="absolute top-[3px] left-[3px] size-5 rounded-full bg-surface shadow-[var(--shadow-card)] transition-transform duration-base ease-out group-aria-checked:translate-x-[18px]" />
+            <span className="absolute top-[3px] left-[3px] size-5 rounded-full bg-surface shadow-[var(--shadow-card)] transition-transform duration-base ease-out motion-reduce:transition-none group-aria-checked:translate-x-[18px]" />
           </span>
         </button>
       </div>

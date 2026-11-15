@@ -32,3 +32,20 @@
 body {
   background: var(--color-surface);
 }
+
+/*
+ * The fast switch (?fast=1 or the READY_FAST cookie, see src/lib/motion/fast.ts)
+ * makes every CSS transition and animation instant. Durations and delays go to
+ * 0s rather than `none`, so a CSS animation still runs (in no time, landing on
+ * its fill state) and still sends its start and end events. Web Animations
+ * (el.animate) and view transitions are not touched; they read the switch
+ * themselves.
+ */
+:root[data-fast] *,
+:root[data-fast] *::before,
+:root[data-fast] *::after {
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+}

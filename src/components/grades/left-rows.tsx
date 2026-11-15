@@ -199,10 +199,13 @@ function LeftRow({
   }, []);
 
   const swingText = range ? `grade ${fmt1(range.lo)} to ${fmt1(range.hi)}` : "needs a what-if first";
-  const barStyle = range
-    ? { left: `${(range.lo / 5) * 100}%`, width: `${Math.max(2, ((range.hi - range.lo) / 5) * 100)}%` }
-    : { left: "0%", width: "0%" };
-  const glide = mode === "full" ? "transition-[left,width] duration-quick ease-out" : "";
+  // The bar is moved with transforms only (no layout per frame): a full-width
+  // window slid to the low end, and inside it a full-width fill slid back so
+  // its right end sits on the high end. Both are pill-shaped and the window
+  // clips, so both ends stay round at any width (scaleX would flatten them).
+  const lo = range ? (range.lo / 5) * 100 : 0;
+  const span = range ? Math.max(2, ((range.hi - range.lo) / 5) * 100) : 0;
+  const glide = mode === "full" ? "transition-transform duration-quick ease-out" : "";
 
   return (
     <li data-testid={`left-${item.id}`} className="border-t border-solid border-line pb-1 pt-3">
@@ -217,12 +220,18 @@ function LeftRow({
       {meta && <p className="mono mt-0.5 text-ink-3">{meta}</p>}
       {showSwing && (
         <div className="mt-2 flex items-center gap-2.5">
-          <div className="relative h-1 flex-1 rounded-full bg-line" aria-hidden="true">
+          <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-line" aria-hidden="true">
             <i
               data-testid={`swing-bar-${item.id}`}
-              className={`absolute inset-y-0 rounded-full bg-ink-2 ${glide}`}
-              style={barStyle}
-            />
+              className={`absolute inset-0 overflow-hidden rounded-full ${glide}`}
+              style={{ transform: `translateX(${lo}%)` }}
+            >
+              <i
+                data-testid={`swing-fill-${item.id}`}
+                className={`absolute inset-0 rounded-full bg-ink-2 ${glide}`}
+                style={{ transform: `translateX(${span - 100}%)` }}
+              />
+            </i>
           </div>
           <span data-testid={`swing-${item.id}`} className="mono whitespace-nowrap text-ink-3">
             {swingText}
