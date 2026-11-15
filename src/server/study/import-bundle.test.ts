@@ -14,17 +14,21 @@ import { users } from "@/server/db/schema/users";
 import { parseArgs, run } from "../../../scripts/study/import-bundle";
 import {
   applyImport,
+  applyStudyOnly,
   BundleInvalid,
   ImportFailed,
   loadBundle,
   NO_EXAM_DATE,
   planImport,
-  STUDY_ONLY,
+  planStudyOnly,
+  STUDY_ONLY_NO_CODE,
+  STUDY_ONLY_WITH_EXAM,
   type CourseBundle,
   type ImportPlan,
 } from "./import-bundle";
 
 const FIXTURE = path.join(process.cwd(), "tests/fixtures/study/sample-bundle");
+const STUDY_FIXTURE = path.join(process.cwd(), "tests/fixtures/study/sample-study-only");
 const NOW = new Date("2026-11-15T10:00:00Z");
 /** startNewOn 2026-11-24 at 00:00 in Helsinki (UTC+2 in November). */
 const START = new Date("2026-11-23T22:00:00Z");
@@ -204,9 +208,11 @@ describe("planImport (pure)", () => {
     const [mapped] = (await loadBundle(root, { courses: ["TST-E0001"] })).courses;
     const p = planImport(mapped);
     expect(p.aiPolicy).toEqual({ aiAssignments: "off", aiStudy: "allowed" });
-    const notes = p.notes.join("\n");
-    expect(notes).not.toContain("AI scope");
-    expect(notes).toContain("exam/ holds 1 valid file that is not Markdown (1 pdf), not imported");
+    expect(p.notes.join("\n")).not.toContain("AI scope");
+    expect(p.notStored.join("\n")).toContain("exam/ holds 1 valid file that is not Markdown (1 pdf), not imported");
+    // What is stored (the study order) is a note, never under "not stored".
+    expect(p.notes.join("\n")).toContain("studyOrder sets the position");
+    expect(p.notStored.join("\n")).not.toContain("studyOrder");
     expect(p.problems).toContainEqual({ file: "exam/broken.json", reason: "is not valid JSON." });
     // The seed lists study-plan.md, so it comes first; essentials.md follows in file-name order.
     expect(p.documents.map((d) => [d.slug, d.title, d.position])).toEqual([
@@ -228,7 +234,7 @@ describe("planImport (pure)", () => {
     ]);
     expect(p.problems).toContainEqual({ file: "seed.json", reason: "documents names exam/missing.md, which is not a Markdown file in exam/." });
     expect(p.problems).toContainEqual({ file: "exam/02 plan.md", reason: "has the same name as exam/02-plan.md; skipped." });
-    expect(p.notes.join("\n")).toContain("1 valid file that is not Markdown (1 text)");
+    expect(p.notStored.join("\n")).toContain("1 valid file that is not Markdown (1 text)");
   });
 });
 
@@ -324,34 +330,125 @@ describe("a bundle that cannot be imported yet", () => {
     T,
   );
 
+  it("refuses a seed that is study-only and still has an exam, and a study-only seed with no course code", async () => {
+    const seed = JSON.parse(await readFile(path.join(dir, "seed.json"), "utf8"));
+    await write(path.join(dir, "seed.json"), { ...seed, studyOnly: true });
+    expect(((await loadBundle(dir).catch((e: unknown) => e)) as BundleInvalid).problems).toEqual([`seed.json: ${STUDY_ONLY_WITH_EXAM}`]);
+    const { exam: _exam, ...rest } = seed;
+    void _exam;
+    await write(path.join(dir, "seed.json"), { ...rest, studyOnly: true });
+    expect(((await loadBundle(dir).catch((e: unknown) => e)) as BundleInvalid).problems).toEqual([`seed.json: ${STUDY_ONLY_NO_CODE}`]);
+  });
+});
+
+describe("a study-only course (M3-56)", () => {
+  let studyCourse: string;
+  const SUMMARY_FIRST = "Study-only course: 1 lecture page imported, 3 cards not imported (cards need an exam)";
+
+  beforeEach(async () => {
+    const [c] = await t.db.insert(courses).values({ userId: her, moodleId: 1003, code: "TST-E0003", name: "Intro to Service Sketching" }).returning();
+    studyCourse = c.id;
+  }, T);
+
+  async function studyPlan() {
+    const bundle = await loadBundle(STUDY_FIXTURE);
+    expect(bundle.courses).toEqual([]);
+    expect(bundle.studyOnly).toHaveLength(1);
+    return planStudyOnly(bundle.studyOnly[0]);
+  }
+
+  it("plans its lecture and page, and counts the cards and concepts it leaves out", async () => {
+    const p = await studyPlan();
+    expect(p.courseCode).toBe("TST-E0003");
+    expect(p.lectures).toMatchObject([{ n: 1, title: "What a service sketch shows" }]);
+    expect(p.lectures[0].pageHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(p.cardsNotImported).toBe(3);
+    expect(p.problems).toEqual([]);
+    expect(p.notStored).toEqual(["2 concepts not imported (concepts need an exam)."]);
+  });
+
   it(
-    "the dry run refuses a study-only bundle (lectures, pages and cards, no exam): cards.exam_id is required",
+    "creates its lecture page and no exam, concept or card, and reports the skipped cards",
     async () => {
-      // A second invented sample: the fixture's lectures, page and deck, with no exam.
-      const seed = JSON.parse(await readFile(path.join(dir, "seed.json"), "utf8"));
-      const { exam: _exam, ...rest } = seed;
-      void _exam;
-      await write(path.join(dir, "seed.json"), { ...rest, studyOnly: true, courseCode: "TST-E0001" });
+      const before = await rowCounts();
+      const result = await applyStudyOnly(t.db, her, await studyPlan());
+      expect(result.summary).toBe(SUMMARY_FIRST);
+      expect(result.cardsNotImported).toBe(3);
+      expect(result.courseId).toBe(studyCourse);
+      expect(result.counts).toEqual({
+        lectures: { created: 1, skipped: 0, updated: 0 },
+        pages: { created: 1, skipped: 0, updated: 0 },
+        aiPolicy: { created: 0, skipped: 0, updated: 0 },
+      });
+      const after = await rowCounts();
+      expect(after).toEqual({ ...before, lectures: before.lectures + 1, lectureContent: before.lectureContent + 1 });
+      for (const table of ["exams", "concepts", "cards", "cardStates", "cardConcepts", "lectureConcepts", "examDocuments"]) expect(after[table]).toBe(0);
 
-      const err = await loadBundle(dir).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(BundleInvalid);
-      expect((err as BundleInvalid).problems).toEqual([`seed.json: ${STUDY_ONLY}.`]);
+      const [lecture] = await t.db.select().from(lectures).where(eq(lectures.userId, her));
+      expect(lecture).toMatchObject({ courseId: studyCourse, n: 1, title: "What a service sketch shows" });
+      const [content] = await t.db.select().from(lectureContent).where(eq(lectureContent.lectureId, lecture.id));
+      expect(content).toMatchObject({ minutes: 4 });
+      expect(content.sections).toHaveLength(2);
+      expect(content.slideTitles).toHaveLength(7);
+    },
+    T,
+  );
 
-      const r = await dryRun(dir);
-      expect(r.code).toBe(1);
-      expect(r.err).toContain("study-only bundles need cards without an exam, which the schema does not allow yet; nothing was imported");
+  it(
+    "a second import adds nothing, and a dry run writes nothing",
+    async () => {
+      const dry = await applyStudyOnly(t.db, her, await studyPlan(), { dryRun: true });
+      expect(dry.dryRun).toBe(true);
+      expect(dry.summary).toBe(SUMMARY_FIRST);
+      expect(await t.db.select().from(lectures)).toEqual([]);
 
-      // In a multi-course root it is found by its folder name, picked or not, and blocks only when picked.
+      await applyStudyOnly(t.db, her, await studyPlan());
+      const before = await rowCounts();
+      const again = await applyStudyOnly(t.db, her, await studyPlan());
+      expect(again.counts).toEqual({
+        lectures: { created: 0, skipped: 1, updated: 0 },
+        pages: { created: 0, skipped: 1, updated: 0 },
+        aiPolicy: { created: 0, skipped: 0, updated: 0 },
+      });
+      expect(again.summary).toBe("Study-only course: 0 lecture pages imported, 3 cards not imported (cards need an exam)");
+      expect(await rowCounts()).toEqual(before);
+    },
+    T,
+  );
+
+  it(
+    "through the CLI in a multi-course root: found by its folder name, AI rules applied, a bad deck reported but not fatal",
+    async () => {
       const many = await mkdtemp(path.join(os.tmpdir(), "bundle-many-"));
       try {
         await cp(FIXTURE, path.join(many, "TST-E0001"), { recursive: true });
-        await cp(dir, path.join(many, "TST-E0003"), { recursive: true });
-        await write(path.join(many, "TST-E0003", "seed.json"), { ...rest, studyOnly: true });
-        expect((await dryRun(many, ["--course", "TST-E0003"])).err).toContain("TST-E0003/seed.json: study-only bundles need cards without an exam");
-        expect((await dryRun(many)).code).toBe(1);
-        const picked = await dryRun(many, ["--course", "TST-E0001"]);
-        expect(picked.code).toBe(0);
-        expect(picked.out).toMatch(/Cards\s+5 created/);
+        await cp(STUDY_FIXTURE, path.join(many, "TST-E0003"), { recursive: true });
+        const seed = JSON.parse(await readFile(STUDY_FIXTURE + "/seed.json", "utf8"));
+        const { courseCode: _code, ...noCode } = seed;
+        void _code;
+        // No courseCode: the folder's name is the code. A second lecture's deck is missing.
+        await write(path.join(many, "TST-E0003", "seed.json"), {
+          ...noCode,
+          lectures: [...noCode.lectures, { n: 2, title: "Front stage and back stage", deck: "deck-2.json" }],
+        });
+        await write(path.join(many, "account.json"), { courses: { "TST-E0003": { aiAllowed: false, scope: "assignments" } } });
+
+        const out: string[] = [];
+        const err: string[] = [];
+        const code = await run([many, "--user", her], t.db, { out: (l) => out.push(l), err: (l) => err.push(l) });
+        expect(err).toEqual([]);
+        expect(code).toBe(0);
+        const text = out.join("\n");
+        expect(text).toContain(`Course TST-E0003:\n  ${SUMMARY_FIRST}`);
+        expect(text).toMatch(/Lectures\s+2 created/);
+        expect(text).toContain("deck-2.json (lecture 2): cannot be read (missing?).");
+        expect(text).toContain("Imported 2 course(s).");
+
+        const [row] = await t.db.select().from(courses).where(eq(courses.id, studyCourse));
+        expect(row).toMatchObject({ aiAssignments: "off", aiStudy: "allowed" });
+        expect(await t.db.select().from(exams).where(eq(exams.courseId, studyCourse))).toEqual([]);
+        expect(await t.db.select().from(lectures).where(eq(lectures.courseId, studyCourse))).toHaveLength(2);
+        expect(await t.db.select().from(cards).where(eq(cards.userId, her))).toHaveLength(5); // TST-E0001's only
       } finally {
         await rm(many, { recursive: true, force: true });
       }
@@ -801,7 +898,17 @@ describe("CLI", () => {
       expect(text).toContain("Course TST-E0001 (dry run");
       expect(text).toContain("deck-1.json card 6 (lecture 1): Unknown concept slug");
       expect(text).toMatch(/Cards\s+5 created, 0 already there/);
-      expect(text).toContain("Not stored");
+      // The documents count, and the headings say what is under them.
+      expect(text).toMatch(/Exam documents\s+2 created, 0 already there/);
+      const notStoredAt = out.indexOf("  Not stored:");
+      const notesAt = out.indexOf("  Notes (how the bundle was read):");
+      expect(notStoredAt).toBeGreaterThan(-1);
+      expect(notesAt).toBeGreaterThan(notStoredAt);
+      expect(out.slice(notStoredAt + 1, notesAt)).toEqual([
+        "    - exam/ holds 1 valid file that is not Markdown (1 pdf), not imported: exam_documents holds Markdown only.",
+      ]);
+      expect(out.slice(notesAt + 1).join("\n")).toContain("studyOrder sets the position of 3 concepts.");
+      expect(text).not.toContain("(no field in the schema or the card format)");
       expect(text).toContain("Dry run: nothing was written.");
       expect(text).not.toContain("smoothing constant"); // no card text
       expect(await rowCounts()).toEqual(before);

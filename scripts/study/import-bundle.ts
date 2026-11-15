@@ -18,13 +18,16 @@ import { moodleConnections } from "@/server/db/schema/moodle";
 import { users } from "@/server/db/schema/users";
 import {
   applyImport,
+  applyStudyOnly,
   BundleInvalid,
   ImportFailed,
   loadBundle,
   planImport,
-  type ImportCounts,
+  planStudyOnly,
+  type Count,
   type ImportProblem,
   type ImportResult,
+  type StudyOnlyResult,
 } from "@/server/study/import-bundle";
 
 export const HELP = `Import a hand-made study bundle into one user's account.
@@ -34,7 +37,9 @@ Usage:
   npx tsx scripts/study/import-bundle.ts <folder> --moodle-user <moodleUserId> [--course <code>]... [--dry-run]
 
   <folder>          one course (it holds seed.json), or a folder of course folders
-                    (<folder>/<CODE>/seed.json, decks, pages, exam/), with account.json at the root
+                    (<folder>/<CODE>/seed.json, decks, pages, exam/), with account.json at the root.
+                    A study-only course (seed.json says "studyOnly": true, no exam) brings its
+                    lectures and lecture pages only: its cards need an exam and are counted, not imported.
   --user            the user's id in our database (users.id)
   --moodle-user     the user's Moodle user id (looked up in moodle_connections)
   --course <code>   import only this course; repeat for more. Courses not picked are not read,
@@ -137,34 +142,42 @@ function problemLine(p: ImportProblem): string {
   return `  ${where}: ${p.reason}`;
 }
 
-function countLines(counts: ImportCounts): string[] {
-  const names: [keyof ImportCounts, string][] = [
-    ["exam", "Exam"],
-    ["concepts", "Concepts"],
-    ["lectures", "Lectures"],
-    ["pages", "Lecture pages"],
-    ["lectureConcepts", "Lecture-concept links"],
-    ["cards", "Cards"],
-    ["aiPolicy", "AI policy"],
-  ];
-  return names
-    .filter(([k]) => k !== "aiPolicy" || counts.aiPolicy.skipped + counts.aiPolicy.updated > 0)
-    .map(([k, label]) => {
+const LABELS: Record<string, string> = {
+  exam: "Exam",
+  concepts: "Concepts",
+  lectures: "Lectures",
+  pages: "Lecture pages",
+  lectureConcepts: "Lecture-concept links",
+  cards: "Cards",
+  documents: "Exam documents",
+  aiPolicy: "AI policy",
+};
+
+function countLines(counts: Record<string, Count>): string[] {
+  return Object.keys(LABELS)
+    .filter((k) => k in counts)
+    .filter((k) => k !== "aiPolicy" || counts.aiPolicy.skipped + counts.aiPolicy.updated > 0)
+    .map((k) => {
       const c = counts[k];
       const updated = c.updated ? `, ${c.updated} updated` : "";
-      return `  ${label.padEnd(22)} ${c.created} created, ${c.skipped} already there${updated}`;
+      return `  ${LABELS[k].padEnd(22)} ${c.created} created, ${c.skipped} already there${updated}`;
     });
 }
 
-function printResult(r: ImportResult, io: Io): void {
+function printResult(r: ImportResult | StudyOnlyResult, io: Io): void {
   io.out(`Course ${r.courseCode}${r.dryRun ? " (dry run, nothing was written; it would give)" : ""}:`);
+  if ("studyOnly" in r) io.out(`  ${r.summary}`);
   for (const line of countLines(r.counts)) io.out(line);
   if (r.problems.length) {
     io.out(`  ${r.problems.length} problem(s), skipped or left as they are:`);
     for (const p of r.problems) io.out(`  ${problemLine(p)}`);
   }
+  if (r.notStored.length) {
+    io.out("  Not stored:");
+    for (const n of r.notStored) io.out(`    - ${n}`);
+  }
   if (r.notes.length) {
-    io.out("  Not stored (no field in the schema or the card format):");
+    io.out("  Notes (how the bundle was read):");
     for (const n of r.notes) io.out(`    - ${n}`);
   }
   io.out("");
@@ -188,6 +201,7 @@ export async function run(argv: readonly string[], database: Db, io: Io = { out:
   try {
     const bundle = await loadBundle(args.folder, { courses: args.courses });
     const plans = bundle.courses.map(planImport);
+    const studyPlans = bundle.studyOnly.map(planStudyOnly);
 
     const userId = await resolveUser(database, args.user);
     if (!userId) {
@@ -197,10 +211,10 @@ export async function run(argv: readonly string[], database: Db, io: Io = { out:
 
     // One transaction for every picked course; each course is a savepoint inside it.
     const results = await database.transaction(async (tx) => {
-      const out: ImportResult[] = [];
-      for (const plan of plans) {
-        out.push(await applyImport(tx as unknown as Db, userId, plan, { dryRun: args.dryRun, courseId: args.courseId }));
-      }
+      const out: (ImportResult | StudyOnlyResult)[] = [];
+      const options = { dryRun: args.dryRun, courseId: args.courseId };
+      for (const plan of plans) out.push(await applyImport(tx as unknown as Db, userId, plan, options));
+      for (const plan of studyPlans) out.push(await applyStudyOnly(tx as unknown as Db, userId, plan, options));
       return out;
     });
     for (const r of results) printResult(r, io);

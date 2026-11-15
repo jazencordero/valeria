@@ -1,0 +1,22 @@
+{
+  "breath": "A service sketch draws what a customer goes through, step by step, so you can see where the service helps and where it gets in the way.",
+  "minutes": 4,
+  "sections": [
+    {
+      "heading": "Steps in order",
+      "blocks": [
+        ["p", "A journey map lists the customer's steps from first contact to the end."],
+        ["ul", ["One step per box", "Arrows show the order"]]
+      ],
+      "terms": ["journey map"],
+      "slides": "slides 2-4"
+    },
+    {
+      "heading": "Where the service meets the customer",
+      "blocks": [["dl", [["Touchpoint", "A moment where the customer meets the service"]]]],
+      "terms": ["touchpoint"],
+      "slides": "slides 5-7"
+    }
+  ],
+  "slideTitles": ["What a service sketch shows", "Steps", "Boxes and arrows", "Order", "Touchpoints", "Front stage", "Winning and losing"]
+}

@@ -12,8 +12,14 @@
  *   concepts: [{slug, name, lecture, position, weight}], lectures: [{n, title, file, deck, page}],
  *   map?, startNewOn?, documents? }`. Weights are renormalised to sum to 1. `gradeTarget` 1..5
  *   becomes `target_pct` with the M3-13 scale (`targetPctForGrade`) and is kept as given in
- *   `exams.grade_target`. A seed without `exam.at` (no exam date yet) or with `studyOnly: true`
- *   (cards without an exam; `cards.exam_id` is NOT NULL) is refused: nothing is imported.
+ *   `exams.grade_target`. A seed without `exam.at` (no exam date yet) is refused: nothing is imported.
+ * - A study-only seed (M3-56): `{ studyOnly: true, courseCode?, concepts?, lectures }`, no exam.
+ *   Its course code is `courseCode`, else the course folder's name. Only its lectures and lecture
+ *   pages are imported (same matching rules as below); cards and concepts need an exam row
+ *   (`cards.exam_id`, `concepts.exam_id` are NOT NULL), so they are counted and left out, and so
+ *   are lecture-concept links, a map and `exam/`. The deck files are read only to count their
+ *   cards; a deck that cannot be read is a problem line, never a reason to stop. A seed with
+ *   `studyOnly: true` and an `exam` is refused.
  * - one deck file per lecture: an array of cards in the M3-49 format (`parseCard`); `concept` /
  *   `concepts` hold slugs from seed.json. An optional `id` is the card's stable id. `core`,
  *   `first` and cloze `accept` are part of the format; `beyondSlides`, `basis`, `quote` and
@@ -56,7 +62,7 @@
  *   ai_assignments off, ai_study allowed; false otherwise -> off + not_allowed; "unknown"/missing -> untouched.
  *
  * Problems (a card skipped, and why) name the file and the card's position, never its text.
- * Notes say what the bundle holds that is not stored, and how some things were read. Writes are batched;
+ * `notStored` says what the bundle holds that is stored nowhere; `notes` say how some things were read. Writes are batched;
  * `applyImport` runs in one transaction (a savepoint when called inside one), and `dryRun`
  * does every write and then rolls back.
  */
@@ -93,9 +99,23 @@ const day = (what: string) =>
 
 /** A seed whose exam has no date yet (`at: null`, often with `atIsPlaceholderTime`). */
 export const NO_EXAM_DATE = "exam.at is missing: this bundle has no exam date yet. Get the date first; nothing was imported.";
-/** A seed with `studyOnly: true`: lectures, pages and cards, no exam. */
-export const STUDY_ONLY =
-  "study-only bundles need cards without an exam, which the schema does not allow yet; nothing was imported";
+/** A seed that says `studyOnly: true` and still has an exam. */
+export const STUDY_ONLY_WITH_EXAM = "studyOnly is true but the seed has an exam; remove one of them. Nothing was imported.";
+/** A study-only seed in a one-course root with no `courseCode`. */
+export const STUDY_ONLY_NO_CODE = "a study-only seed needs courseCode (or a course folder named by its code); nothing was imported.";
+
+const LectureListSchema = z.array(
+  z.object({
+    n: z.number().int().min(1, { error: "Each lecture number n must be 1 or more." }),
+    title: nonEmpty("Each lecture title"),
+    file: z.string().optional(),
+    deck: fileName("A lecture's deck").optional(),
+    page: fileName("A lecture's page").optional(),
+  }),
+);
+type SeedLecture = z.infer<typeof LectureListSchema>[number];
+
+const dupValues = (list: (string | number)[]) => [...new Set(list.filter((v, i) => list.indexOf(v) !== i))];
 
 export const SeedSchema = z
   .object({
@@ -133,18 +153,10 @@ export const SeedSchema = z
         }),
       )
       .min(1, { error: "The seed needs at least one concept." }),
-    lectures: z.array(
-      z.object({
-        n: z.number().int().min(1, { error: "Each lecture number n must be 1 or more." }),
-        title: nonEmpty("Each lecture title"),
-        file: z.string().optional(),
-        deck: fileName("A lecture's deck").optional(),
-        page: fileName("A lecture's page").optional(),
-      }),
-    ),
+    lectures: LectureListSchema,
   })
   .superRefine((seed, ctx) => {
-    const dup = (list: (string | number)[]) => [...new Set(list.filter((v, i) => list.indexOf(v) !== i))];
+    const dup = dupValues;
     for (const s of dup(seed.concepts.map((c) => c.slug))) ctx.addIssue(`Concept slug "${s}" is used twice.`);
     for (const s of dup(seed.concepts.map((c) => c.name))) ctx.addIssue(`Concept name "${s}" is used twice.`);
     for (const n of dup(seed.lectures.map((l) => l.n))) ctx.addIssue(`Lecture ${n} is listed twice.`);
@@ -157,6 +169,22 @@ export const SeedSchema = z
     }
   });
 export type Seed = z.infer<typeof SeedSchema>;
+
+/**
+ * A study-only seed: lectures and pages, no exam. Concepts may be listed (they are counted, not
+ * imported); other keys are allowed and ignored.
+ */
+export const StudySeedSchema = z
+  .looseObject({
+    studyOnly: z.literal(true),
+    courseCode: nonEmpty("courseCode").optional(),
+    concepts: z.array(z.unknown(), { error: "concepts must be a list." }).default([]),
+    lectures: LectureListSchema,
+  })
+  .superRefine((seed, ctx) => {
+    for (const n of dupValues(seed.lectures.map((l) => l.n))) ctx.addIssue(`Lecture ${n} is listed twice.`);
+  });
+export type StudySeed = z.infer<typeof StudySeedSchema>;
 
 export const DeckFileSchema = z.array(z.unknown(), { error: "A deck file must be a JSON array of cards." });
 
@@ -252,7 +280,26 @@ export type CourseBundle = {
   account: { aiAllowed?: boolean | "unknown"; scope?: string; other: string[] } | null;
 };
 
-export type Bundle = { root: string; courses: CourseBundle[] };
+/** One study-only course of a bundle (M3-56): lectures and pages are imported, nothing else. */
+export type StudyOnlyCourse = {
+  dir: string;
+  /** From `courseCode`, else the course folder's name. */
+  courseCode: string;
+  seed: StudySeed;
+  pages: BundlePage[];
+  /** Every deck file that could be read, with how many cards it holds (none is imported). */
+  decks: { lecture: number; file: string; cards: number }[];
+  /** Deck files that could not be read: reported, never a reason to stop. */
+  deckProblems: { file: string; lecture: number; reason: string }[];
+  /** Files under `exam/` (none is imported: exam documents need an exam). */
+  examFiles: number;
+  /** `seed.map`, when it names one (not imported). */
+  map: string | null;
+  account: CourseBundle["account"];
+};
+
+/** `courses` hold an exam; `studyOnly` courses hold lectures and pages only. */
+export type Bundle = { root: string; courses: CourseBundle[]; studyOnly: StudyOnlyCourse[] };
 
 /** The bundle cannot be used at all: every reason, one sentence each. */
 export class BundleInvalid extends Error {
@@ -339,10 +386,31 @@ async function loadExamDocs(dir: string): Promise<Pick<CourseBundle, "examDocs" 
   return { examDocs, examDocProblems };
 }
 
+/** Reads and validates the lecture pages; a page that is missing or wrong is a bundle problem. */
+async function loadPages(dir: string, lectureList: SeedLecture[], at: (f: string) => string, problems: string[]): Promise<BundlePage[]> {
+  const pages: BundlePage[] = [];
+  for (const lecture of lectureList) {
+    if (!lecture.page) continue;
+    const raw = await readJson(dir, lecture.page, problems, at(lecture.page));
+    if (raw === undefined) continue;
+    const page = PageSchema.safeParse(raw);
+    if (page.success) pages.push({ lecture: lecture.n, file: lecture.page, page: page.data });
+    else problems.push(...issues(at(lecture.page), page.error));
+  }
+  return pages;
+}
+
+/** account.json's entry for a course, by code (trimmed, any case). */
+function accountFor(account: Account | null, courseCode: string): CourseBundle["account"] {
+  const entry = account ? Object.entries(account.courses).find(([code]) => normCode(code) === normCode(courseCode))?.[1] : undefined;
+  return entry
+    ? { aiAllowed: entry.aiAllowed, scope: entry.scope, other: Object.keys(entry).filter((k) => k !== "aiAllowed" && k !== "scope") }
+    : null;
+}
+
 async function loadCourse(dir: string, label: string, seed: Seed, account: Account | null, problems: string[]): Promise<CourseBundle> {
   const at = (f: string) => (label ? `${label}/${f}` : f);
   const decks: BundleDeck[] = [];
-  const pages: BundlePage[] = [];
   for (const lecture of seed.lectures) {
     if (lecture.deck) {
       const raw = await readJson(dir, lecture.deck, problems, at(lecture.deck));
@@ -352,15 +420,8 @@ async function loadCourse(dir: string, label: string, seed: Seed, account: Accou
         else problems.push(...issues(at(lecture.deck), deck.error));
       }
     }
-    if (lecture.page) {
-      const raw = await readJson(dir, lecture.page, problems, at(lecture.page));
-      if (raw !== undefined) {
-        const page = PageSchema.safeParse(raw);
-        if (page.success) pages.push({ lecture: lecture.n, file: lecture.page, page: page.data });
-        else problems.push(...issues(at(lecture.page), page.error));
-      }
-    }
   }
+  const pages = await loadPages(dir, seed.lectures, at, problems);
 
   let map: StudyMap | null = null;
   if (seed.map) {
@@ -374,18 +435,38 @@ async function loadCourse(dir: string, label: string, seed: Seed, account: Accou
   const starts = [seed.startNewOn, seed.exam.startNewOn, map?.startNewOn].filter((d): d is string => !!d);
   if (new Set(starts).size > 1) problems.push(`${at(seed.map ?? "seed.json")}: startNewOn is given twice with different dates.`);
 
-  const entry = account
-    ? Object.entries(account.courses).find(([code]) => normCode(code) === normCode(seed.exam.courseCode))?.[1]
-    : undefined;
-  const accountPart = entry
-    ? {
-        aiAllowed: entry.aiAllowed,
-        scope: entry.scope,
-        other: Object.keys(entry).filter((k) => k !== "aiAllowed" && k !== "scope"),
-      }
-    : null;
+  return { dir, seed, map, decks, pages, ...(await loadExamDocs(dir)), account: accountFor(account, seed.exam.courseCode) };
+}
 
-  return { dir, seed, map, decks, pages, ...(await loadExamDocs(dir)), account: accountPart };
+async function loadStudyOnly(
+  dir: string,
+  label: string,
+  courseCode: string,
+  seed: StudySeed,
+  account: Account | null,
+  problems: string[],
+): Promise<StudyOnlyCourse> {
+  const at = (f: string) => (label ? `${label}/${f}` : f);
+  // Decks are only counted: a deck that cannot be read is reported, and the pages still go in.
+  const decks: StudyOnlyCourse["decks"] = [];
+  const deckProblems: StudyOnlyCourse["deckProblems"] = [];
+  for (const lecture of seed.lectures) {
+    if (!lecture.deck) continue;
+    const local: string[] = [];
+    const raw = await readJson(dir, lecture.deck, local, lecture.deck);
+    if (raw === undefined) {
+      deckProblems.push({ file: lecture.deck, lecture: lecture.n, reason: local.join(" ").replace(`${lecture.deck}: `, "") });
+      continue;
+    }
+    const deck = DeckFileSchema.safeParse(raw);
+    if (deck.success) decks.push({ lecture: lecture.n, file: lecture.deck, cards: deck.data.length });
+    else deckProblems.push({ file: lecture.deck, lecture: lecture.n, reason: "is not a JSON array of cards; its cards were not counted." });
+  }
+  const pages = await loadPages(dir, seed.lectures, at, problems);
+  const examDir = path.join(dir, "exam");
+  const examFiles = (await exists(examDir)) ? (await listFiles(examDir)).length : 0;
+  const map = typeof seed.map === "string" ? seed.map : null;
+  return { dir, courseCode, seed, pages, decks, deckProblems, examFiles, map, account: accountFor(account, courseCode) };
 }
 
 /**
@@ -425,6 +506,7 @@ export async function loadBundle(root: string, options: { courses?: string[] } =
   }
 
   const found: { dir: string; label: string; seed: Seed }[] = [];
+  const foundStudy: { dir: string; label: string; code: string; seed: StudySeed }[] = [];
   const codesSeen: string[] = [];
   for (const place of places) {
     const seedLabel = place.label ? `${place.label}/seed.json` : "seed.json";
@@ -439,7 +521,17 @@ export async function loadBundle(root: string, options: { courses?: string[] } =
     if (code) codesSeen.push(code);
     if (wanted && (!code || !wanted.has(code))) continue;
     if (studyOnly) {
-      problems.push(`${seedLabel}: ${STUDY_ONLY}.`);
+      if (loose.exam !== undefined) {
+        problems.push(`${seedLabel}: ${STUDY_ONLY_WITH_EXAM}`);
+        continue;
+      }
+      if (!code) {
+        problems.push(`${seedLabel}: ${STUDY_ONLY_NO_CODE}`);
+        continue;
+      }
+      const parsedStudy = StudySeedSchema.safeParse(raw);
+      if (!parsedStudy.success) problems.push(...issues(seedLabel, parsedStudy.error));
+      else foundStudy.push({ ...place, code, seed: parsedStudy.data });
       continue;
     }
     const parsed = SeedSchema.safeParse(raw);
@@ -459,8 +551,10 @@ export async function loadBundle(root: string, options: { courses?: string[] } =
 
   const coursesOut: CourseBundle[] = [];
   for (const f of found) coursesOut.push(await loadCourse(f.dir, f.label, f.seed, account, problems));
+  const studyOut: StudyOnlyCourse[] = [];
+  for (const f of foundStudy) studyOut.push(await loadStudyOnly(f.dir, f.label, f.code, f.seed, account, problems));
   if (problems.length) throw new BundleInvalid(problems);
-  return { root, courses: coursesOut };
+  return { root, courses: coursesOut, studyOnly: studyOut };
 }
 
 // ---------------------------------------------------------------------------
@@ -532,7 +626,9 @@ export type ImportPlan = {
   /** M2-27's two columns to write, or null to leave her own answers alone. */
   aiPolicy: { aiAssignments: "off" | "allowed"; aiStudy: "allowed" | "not_allowed" } | null;
   problems: ImportProblem[];
-  /** What the bundle holds that is not stored, and how some things were read. */
+  /** What the bundle holds that is not stored anywhere. */
+  notStored: string[];
+  /** How some things were read (all of it stored). */
   notes: string[];
 };
 
@@ -585,6 +681,7 @@ export function planImport(course: CourseBundle): ImportPlan {
   const { seed, map } = course;
   const problems: ImportProblem[] = [];
   const notes: string[] = [];
+  const notStored: string[] = [];
 
   // Concepts: weights renormalised; position from studyOrder when the map has one.
   const total = seed.concepts.reduce((s, c) => s + c.weight, 0);
@@ -687,22 +784,7 @@ export function planImport(course: CourseBundle): ImportPlan {
   const startDay = seed.startNewOn ?? exam.startNewOn ?? map?.startNewOn ?? null;
   const startNewAt = startDay ? helsinkiToInstant(startDay, "00:00") : null;
 
-  let aiPolicy: ImportPlan["aiPolicy"] = null;
-  if (course.account) {
-    // account.json -> M2-27's columns. Missing or "unknown" leaves both as they are, so her own
-    // answer is never overwritten. Importing a bundle does not by itself set ai_study.
-    const { aiAllowed, scope } = course.account;
-    if (aiAllowed === true) aiPolicy = { aiAssignments: "allowed", aiStudy: "allowed" };
-    else if (aiAllowed === false && scope === "assignments") {
-      // No help with assignments; studying the slides with AI is fine.
-      aiPolicy = { aiAssignments: "off", aiStudy: "allowed" };
-    } else if (aiAllowed === false) {
-      // No scope (or one we do not know): the safe reading is no AI at all for this course.
-      aiPolicy = { aiAssignments: "off", aiStudy: "not_allowed" };
-      if (scope !== undefined) notes.push(`account.json AI scope "${scope}" is not known; treated as no AI for this course.`);
-    }
-    if (course.account.other.length) notes.push(`account.json fields ${course.account.other.join(", ")} are not stored.`);
-  }
+  const aiPolicy = aiPolicyFor(course.account, notes, notStored);
 
   // Exam documents: every Markdown file of exam/ is stored; the rest is counted.
   const markdown = course.examDocs.filter((d) => d.text !== undefined);
@@ -731,7 +813,7 @@ export function planImport(course: CourseBundle): ImportPlan {
       .filter(([, n]) => n)
       .map(([k, n]) => `${n} ${k}`)
       .join(", ");
-    notes.push(`exam/ holds ${plural(others.length, "valid file")} that is not Markdown (${kinds}), not imported: exam_documents holds Markdown only.`);
+    notStored.push(`exam/ holds ${plural(others.length, "valid file")} that is not Markdown (${kinds}), not imported: exam_documents holds Markdown only.`);
   }
   for (const p of course.examDocProblems) problems.push({ file: p.file, reason: p.reason });
 
@@ -753,8 +835,70 @@ export function planImport(course: CourseBundle): ImportPlan {
     startNewAt,
     aiPolicy,
     problems,
+    notStored,
     notes,
   };
+}
+
+/**
+ * account.json -> M2-27's columns. Missing or "unknown" leaves both as they are, so her own
+ * answer is never overwritten. Importing a bundle does not by itself set ai_study.
+ */
+function aiPolicyFor(account: CourseBundle["account"], notes: string[], notStored: string[]): ImportPlan["aiPolicy"] {
+  if (!account) return null;
+  let aiPolicy: ImportPlan["aiPolicy"] = null;
+  const { aiAllowed, scope } = account;
+  if (aiAllowed === true) aiPolicy = { aiAssignments: "allowed", aiStudy: "allowed" };
+  else if (aiAllowed === false && scope === "assignments") {
+    // No help with assignments; studying the slides with AI is fine.
+    aiPolicy = { aiAssignments: "off", aiStudy: "allowed" };
+  } else if (aiAllowed === false) {
+    // No scope (or one we do not know): the safe reading is no AI at all for this course.
+    aiPolicy = { aiAssignments: "off", aiStudy: "not_allowed" };
+    if (scope !== undefined) notes.push(`account.json AI scope "${scope}" is not known; treated as no AI for this course.`);
+  }
+  if (account.other.length) notStored.push(`account.json fields ${account.other.join(", ")} are not stored.`);
+  return aiPolicy;
+}
+
+/** A study-only course's plan: its lectures and pages, and what is left out. */
+export type StudyOnlyPlan = {
+  courseCode: string;
+  lectures: PlannedLecture[];
+  /** Every card in the deck files: none is imported (cards need an exam). */
+  cardsNotImported: number;
+  aiPolicy: ImportPlan["aiPolicy"];
+  problems: ImportProblem[];
+  notStored: string[];
+  notes: string[];
+};
+
+export function planStudyOnly(course: StudyOnlyCourse): StudyOnlyPlan {
+  const notes: string[] = [];
+  const notStored: string[] = [];
+  const pageOf = new Map(course.pages.map((p) => [p.lecture, p.page]));
+  const plannedLectures: PlannedLecture[] = course.seed.lectures.map((l) => {
+    const page = pageOf.get(l.n) ?? null;
+    return { n: l.n, title: l.title, page, pageHash: page ? pageHash(page) : null };
+  });
+  const concepts = course.seed.concepts.length;
+  if (concepts) notStored.push(`${plural(concepts, "concept")} not imported (concepts need an exam).`);
+  if (course.map) notStored.push(`The map ${course.map} is not imported (a study map belongs to an exam).`);
+  if (course.examFiles) notStored.push(`exam/ holds ${plural(course.examFiles, "file")}, not imported (exam documents need an exam).`);
+  return {
+    courseCode: course.courseCode,
+    lectures: plannedLectures,
+    cardsNotImported: course.decks.reduce((s, d) => s + d.cards, 0),
+    aiPolicy: aiPolicyFor(course.account, notes, notStored),
+    problems: course.deckProblems.map((p) => ({ file: p.file, lecture: p.lecture, reason: p.reason })),
+    notStored,
+    notes,
+  };
+}
+
+/** The study-only summary line. */
+export function studyOnlySummary(pagesImported: number, cardsNotImported: number): string {
+  return `Study-only course: ${plural(pagesImported, "lecture page")} imported, ${plural(cardsNotImported, "card")} not imported (cards need an exam)`;
 }
 
 // ---------------------------------------------------------------------------
@@ -781,6 +925,7 @@ export type ImportResult = {
   counts: ImportCounts;
   /** The plan's problems plus those found while writing. */
   problems: ImportProblem[];
+  notStored: string[];
   notes: string[];
 };
 
@@ -792,10 +937,113 @@ export class ImportFailed extends Error {
   }
 }
 
-class DryRunRollback extends Error {
-  constructor(readonly result: ImportResult) {
+class DryRunRollback<R> extends Error {
+  constructor(readonly result: R) {
     super("dry run: rolled back");
   }
+}
+
+/** Runs `work` in one transaction (a savepoint inside one); a dry run rolls it back and still returns. */
+async function inTransaction<R>(database: Db, dryRun: boolean, work: (tx: Db) => Promise<R>): Promise<R> {
+  try {
+    return await database.transaction(async (txRaw) => {
+      const result = await work(txRaw as unknown as Db);
+      if (dryRun) throw new DryRunRollback(result);
+      return result;
+    });
+  } catch (err) {
+    if (err instanceof DryRunRollback) return err.result as R;
+    throw err;
+  }
+}
+
+type HerCourse = { id: string; aiAssignments: string; aiStudy: string };
+
+/** Her course with this code: found, never created. */
+async function findCourse(tx: Db, userId: string, courseCode: string, courseId?: string): Promise<HerCourse> {
+  const hers = await tx
+    .select({ id: courses.id, code: courses.code, name: courses.name, hidden: courses.hidden, aiAssignments: courses.aiAssignments, aiStudy: courses.aiStudy })
+    .from(courses)
+    .where(eq(courses.userId, userId));
+  let matches = hers.filter((c) => c.code !== null && normCode(c.code) === normCode(courseCode));
+  if (courseId) matches = matches.filter((c) => c.id === courseId);
+  if (matches.length === 0) {
+    throw new ImportFailed(
+      `No course with code ${courseCode}${courseId ? ` and id ${courseId}` : ""} ` +
+        "for this user. Sync Moodle first: a course cannot be created by hand (courses.moodle_id is required).",
+    );
+  }
+  if (matches.length > 1) {
+    const list = matches.map((c) => `${c.id} (${c.name}${c.hidden ? ", hidden" : ""})`).join("; ");
+    throw new ImportFailed(`Several courses have code ${courseCode}: ${list}. Pick one with --course-id <id>.`);
+  }
+  return matches[0];
+}
+
+async function writeAiPolicy(tx: Db, course: HerCourse, rules: ImportPlan["aiPolicy"], count: Count): Promise<void> {
+  if (!rules) return;
+  if (course.aiAssignments === rules.aiAssignments && course.aiStudy === rules.aiStudy) count.skipped += 1;
+  else {
+    await tx.update(courses).set(rules).where(eq(courses.id, course.id));
+    count.updated += 1;
+  }
+}
+
+/** Lectures by course + n (an existing one keeps its title), then their pages by source hash. */
+async function writeLectures(
+  tx: Db,
+  userId: string,
+  courseId: string,
+  planned: PlannedLecture[],
+  counts: { lectures: Count; pages: Count },
+): Promise<Map<number, string>> {
+  const lectureRows = await tx
+    .select({ id: lectures.id, n: lectures.n })
+    .from(lectures)
+    .where(and(eq(lectures.userId, userId), eq(lectures.courseId, courseId)));
+  const lectureIdOf = new Map(lectureRows.map((l) => [l.n, l.id]));
+  const newLectures = planned.filter((l) => !lectureIdOf.has(l.n));
+  counts.lectures.skipped += planned.length - newLectures.length;
+  if (newLectures.length) {
+    const rows = await tx
+      .insert(lectures)
+      .values(newLectures.map((l) => ({ userId, courseId, n: l.n, title: l.title.trim() })))
+      .returning({ id: lectures.id, n: lectures.n });
+    for (const r of rows) lectureIdOf.set(r.n, r.id);
+    counts.lectures.created += rows.length;
+  }
+
+  const withPage = planned.filter((l) => l.page && l.pageHash);
+  const contentRows = withPage.length
+    ? await tx
+        .select({ id: lectureContent.id, lectureId: lectureContent.lectureId, sourceHash: lectureContent.sourceHash })
+        .from(lectureContent)
+        .where(inArray(lectureContent.lectureId, withPage.map((l) => lectureIdOf.get(l.n)!)))
+    : [];
+  const contentOf = new Map(contentRows.map((c) => [c.lectureId, c]));
+  const newContent = [];
+  for (const l of withPage) {
+    const lectureId = lectureIdOf.get(l.n)!;
+    const values = {
+      breath: l.page!.breath,
+      minutes: l.page!.minutes,
+      sections: l.page!.sections,
+      slideTitles: l.page!.slideTitles,
+      sourceHash: l.pageHash!,
+    };
+    const content = contentOf.get(lectureId);
+    if (!content) newContent.push({ lectureId, ...values });
+    else if (content.sourceHash === l.pageHash) counts.pages.skipped += 1;
+    else {
+      await tx.update(lectureContent).set(values).where(eq(lectureContent.id, content.id));
+      counts.pages.updated += 1;
+    }
+  }
+  if (newContent.length) {
+    await tx.insert(lectureContent).values(newContent);
+    counts.pages.created += newContent.length;
+  }
+  return lectureIdOf;
 }
 
 const zero = (): Count => ({ created: 0, skipped: 0, updated: 0 });
@@ -858,304 +1106,275 @@ export async function applyImport(
   const dryRun = options.dryRun ?? false;
   const dueAt = plan.startNewAt && plan.startNewAt > now ? plan.startNewAt : now;
 
-  try {
-    return await database.transaction(async (txRaw) => {
-      const tx = txRaw as unknown as Db;
-      const counts: ImportCounts = {
-        exam: zero(),
-        concepts: zero(),
-        lectures: zero(),
-        pages: zero(),
-        lectureConcepts: zero(),
-        cards: zero(),
-        documents: zero(),
-        aiPolicy: zero(),
-      };
-      const problems: ImportProblem[] = [...plan.problems];
+  return inTransaction(database, dryRun, async (tx) => {
+    const counts: ImportCounts = {
+      exam: zero(),
+      concepts: zero(),
+      lectures: zero(),
+      pages: zero(),
+      lectureConcepts: zero(),
+      cards: zero(),
+      documents: zero(),
+      aiPolicy: zero(),
+    };
+    const problems: ImportProblem[] = [...plan.problems];
 
-      // Course: found, never created.
-      const hers = await tx
-        .select({ id: courses.id, code: courses.code, name: courses.name, hidden: courses.hidden, aiAssignments: courses.aiAssignments, aiStudy: courses.aiStudy })
-        .from(courses)
-        .where(eq(courses.userId, userId));
-      let matches = hers.filter((c) => c.code !== null && normCode(c.code) === normCode(plan.exam.courseCode));
-      if (options.courseId) matches = matches.filter((c) => c.id === options.courseId);
-      if (matches.length === 0) {
-        throw new ImportFailed(
-          `No course with code ${plan.exam.courseCode}${options.courseId ? ` and id ${options.courseId}` : ""} ` +
-            "for this user. Sync Moodle first: a course cannot be created by hand (courses.moodle_id is required).",
-        );
-      }
-      if (matches.length > 1) {
-        const list = matches.map((c) => `${c.id} (${c.name}${c.hidden ? ", hidden" : ""})`).join("; ");
-        throw new ImportFailed(`Several courses have code ${plan.exam.courseCode}: ${list}. Pick one with --course-id <id>.`);
-      }
-      const course = matches[0];
-      const courseId = course.id;
+    const course = await findCourse(tx, userId, plan.exam.courseCode, options.courseId);
+    const courseId = course.id;
+    await writeAiPolicy(tx, course, plan.aiPolicy, counts.aiPolicy);
 
-      if (plan.aiPolicy) {
-        const rules = plan.aiPolicy;
-        if (course.aiAssignments === rules.aiAssignments && course.aiStudy === rules.aiStudy) counts.aiPolicy.skipped += 1;
-        else {
-          await tx.update(courses).set(rules).where(eq(courses.id, courseId));
-          counts.aiPolicy.updated += 1;
-        }
+    // Exam: by course + title.
+    const title = plan.exam.title.trim();
+    const [existingExam] = await tx
+      .select()
+      .from(exams)
+      .where(and(eq(exams.userId, userId), eq(exams.courseId, courseId), eq(exams.title, title)))
+      .limit(1);
+    let examId: string;
+    if (existingExam) {
+      examId = existingExam.id;
+      // The map, the study start and the grade target follow the bundle; the rest is hers.
+      const set: Partial<typeof exams.$inferInsert> = {};
+      if (plan.exam.studyMap && !sameJson(existingExam.studyMap, plan.exam.studyMap)) set.studyMap = plan.exam.studyMap;
+      if (plan.exam.startNewOn && existingExam.startNewOn !== plan.exam.startNewOn) set.startNewOn = plan.exam.startNewOn;
+      if (plan.exam.gradeTarget !== null && !sameJson(existingExam.gradeTarget, plan.exam.gradeTarget)) set.gradeTarget = plan.exam.gradeTarget;
+      if (Object.keys(set).length) {
+        await tx.update(exams).set(set).where(eq(exams.id, examId));
+        counts.exam.updated += 1;
+      } else counts.exam.skipped += 1;
+      const differs =
+        existingExam.at.getTime() !== plan.exam.at.getTime() ||
+        existingExam.kind !== plan.exam.kind ||
+        existingExam.targetPct !== plan.exam.targetPct;
+      if (differs) {
+        problems.push({
+          file: "seed.json",
+          reason: `The exam "${title}" already exists with a different date, kind or target; it was left as it is.`,
+        });
       }
-
-      // Exam: by course + title.
-      const title = plan.exam.title.trim();
-      const [existingExam] = await tx
-        .select()
-        .from(exams)
-        .where(and(eq(exams.userId, userId), eq(exams.courseId, courseId), eq(exams.title, title)))
-        .limit(1);
-      let examId: string;
-      if (existingExam) {
-        examId = existingExam.id;
-        // The map, the study start and the grade target follow the bundle; the rest is hers.
-        const set: Partial<typeof exams.$inferInsert> = {};
-        if (plan.exam.studyMap && !sameJson(existingExam.studyMap, plan.exam.studyMap)) set.studyMap = plan.exam.studyMap;
-        if (plan.exam.startNewOn && existingExam.startNewOn !== plan.exam.startNewOn) set.startNewOn = plan.exam.startNewOn;
-        if (plan.exam.gradeTarget !== null && !sameJson(existingExam.gradeTarget, plan.exam.gradeTarget)) set.gradeTarget = plan.exam.gradeTarget;
-        if (Object.keys(set).length) {
-          await tx.update(exams).set(set).where(eq(exams.id, examId));
-          counts.exam.updated += 1;
-        } else counts.exam.skipped += 1;
-        const differs =
-          existingExam.at.getTime() !== plan.exam.at.getTime() ||
-          existingExam.kind !== plan.exam.kind ||
-          existingExam.targetPct !== plan.exam.targetPct;
-        if (differs) {
-          problems.push({
-            file: "seed.json",
-            reason: `The exam "${title}" already exists with a different date, kind or target; it was left as it is.`,
-          });
-        }
-      } else {
-        const [row] = await tx
-          .insert(exams)
-          .values({
-            userId,
-            courseId,
-            title,
-            kind: plan.exam.kind,
-            at: plan.exam.at,
-            targetPct: plan.exam.targetPct,
-            studyMap: plan.exam.studyMap,
-            startNewOn: plan.exam.startNewOn,
-            gradeTarget: plan.exam.gradeTarget,
-          })
-          .returning({ id: exams.id });
-        examId = row.id;
-        counts.exam.created += 1;
-      }
-
-      // Concepts: by exam + slug, else by name (a concept from before M3-53 has no slug yet).
-      const conceptRows = await tx
-        .select({ id: concepts.id, name: concepts.name, slug: concepts.slug, lecture: concepts.lecture, position: concepts.position, weight: concepts.weight })
-        .from(concepts)
-        .where(and(eq(concepts.userId, userId), eq(concepts.examId, examId)));
-      const conceptBySlug = new Map(conceptRows.filter((c) => c.slug !== null).map((c) => [c.slug!, c]));
-      const conceptByName = new Map(conceptRows.filter((c) => c.slug === null).map((c) => [c.name.trim(), c]));
-      const conceptIdOf = new Map<string, string>();
-      const newConcepts: PlannedConcept[] = [];
-      for (const c of plan.concepts) {
-        const name = c.name.trim();
-        const row = conceptBySlug.get(c.slug) ?? conceptByName.get(name);
-        if (!row) {
-          newConcepts.push(c);
-          continue;
-        }
-        conceptIdOf.set(c.slug, row.id);
-        if (row.slug === c.slug && row.name === name && row.position === c.position && sameNumber(row.weight, c.weight) && row.lecture === c.lecture) {
-          counts.concepts.skipped += 1;
-        } else {
-          await tx
-            .update(concepts)
-            .set({ slug: c.slug, name, position: c.position, weight: c.weight, lecture: c.lecture })
-            .where(eq(concepts.id, row.id));
-          counts.concepts.updated += 1;
-        }
-      }
-      for (const part of chunks(newConcepts)) {
-        const rows = await tx
-          .insert(concepts)
-          .values(part.map((c) => ({ userId, examId, slug: c.slug, name: c.name.trim(), lecture: c.lecture, position: c.position, weight: c.weight })))
-          .returning({ id: concepts.id, slug: concepts.slug });
-        for (const r of rows) conceptIdOf.set(r.slug!, r.id);
-        counts.concepts.created += rows.length;
-      }
-
-      // Lectures: by course + n.
-      const lectureRows = await tx
-        .select({ id: lectures.id, n: lectures.n })
-        .from(lectures)
-        .where(and(eq(lectures.userId, userId), eq(lectures.courseId, courseId)));
-      const lectureIdOf = new Map(lectureRows.map((l) => [l.n, l.id]));
-      const newLectures = plan.lectures.filter((l) => !lectureIdOf.has(l.n));
-      counts.lectures.skipped += plan.lectures.length - newLectures.length;
-      if (newLectures.length) {
-        const rows = await tx
-          .insert(lectures)
-          .values(newLectures.map((l) => ({ userId, courseId, n: l.n, title: l.title.trim() })))
-          .returning({ id: lectures.id, n: lectures.n });
-        for (const r of rows) lectureIdOf.set(r.n, r.id);
-        counts.lectures.created += rows.length;
-      }
-
-      // Lecture pages.
-      const withPage = plan.lectures.filter((l) => l.page && l.pageHash);
-      const contentRows = withPage.length
-        ? await tx
-            .select({ id: lectureContent.id, lectureId: lectureContent.lectureId, sourceHash: lectureContent.sourceHash })
-            .from(lectureContent)
-            .where(inArray(lectureContent.lectureId, withPage.map((l) => lectureIdOf.get(l.n)!)))
-        : [];
-      const contentOf = new Map(contentRows.map((c) => [c.lectureId, c]));
-      const newContent = [];
-      for (const l of withPage) {
-        const lectureId = lectureIdOf.get(l.n)!;
-        const values = {
-          breath: l.page!.breath,
-          minutes: l.page!.minutes,
-          sections: l.page!.sections,
-          slideTitles: l.page!.slideTitles,
-          sourceHash: l.pageHash!,
-        };
-        const content = contentOf.get(lectureId);
-        if (!content) newContent.push({ lectureId, ...values });
-        else if (content.sourceHash === l.pageHash) counts.pages.skipped += 1;
-        else {
-          await tx.update(lectureContent).set(values).where(eq(lectureContent.id, content.id));
-          counts.pages.updated += 1;
-        }
-      }
-      if (newContent.length) {
-        await tx.insert(lectureContent).values(newContent);
-        counts.pages.created += newContent.length;
-      }
-
-      // Lecture concepts: a concept's `lecture` names one of the bundle's lectures.
-      const bundleLectures = new Set(plan.lectures.map((l) => l.n));
-      const links = plan.concepts
-        .filter((c) => c.lecture !== null && bundleLectures.has(Number(c.lecture)))
-        .map((c) => ({ lectureId: lectureIdOf.get(Number(c.lecture))!, conceptId: conceptIdOf.get(c.slug)! }));
-      for (const part of chunks(links)) {
-        const made = await tx.insert(lectureConcepts).values(part).onConflictDoNothing().returning({ id: lectureConcepts.id });
-        counts.lectureConcepts.created += made.length;
-        counts.lectureConcepts.skipped += part.length - made.length;
-      }
-
-      // Exam documents: by exam + slug.
-      const docRows = plan.documents.length
-        ? await tx
-            .select({ id: examDocuments.id, slug: examDocuments.slug, title: examDocuments.title, bodyMd: examDocuments.bodyMd, position: examDocuments.position })
-            .from(examDocuments)
-            .where(and(eq(examDocuments.userId, userId), eq(examDocuments.examId, examId)))
-        : [];
-      const docOf = new Map(docRows.map((d) => [d.slug, d]));
-      const newDocs = [];
-      for (const d of plan.documents) {
-        const values = { slug: d.slug, title: d.title, bodyMd: d.bodyMd, position: d.position };
-        const row = docOf.get(d.slug);
-        if (!row) newDocs.push({ userId, examId, ...values });
-        else if (row.title === d.title && row.bodyMd === d.bodyMd && row.position === d.position) counts.documents.skipped += 1;
-        else {
-          await tx.update(examDocuments).set(values).where(eq(examDocuments.id, row.id));
-          counts.documents.updated += 1;
-        }
-      }
-      if (newDocs.length) {
-        await tx.insert(examDocuments).values(newDocs);
-        counts.documents.created += newDocs.length;
-      }
-
-      // Cards: by stable id in this exam (the column, or body.importId from before M3-53),
-      // then by content hash in her account.
-      const existing = await tx
-        .select({
-          id: cards.id,
-          examId: cards.examId,
-          hash: cards.contentHash,
-          importId: cards.importId,
-          bodyImportId: sql<string | null>`${cards.body}->>'importId'`,
-          type: cards.type,
-          rung: cards.rung,
-          boss: cards.boss,
-          body: cards.body,
-          why: cards.why,
-          source: cards.source,
+    } else {
+      const [row] = await tx
+        .insert(exams)
+        .values({
+          userId,
+          courseId,
+          title,
+          kind: plan.exam.kind,
+          at: plan.exam.at,
+          targetPct: plan.exam.targetPct,
+          studyMap: plan.exam.studyMap,
+          startNewOn: plan.exam.startNewOn,
+          gradeTarget: plan.exam.gradeTarget,
         })
-        .from(cards)
-        .where(eq(cards.userId, userId));
-      const byHash = new Map(existing.map((c) => [c.hash, c.id]));
-      const byImportId = new Map<string, (typeof existing)[number]>();
-      // The column wins over the old body field when both name the same id.
-      for (const c of existing) if (c.examId === examId && c.importId === null && c.bodyImportId) byImportId.set(c.bodyImportId, c);
-      for (const c of existing) if (c.examId === examId && c.importId !== null) byImportId.set(c.importId, c);
+        .returning({ id: exams.id });
+      examId = row.id;
+      counts.exam.created += 1;
+    }
 
-      const toInsert: PlannedCard[] = [];
-      const toUpdate: { id: string; p: PlannedCard }[] = [];
-      for (const p of plan.cards) {
-        const same = p.importId ? byImportId.get(p.importId) : undefined;
-        if (same) {
-          if (same.hash === p.hash) {
-            if (sameCard(same, p)) counts.cards.skipped += 1;
-            else toUpdate.push({ id: same.id, p });
-          } else if (byHash.has(p.hash)) {
-            problems.push({
-              file: p.file,
-              lecture: p.lecture,
-              index: p.index,
-              reason: `Card "${p.importId}" was edited into a card she already has; left as it was.`,
-            });
-          } else {
-            toUpdate.push({ id: same.id, p });
-            byHash.delete(same.hash);
-            byHash.set(p.hash, same.id);
-          }
-        } else if (byHash.has(p.hash)) counts.cards.skipped += 1;
-        else {
-          toInsert.push(p);
-          byHash.set(p.hash, "pending");
-        }
+    // Concepts: by exam + slug, else by name (a concept from before M3-53 has no slug yet).
+    const conceptRows = await tx
+      .select({ id: concepts.id, name: concepts.name, slug: concepts.slug, lecture: concepts.lecture, position: concepts.position, weight: concepts.weight })
+      .from(concepts)
+      .where(and(eq(concepts.userId, userId), eq(concepts.examId, examId)));
+    const conceptBySlug = new Map(conceptRows.filter((c) => c.slug !== null).map((c) => [c.slug!, c]));
+    const conceptByName = new Map(conceptRows.filter((c) => c.slug === null).map((c) => [c.name.trim(), c]));
+    const conceptIdOf = new Map<string, string>();
+    const newConcepts: PlannedConcept[] = [];
+    for (const c of plan.concepts) {
+      const name = c.name.trim();
+      const row = conceptBySlug.get(c.slug) ?? conceptByName.get(name);
+      if (!row) {
+        newConcepts.push(c);
+        continue;
       }
-
-      for (const { id, p } of toUpdate) {
-        await tx.update(cards).set(cardColumns(p)).where(eq(cards.id, id));
-        await tx.delete(cardConcepts).where(eq(cardConcepts.cardId, id));
-        await tx.insert(cardConcepts).values(p.conceptSlugs.map((slug) => ({ cardId: id, conceptId: conceptIdOf.get(slug)! })));
-        counts.cards.updated += 1;
-      }
-
-      const fresh = newCard(dueAt);
-      for (const part of chunks(toInsert)) {
-        const rows = await tx
-          .insert(cards)
-          .values(part.map((p) => ({ userId, examId, origin: "manual" as const, ...cardColumns(p) })))
-          .returning({ id: cards.id, hash: cards.contentHash });
-        const idOf = new Map(rows.map((r) => [r.hash, r.id]));
+      conceptIdOf.set(c.slug, row.id);
+      if (row.slug === c.slug && row.name === name && row.position === c.position && sameNumber(row.weight, c.weight) && row.lecture === c.lecture) {
+        counts.concepts.skipped += 1;
+      } else {
         await tx
-          .insert(cardConcepts)
-          .values(part.flatMap((p) => p.conceptSlugs.map((slug) => ({ cardId: idOf.get(p.hash)!, conceptId: conceptIdOf.get(slug)! }))));
-        await tx.insert(cardStates).values(rows.map((r) => ({ cardId: r.id, fsrs: fresh, dueAt, lapses: 0 })));
-        counts.cards.created += rows.length;
+          .update(concepts)
+          .set({ slug: c.slug, name, position: c.position, weight: c.weight, lecture: c.lecture })
+          .where(eq(concepts.id, row.id));
+        counts.concepts.updated += 1;
       }
+    }
+    for (const part of chunks(newConcepts)) {
+      const rows = await tx
+        .insert(concepts)
+        .values(part.map((c) => ({ userId, examId, slug: c.slug, name: c.name.trim(), lecture: c.lecture, position: c.position, weight: c.weight })))
+        .returning({ id: concepts.id, slug: concepts.slug });
+      for (const r of rows) conceptIdOf.set(r.slug!, r.id);
+      counts.concepts.created += rows.length;
+    }
 
-      const result: ImportResult = {
-        dryRun,
-        courseCode: plan.exam.courseCode,
-        courseId,
-        examId,
-        counts,
-        problems,
-        notes: plan.notes,
-      };
-      if (dryRun) throw new DryRunRollback(result);
-      return result;
-    });
-  } catch (err) {
-    if (err instanceof DryRunRollback) return err.result;
-    throw err;
-  }
+    // Lectures and their pages.
+    const lectureIdOf = await writeLectures(tx, userId, courseId, plan.lectures, counts);
+
+    // Lecture concepts: a concept's `lecture` names one of the bundle's lectures.
+    const bundleLectures = new Set(plan.lectures.map((l) => l.n));
+    const links = plan.concepts
+      .filter((c) => c.lecture !== null && bundleLectures.has(Number(c.lecture)))
+      .map((c) => ({ lectureId: lectureIdOf.get(Number(c.lecture))!, conceptId: conceptIdOf.get(c.slug)! }));
+    for (const part of chunks(links)) {
+      const made = await tx.insert(lectureConcepts).values(part).onConflictDoNothing().returning({ id: lectureConcepts.id });
+      counts.lectureConcepts.created += made.length;
+      counts.lectureConcepts.skipped += part.length - made.length;
+    }
+
+    // Exam documents: by exam + slug.
+    const docRows = plan.documents.length
+      ? await tx
+          .select({ id: examDocuments.id, slug: examDocuments.slug, title: examDocuments.title, bodyMd: examDocuments.bodyMd, position: examDocuments.position })
+          .from(examDocuments)
+          .where(and(eq(examDocuments.userId, userId), eq(examDocuments.examId, examId)))
+      : [];
+    const docOf = new Map(docRows.map((d) => [d.slug, d]));
+    const newDocs = [];
+    for (const d of plan.documents) {
+      const values = { slug: d.slug, title: d.title, bodyMd: d.bodyMd, position: d.position };
+      const row = docOf.get(d.slug);
+      if (!row) newDocs.push({ userId, examId, ...values });
+      else if (row.title === d.title && row.bodyMd === d.bodyMd && row.position === d.position) counts.documents.skipped += 1;
+      else {
+        await tx.update(examDocuments).set(values).where(eq(examDocuments.id, row.id));
+        counts.documents.updated += 1;
+      }
+    }
+    if (newDocs.length) {
+      await tx.insert(examDocuments).values(newDocs);
+      counts.documents.created += newDocs.length;
+    }
+
+    // Cards: by stable id in this exam (the column, or body.importId from before M3-53),
+    // then by content hash in her account.
+    const existing = await tx
+      .select({
+        id: cards.id,
+        examId: cards.examId,
+        hash: cards.contentHash,
+        importId: cards.importId,
+        bodyImportId: sql<string | null>`${cards.body}->>'importId'`,
+        type: cards.type,
+        rung: cards.rung,
+        boss: cards.boss,
+        body: cards.body,
+        why: cards.why,
+        source: cards.source,
+      })
+      .from(cards)
+      .where(eq(cards.userId, userId));
+    const byHash = new Map(existing.map((c) => [c.hash, c.id]));
+    const byImportId = new Map<string, (typeof existing)[number]>();
+    // The column wins over the old body field when both name the same id.
+    for (const c of existing) if (c.examId === examId && c.importId === null && c.bodyImportId) byImportId.set(c.bodyImportId, c);
+    for (const c of existing) if (c.examId === examId && c.importId !== null) byImportId.set(c.importId, c);
+
+    const toInsert: PlannedCard[] = [];
+    const toUpdate: { id: string; p: PlannedCard }[] = [];
+    for (const p of plan.cards) {
+      const same = p.importId ? byImportId.get(p.importId) : undefined;
+      if (same) {
+        if (same.hash === p.hash) {
+          if (sameCard(same, p)) counts.cards.skipped += 1;
+          else toUpdate.push({ id: same.id, p });
+        } else if (byHash.has(p.hash)) {
+          problems.push({
+            file: p.file,
+            lecture: p.lecture,
+            index: p.index,
+            reason: `Card "${p.importId}" was edited into a card she already has; left as it was.`,
+          });
+        } else {
+          toUpdate.push({ id: same.id, p });
+          byHash.delete(same.hash);
+          byHash.set(p.hash, same.id);
+        }
+      } else if (byHash.has(p.hash)) counts.cards.skipped += 1;
+      else {
+        toInsert.push(p);
+        byHash.set(p.hash, "pending");
+      }
+    }
+
+    for (const { id, p } of toUpdate) {
+      await tx.update(cards).set(cardColumns(p)).where(eq(cards.id, id));
+      await tx.delete(cardConcepts).where(eq(cardConcepts.cardId, id));
+      await tx.insert(cardConcepts).values(p.conceptSlugs.map((slug) => ({ cardId: id, conceptId: conceptIdOf.get(slug)! })));
+      counts.cards.updated += 1;
+    }
+
+    const fresh = newCard(dueAt);
+    for (const part of chunks(toInsert)) {
+      const rows = await tx
+        .insert(cards)
+        .values(part.map((p) => ({ userId, examId, origin: "manual" as const, ...cardColumns(p) })))
+        .returning({ id: cards.id, hash: cards.contentHash });
+      const idOf = new Map(rows.map((r) => [r.hash, r.id]));
+      await tx
+        .insert(cardConcepts)
+        .values(part.flatMap((p) => p.conceptSlugs.map((slug) => ({ cardId: idOf.get(p.hash)!, conceptId: conceptIdOf.get(slug)! }))));
+      await tx.insert(cardStates).values(rows.map((r) => ({ cardId: r.id, fsrs: fresh, dueAt, lapses: 0 })));
+      counts.cards.created += rows.length;
+    }
+
+    const result: ImportResult = {
+      dryRun,
+      courseCode: plan.exam.courseCode,
+      courseId,
+      examId,
+      counts,
+      problems,
+      notStored: plan.notStored,
+      notes: plan.notes,
+    };
+    return result;
+  });
+}
+
+export type StudyOnlyCounts = { lectures: Count; pages: Count; aiPolicy: Count };
+
+export type StudyOnlyResult = {
+  studyOnly: true;
+  dryRun: boolean;
+  courseCode: string;
+  courseId: string;
+  counts: StudyOnlyCounts;
+  cardsNotImported: number;
+  /** "Study-only course: N lecture pages imported, M cards not imported (cards need an exam)". */
+  summary: string;
+  problems: ImportProblem[];
+  notStored: string[];
+  notes: string[];
+};
+
+/**
+ * Imports a study-only course: its lectures and pages, matched as for any bundle, and the
+ * account.json AI rules. No exam, concept, card or link is written. Same transaction and dry
+ * run as `applyImport`.
+ */
+export async function applyStudyOnly(
+  database: Db,
+  userId: string,
+  plan: StudyOnlyPlan,
+  options: { dryRun?: boolean; courseId?: string } = {},
+): Promise<StudyOnlyResult> {
+  const dryRun = options.dryRun ?? false;
+  return inTransaction(database, dryRun, async (tx) => {
+    const counts: StudyOnlyCounts = { lectures: zero(), pages: zero(), aiPolicy: zero() };
+    const course = await findCourse(tx, userId, plan.courseCode, options.courseId);
+    await writeAiPolicy(tx, course, plan.aiPolicy, counts.aiPolicy);
+    await writeLectures(tx, userId, course.id, plan.lectures, counts);
+    return {
+      studyOnly: true,
+      dryRun,
+      courseCode: plan.courseCode,
+      courseId: course.id,
+      counts,
+      cardsNotImported: plan.cardsNotImported,
+      summary: studyOnlySummary(counts.pages.created + counts.pages.updated, plan.cardsNotImported),
+      problems: [...plan.problems],
+      notStored: plan.notStored,
+      notes: plan.notes,
+    };
+  });
 }

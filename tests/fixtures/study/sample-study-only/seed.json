@@ -1,0 +1,27 @@
+{
+  "studyOnly": true,
+  "courseCode": "TST-E0003",
+  "concepts": [
+    {
+      "slug": "journey-map",
+      "name": "Journey maps",
+      "lecture": 1,
+      "weight": 1
+    },
+    {
+      "slug": "touchpoint",
+      "name": "Touchpoints",
+      "lecture": 1,
+      "weight": 1
+    }
+  ],
+  "lectures": [
+    {
+      "n": 1,
+      "title": "What a service sketch shows",
+      "file": "lecture-1.pdf",
+      "deck": "deck-1.json",
+      "page": "page-1.json"
+    }
+  ]
+}

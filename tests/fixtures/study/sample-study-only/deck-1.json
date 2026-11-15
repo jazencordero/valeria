@@ -1,0 +1,25 @@
+[
+  {
+    "id": "ss-1",
+    "type": "basic",
+    "concept": "journey-map",
+    "q": "What does a journey map lay out from left to right?",
+    "a": "The steps a customer takes, in the order they take them.",
+    "source": "Lecture 1, slide 3"
+  },
+  {
+    "id": "ss-2",
+    "type": "cloze",
+    "concept": "touchpoint",
+    "q": "A moment where the customer meets the service is a {{touchpoint}}.",
+    "source": "Lecture 1, slide 5"
+  },
+  {
+    "id": "ss-3",
+    "type": "basic",
+    "concepts": ["journey-map", "touchpoint"],
+    "q": "Why mark touchpoints on a journey map?",
+    "a": "To see where the service can win or lose the customer.",
+    "source": "Lecture 1, slide 7"
+  }
+]
