@@ -124,6 +124,12 @@ export function daysBetween(from: DateInput, to: DateInput): number {
   return dayNumber(to) - dayNumber(from);
 }
 
+/** 00:00 Helsinki time of the day that contains `date`. DST-safe. */
+export function startOfDay(date: DateInput): Date {
+  const { year, month, day } = localParts(date);
+  return fromLocal(year, month, day);
+}
+
 /** Monday 00:00 Helsinki time of the week that contains `date`. */
 export function startOfWeek(date: DateInput): Date {
   const { year, month, day } = localParts(date);
@@ -195,6 +201,12 @@ export function minutesLabel(min: number): string {
   if (rounded < 120) return `about ${rounded} min`;
   const hours = Math.round(min / 30) / 2;
   return `about ${hours} h`;
+}
+
+/** A day with no clock time, for something that lasts the whole day: `MON 23 NOV`. */
+export function dayLine(at: DateInput): string {
+  const { day, month } = localParts(at);
+  return `${weekdayOf(at)} ${day} ${MONTHS[month - 1]}`;
 }
 
 /** Header date line: `SAT 14 NOV · 15:48`. */

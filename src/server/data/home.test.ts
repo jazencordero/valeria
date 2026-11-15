@@ -440,6 +440,84 @@ describe("getHomeView: bite row and exam cards", () => {
     },
     DB_TIMEOUT,
   );
+
+  /** Home at `now`, with the clock `examView` reads set to it too. */
+  async function homeAt(userId: string, now: Date, flash?: Parameters<typeof getHomeView>[1]["flash"]) {
+    vi.setSystemTime(now);
+    return getHomeView(userId, { now, flash }, t.db);
+  }
+
+  it(
+    "an exam whose clock time is a placeholder is today's exam all of its Helsinki day, with no time shown, and is gone the day after",
+    async () => {
+      const u = await user({ name: "Valeria" });
+      signedIn.userId = u.id;
+      const fm = await course(u.id, "Forecasting Methods");
+      const sm = await course(u.id, "Strategy Methods");
+      // Monday 23 Nov 2026: only the day is known; 09:00 is a stand-in.
+      const MONDAY = new Date("2026-11-23T09:00:00+02:00");
+      const retake = await exam(u.id, fm.id, "Retake", MONDAY, { extra: { timeIsPlaceholder: true } });
+      const real = await exam(u.id, sm.id, "Real time", MONDAY);
+      const later = await exam(u.id, sm.id, "Later exam", DEC_3);
+
+      // Before the day: the date, never "09:00"; the exam with a real time keeps its clock.
+      const before = await homeAt(u.id, NOW);
+      expect(before.exams.map((e) => [e.title, e.when])).toEqual([
+        ["Retake", "MON 23 NOV · in 9 days"],
+        ["Real time", "MON 23 NOV · 09:00 · in 9 days"],
+        ["Later exam", "THU 3 DEC · 09:00 · in 19 days"],
+      ]);
+
+      // 09:01 on the day: the real-time exam has left, as before; the whole-day one is today's exam.
+      const morning = await homeAt(u.id, new Date("2026-11-23T09:01:00+02:00"));
+      expect(morning.exams.map((e) => [e.title, e.when, e.daysLeft, e.phase])).toEqual([
+        ["Retake", "MON 23 NOV · today", 0, "Exam day"],
+        ["Later exam", "THU 3 DEC · 09:00 · in 10 days", 10, "Strengthen"],
+      ]);
+      // Home's bite is still for it, not for the other course.
+      expect(morning.bite).toMatchObject({ state: "bite", examId: retake.id, forWhat: "today\u2019s exam" });
+      expect(morning.week.days[0]).toMatchObject({ today: true, marker: "exam" });
+
+      // The last minute of the day, and a session she did that evening.
+      const lastMinute = new Date("2026-11-23T23:59:00+02:00");
+      const evening = await homeAt(u.id, lastMinute, { kind: "studied", at: lastMinute, examId: retake.id, forecast: 61 });
+      expect(evening.exams.map((e) => e.title)).toEqual(["Retake", "Later exam"]);
+      expect(evening.greeting).toBe("Nice. Today's exam forecast is up to 61%.");
+      for (const e of evening.exams.filter((x) => x.id === retake.id)) expect(JSON.stringify(e)).not.toMatch(/\d\d:\d\d/);
+
+      // 00:00 the day after: past. It is off Home, and Home's bite moves on.
+      const after = await homeAt(u.id, new Date("2026-11-24T00:00:00+02:00"));
+      expect(after.exams.map((e) => e.title)).toEqual(["Later exam"]);
+      expect(after.bite).toMatchObject({ state: "bite", examId: later.id });
+      expect(real.id).not.toBe(retake.id);
+    },
+    DB_TIMEOUT,
+  );
+
+  it(
+    "the whole day holds across the clock changes: listed to 23:59, gone at 00:00",
+    async () => {
+      const u = await user();
+      signedIn.userId = u.id;
+      const fm = await course(u.id, "Forecasting Methods");
+      // Sunday 25 Oct 2026 has 25 hours in Helsinki (UTC+3 until 04:00, then UTC+2).
+      await exam(u.id, fm.id, "Autumn", new Date("2026-10-25T09:00:00+02:00"), { cards: false, extra: { timeIsPlaceholder: true } });
+      const titles = async (now: string) => (await homeAt(u.id, new Date(now))).exams.map((e) => [e.title, e.when]);
+
+      expect(await titles("2026-10-24T23:59:00+03:00")).toEqual([["Autumn", "SUN 25 OCT · tomorrow"]]);
+      expect(await titles("2026-10-25T00:00:00+03:00")).toEqual([["Autumn", "SUN 25 OCT · today"]]);
+      expect(await titles("2026-10-25T23:59:00+02:00")).toEqual([["Autumn", "SUN 25 OCT · today"]]);
+      expect(await titles("2026-10-26T00:00:00+02:00")).toEqual([]);
+
+      // Sunday 28 Mar 2027 has 23 hours (UTC+2 until 03:00, then UTC+3).
+      await exam(u.id, fm.id, "Spring", new Date("2027-03-28T09:00:00+03:00"), { cards: false, extra: { timeIsPlaceholder: true } });
+      expect(await titles("2027-03-27T23:59:00+02:00")).toEqual([["Spring", "SUN 28 MAR · tomorrow"]]);
+      expect(await titles("2027-03-28T00:00:00+02:00")).toEqual([["Spring", "SUN 28 MAR · today"]]);
+      expect(await titles("2027-03-28T23:59:00+03:00")).toEqual([["Spring", "SUN 28 MAR · today"]]);
+      expect(await titles("2027-03-29T00:00:00+03:00")).toEqual([]);
+    },
+    DB_TIMEOUT,
+  );
 });
 
 describe("biteFor and biteDay", () => {

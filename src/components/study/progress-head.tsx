@@ -30,7 +30,7 @@ export type ProgressHeadProps = {
   shown?: boolean;
   /** The old forecast, when coming back from a bite. The big number rolls from it. */
   rollFrom?: number;
-  /** Said instead of the grade and plan sentence, when there is no plan to promise. */
+  /** Said instead of the grade and plan sentence, and the chart left out, when there is no plan to promise. */
   note?: string;
   className?: string;
 };
@@ -71,9 +71,12 @@ export function ProgressHead({
           {note ?? `That is a ${grade} today. A bite a day gets you to about ${Math.round(planEnd)}% by ${dayName}.`}
         </p>
       </div>
-      <div className="border-t border-line pt-3.5">
-        {seen ? <ForecastChart {...chart} /> : <div className="min-h-[176px]" aria-hidden="true" />}
-      </div>
+      {/* With a note there is no plan, so no chart of where a plan would end either. */}
+      {note == null && (
+        <div className="border-t border-line pt-3.5">
+          {seen ? <ForecastChart {...chart} /> : <div className="min-h-[176px]" aria-hidden="true" />}
+        </div>
+      )}
     </div>
   );
 }

@@ -138,6 +138,19 @@ describe("listExams", () => {
 
 describe("updateExam", () => {
   it(
+    "a time she types is a real one: the placeholder-time mark goes; other edits leave it",
+    async () => {
+      const exam = await addExam(her, { courseId: herCourse, title: "Retake", kind: "exam", at: at(20) }, t.db);
+      // An exam she adds through the form has a real time.
+      expect(exam.timeIsPlaceholder).toBe(false);
+      await t.db.update(exams).set({ timeIsPlaceholder: true }).where(eq(exams.id, exam.id));
+      expect((await updateExam(her, exam.id, { title: "Retake exam" }, t.db)).timeIsPlaceholder).toBe(true);
+      expect((await updateExam(her, exam.id, { at: at(20) }, t.db)).timeIsPlaceholder).toBe(false);
+    },
+    DB_TIMEOUT,
+  );
+
+  it(
     "changes only the given fields, and can move it to another of her courses",
     async () => {
       const exam = await addExam(her, { courseId: herCourse, title: "Final", kind: "exam", at: at(20) }, t.db);

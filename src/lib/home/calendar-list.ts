@@ -18,7 +18,8 @@
  * - Each item's line under the title:
  *   a deadline "Forecasting Methods · due 21:00";
  *   an exam or quiz "Strategic IT Management · 09:00" (it is not handed in,
- *   so not "due", as in the prototype).
+ *   so not "due", as in the prototype); a whole-day exam (only its day is
+ *   known) has no time, just "Strategic IT Management".
  * - Within a day: earliest first; at the same time exams, then quizzes, then
  *   deadlines; then by title, then id, so the order never wobbles.
  * - Empty days are a "gap" row. A run of two or more is one line
@@ -49,6 +50,8 @@ export type CalendarItem = {
   color: CourseColor;
   /** Due time, or the start of the exam. */
   at: DateInput;
+  /** An exam whose clock time is a placeholder: its line shows no time. */
+  wholeDay?: boolean;
 };
 
 export type CalendarEntry = {
@@ -113,7 +116,8 @@ export function calendarHref(item: Pick<CalendarItem, "id" | "kind">): string {
   return base + encodeURIComponent(item.id);
 }
 
-export function calendarMeta(item: Pick<CalendarItem, "kind" | "course" | "at">): string {
+export function calendarMeta(item: Pick<CalendarItem, "kind" | "course" | "at" | "wholeDay">): string {
+  if (item.kind !== "deadline" && item.wholeDay) return item.course;
   const time = clockOf(item.at);
   return item.kind === "deadline" ? `${item.course} · due ${time}` : `${item.course} · ${time}`;
 }

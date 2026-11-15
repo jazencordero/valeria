@@ -141,6 +141,7 @@ describe("courseView", () => {
       title: "Final exam",
       examKind: "exam",
       at: at("2026-12-10T09:00:00Z"),
+      wholeDay: false,
     });
   }, DB_TIMEOUT);
 

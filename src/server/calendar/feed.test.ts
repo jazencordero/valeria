@@ -213,6 +213,35 @@ describe("itemsForUser: an assignment's calendar copy", () => {
   });
 });
 
+describe("itemsForUser: an exam whose clock time is a placeholder", () => {
+  it("is an all-day entry on its Helsinki day; an exam with a real time keeps its time", async () => {
+    const db = t.db;
+    const [user] = await db.insert(users).values({}).returning();
+    const [course] = await db.insert(courses).values({ userId: user.id, moodleId: 1, name: "Course W", code: "C-W" }).returning();
+    await db.insert(exams).values([
+      // 23:30 UTC on the 22nd is already Monday 23 Nov in Helsinki: the day is Helsinki's, not UTC's.
+      { userId: user.id, courseId: course.id, title: "Retake", kind: "exam", at: new Date("2026-11-22T23:30:00Z"), timeIsPlaceholder: true },
+      { userId: user.id, courseId: course.id, title: "Timed", kind: "exam", at: new Date("2026-11-23T07:00:00Z") },
+    ]);
+
+    const items = await itemsForUser(user.id, t.db);
+    expect(items.map((i) => [i.title, i.allDay])).toEqual(
+      expect.arrayContaining([
+        ["Retake", "2026-11-23"],
+        ["Timed", undefined],
+      ]),
+    );
+
+    const token = tokenOf((await createFeed(user.id, "google", { origin: ORIGIN, db: t.db })).link);
+    const body = (await (await fetchFeed(token)).text()).replace(/\r\n[ \t]/g, "");
+    const event = (title: string) => body.split("BEGIN:VEVENT").find((e) => e.includes(`SUMMARY:Exam: ${title}`))!;
+    expect(event("Retake")).toContain("DTSTART;VALUE=DATE:20261123\r\n");
+    expect(event("Retake")).toContain("DTEND;VALUE=DATE:20261124\r\n");
+    expect(event("Retake")).not.toMatch(/DTSTART:|DTEND:/);
+    expect(event("Timed")).toContain("DTSTART:20261123T070000Z");
+  });
+});
+
 describe("subscribeLinks", () => {
   it("builds the Google, Apple and Outlook addresses", () => {
     const link = `${ORIGIN}/api/cal/${"x".repeat(43)}.ics`;

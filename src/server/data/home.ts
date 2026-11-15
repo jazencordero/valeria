@@ -15,7 +15,9 @@
  *
  * M3-44 adds the bite row and the exam cards:
  * - `exams`: her upcoming exams and quizzes, soonest first, past ones left
- *   out. They are the Exams tab's list (`getExamsView`, M3-41), so Home,
+ *   out. An exam whose clock time is a placeholder is a whole-day exam: it
+ *   stays today's exam, with its bite, until its Helsinki day ends, and
+ *   nothing here prints a time for it (`getExamsView`). They are the Exams tab's list (`getExamsView`, M3-41), so Home,
  *   /exams and /exams/<id> show the same forecast, phase and counts: every
  *   number comes from M3-18's `examView`, read once per exam. Home adds what
  *   its card shows on top: the verdict, the concept icons and today's bite
@@ -309,6 +311,8 @@ export function reactionTo(
   flash: Flash | null | undefined,
   lastDone: HomeDone | null,
   views: ReadonlyMap<string, ExamView>,
+  /** Ids of the exams whose time is a placeholder: "today's exam" all of that day. */
+  wholeDay: ReadonlySet<string> = new Set(),
 ): { justHandedIn: JustHandedIn | null; justStudied: JustStudied | null } {
   if (flash?.kind === "handedIn" && lastDone) {
     return {
@@ -321,7 +325,7 @@ export function reactionTo(
     if (v) {
       return {
         justHandedIn: null,
-        justStudied: { examTitle: v.exam.title, forecast: flash.forecast, examAt: v.exam.at },
+        justStudied: { examTitle: v.exam.title, forecast: flash.forecast, examAt: v.exam.at, wholeDay: wholeDay.has(flash.examId) },
       };
     }
   }
@@ -495,13 +499,16 @@ export async function getHomeView(
 
   // The greeting: the bite row's exam is the one it offers a bite for.
   const biteView = bite?.state === "bite" ? views.get(bite.examId) : undefined;
-  const nextExam: NextExam | null = biteView ? { title: biteView.exam.title, at: biteView.exam.at } : null;
+  const wholeDay = new Set(examList.exams.filter((e) => e.wholeDay).map((e) => e.id));
+  const nextExam: NextExam | null = biteView
+    ? { title: biteView.exam.title, at: biteView.exam.at, wholeDay: wholeDay.has(biteView.exam.id) }
+    : null;
   const sentence = greeting({
     firstName: firstNameOf(me?.displayName),
     queue: greetingQueue(view.open, now),
     now,
     nextExam,
-    ...reactionTo(flash, lastDone, views),
+    ...reactionTo(flash, lastDone, views, wholeDay),
   });
 
   // The week: due times from a day before now to a day past the window

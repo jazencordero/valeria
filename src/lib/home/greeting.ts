@@ -68,6 +68,8 @@ export type JustStudied = {
   /** The new forecast as a percentage, 0 to 100. Rounded to a whole number. */
   forecast: number;
   examAt: DateInput;
+  /** Only the exam's day is known: it is "today's exam" all of that day. */
+  wholeDay?: boolean;
 };
 
 /** The next exam, for the "or a 5-minute bite" offer. */
@@ -75,6 +77,8 @@ export type NextExam = {
   /** Used only when the exam is 7+ days away. */
   title?: string;
   at: DateInput;
+  /** Only the exam's day is known: the offer stands all of that day. */
+  wholeDay?: boolean;
 };
 
 export type GreetingInput = {
@@ -120,17 +124,18 @@ function dayName(at: DateInput, now: Date): string {
 }
 
 /** "today's", "tomorrow's", "Tuesday's"; `null` when past or 7+ days ahead. */
-function possessive(at: DateInput, now: Date): string | null {
-  if (ms(at) < now.getTime()) return null;
+function possessive(at: DateInput, now: Date, wholeDay = false): string | null {
   const days = daysBetween(now, at);
+  // A whole-day exam is past only once its day is over.
+  if (wholeDay ? days < 0 : ms(at) < now.getTime()) return null;
   if (days === 0) return "today's";
   if (days === 1) return "tomorrow's";
   if (days < 7) return `${WEEKDAY[listDate(at).slice(0, 3)]}'s`;
   return null;
 }
 
-function examName(at: DateInput, title: string | undefined, now: Date): string {
-  const pos = possessive(at, now);
+function examName(at: DateInput, title: string | undefined, now: Date, wholeDay = false): string {
+  const pos = possessive(at, now, wholeDay);
   if (pos) return `${pos} exam`;
   return title?.trim() || "your exam";
 }
@@ -160,8 +165,8 @@ function nextUp(queue: Queue<GreetingAssignment>, nextExam: NextExam | null | un
     task = pos ? `${pos} ${first.title}` : first.title;
   }
   const exam =
-    nextExam && ms(nextExam.at) >= now.getTime()
-      ? `a 5-minute bite for ${examName(nextExam.at, nextExam.title, now)}`
+    nextExam && (nextExam.wholeDay ? daysBetween(now, nextExam.at) >= 0 : ms(nextExam.at) >= now.getTime())
+      ? `a 5-minute bite for ${examName(nextExam.at, nextExam.title, now, nextExam.wholeDay)}`
       : null;
   if (task && exam) return `Next up is ${task}, or ${exam}.`;
   if (task) return `Next up is ${task}.`;
@@ -196,7 +201,7 @@ export function greeting(input: GreetingInput): string {
   }
 
   if (justStudied) {
-    const exam = capitalise(examName(justStudied.examAt, justStudied.examTitle, now));
+    const exam = capitalise(examName(justStudied.examAt, justStudied.examTitle, now, justStudied.wholeDay));
     return `Nice. ${exam} forecast is up to ${Math.round(justStudied.forecast)}%.`;
   }
 

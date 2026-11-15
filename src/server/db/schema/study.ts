@@ -33,6 +33,11 @@ export const exams = pgTable(
     title: text("title").notNull(),
     kind: text("kind", { enum: EXAM_KINDS }).notNull().default("exam"),
     at: tstz("at").notNull(),
+    /**
+     * True when only the day is known and the clock time in `at` is a stand-in: a whole-day
+     * exam. It shows no time, and stays "today's exam" until that Helsinki day ends.
+     */
+    timeIsPlaceholder: boolean("time_is_placeholder").notNull().default(false),
     targetPct: integer("target_pct").notNull().default(80),
     /** A hand-made bundle's `prerequisites`, `threads` and `studyOrder`, as given (M3-53). */
     studyMap: jsonb("study_map"),

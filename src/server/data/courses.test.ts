@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { courseFiles, courses } from "@/server/db/schema/courses";
@@ -165,6 +166,12 @@ describe("getCoursePage", () => {
       tone: "blush",
       href: `/exams/${exam.id}`,
     });
+
+    // Only the day is known: the finish names the day with no clock time.
+    await t.db.update(exams).set({ timeIsPlaceholder: true }).where(eq(exams.id, exam.id));
+    page = await getCoursePage(her, fc, { now: NOW }, t.db);
+    expect(page!.path!.finish.text).toBe("Exam · Fri 20 Nov");
+    await t.db.update(exams).set({ timeIsPlaceholder: false }).where(eq(exams.id, exam.id));
 
     await t.db.insert(concepts).values({ userId: her, examId: exam.id, name: "Smoothing" });
     page = await getCoursePage(her, fc, { now: NOW }, t.db);

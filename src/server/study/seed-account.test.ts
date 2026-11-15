@@ -164,7 +164,7 @@ describe("planSeed (pure)", () => {
       expect(three.events[0].moodleRef).toMatch(/^seed:/);
       // One course, one exam: account.json's date and kind, the bundle's title and target.
       expect(plan.exams).toEqual([
-        { courseCode: "TST-E0001", title: "Intro to Forecasting final exam", kind: "exam", at: new Date("2026-12-11T07:00:00Z"), targetPct: expect.any(Number) },
+        { courseCode: "TST-E0001", title: "Intro to Forecasting final exam", kind: "exam", at: new Date("2026-12-11T07:00:00Z"), timeIsPlaceholder: true, targetPct: expect.any(Number) },
       ]);
       expect(plan.skipped.some((s) => s.includes('"Lab exam"') && s.includes("no date"))).toBe(true);
       expect(plan.notStored.join(" ")).toMatch(/passRule, gradeBands, note/);
@@ -217,6 +217,8 @@ describe("applySeed", () => {
       expect(examRows).toHaveLength(1);
       expect(examRows[0].title).toBe("Intro to Forecasting final exam");
       expect(examRows[0].at).toEqual(new Date("2026-12-11T07:00:00Z"));
+      // account.json says the clock time is a placeholder: a whole-day exam.
+      expect(examRows[0].timeIsPlaceholder).toBe(true);
       expect(examRows[0].studyMap).not.toBeNull();
       const cardRows = await t.db.select().from(cards).where(eq(cards.examId, examRows[0].id));
       expect(cardRows.length).toBeGreaterThan(0);
@@ -245,6 +247,36 @@ describe("applySeed", () => {
       expect(second.userId).toBe(first.userId);
       expect(await rowCounts()).toEqual(before);
       expect(touched(second)).toBe(0);
+    },
+    T,
+  );
+
+  it(
+    "a rerun marks an exam she already has as placeholder-time: updated once, then nothing changes",
+    async () => {
+      // First seeded from an account.json that does not say the time is a placeholder.
+      const plain = path.join(tmp, "plain-bundles");
+      await rm(plain, { recursive: true, force: true });
+      await cp(bundles, plain, { recursive: true });
+      const account = structuredClone(BUNDLES_ACCOUNT) as { exams: Record<string, unknown>[] };
+      delete account.exams[0].atIsPlaceholderTime;
+      await write(path.join(plain, "account.json"), account);
+      const first = await applySeed(t.db, planSeed(await loadSeed(ACCOUNT, plain)), { name: "Testi", now: NOW });
+      const examOf = async () => (await t.db.select().from(exams).where(eq(exams.userId, first.userId)))[0];
+      const before = await examOf();
+      expect(before.timeIsPlaceholder).toBe(false);
+
+      // The same files, now with the mark: her exam is updated in place.
+      const second = await seed();
+      expect(second.userId).toBe(first.userId);
+      expect(second.counts.exams).toEqual({ created: 0, skipped: 0, updated: 1 });
+      const after = await examOf();
+      expect([after.id, after.at, after.timeIsPlaceholder]).toEqual([before.id, before.at, true]);
+      expect(touched(second)).toBe(1);
+
+      const third = await seed();
+      expect(touched(third)).toBe(0);
+      expect((await examOf()).timeIsPlaceholder).toBe(true);
     },
     T,
   );
@@ -833,7 +865,7 @@ describe("upload: the same seed sent in parts (M3-58)", () => {
       assignments: sorted(a.map((r) => [codeOf.get(r.courseId), r.moodleId, r.cmid, r.name, r.dueAt, r.cutoffAt, r.opensAt, r.state, r.submittedAt, r.needsSubmitButton])),
       events: sorted(e.map((r) => [codeOf.get(r.courseId ?? ""), r.moodleRef, r.source, r.kind, r.title, r.startsAt])),
       gradeItems: sorted(g.map((r) => [codeOf.get(r.courseId), r.moodleRef, r.name, r.weight, r.weightSource, r.max, r.position])),
-      exams: sorted(x.map((r) => [codeOf.get(r.courseId), r.title, r.kind, r.at, r.targetPct, r.studyMap, r.startNewOn, r.gradeTarget])),
+      exams: sorted(x.map((r) => [codeOf.get(r.courseId), r.title, r.kind, r.at, r.timeIsPlaceholder, r.targetPct, r.studyMap, r.startNewOn, r.gradeTarget])),
       concepts: sorted(c.map((r) => [r.slug, r.name, r.lecture, r.position, r.weight])),
       lectures: sorted(l.map((r) => [codeOf.get(r.courseId), r.n, r.title])),
       pages: sorted(lc.map((r) => [r.sourceHash, r.breath, r.minutes, r.sections, r.slideTitles])),
@@ -934,6 +966,63 @@ describe("upload: the same seed sent in parts (M3-58)", () => {
       } finally {
         await other.close();
       }
+    },
+    T,
+  );
+
+  it(
+    "the placeholder-time mark travels in the parts: set on a new exam, and on one she already has, once",
+    async () => {
+      // Two copies of the sample bundles whose seed has no date of its own: it takes the date of
+      // account.json's exam of the same title, and with it the mark. One copy has no mark.
+      const [plain, marked] = [path.join(tmp, "plain-upload-bundles"), path.join(tmp, "marked-upload-bundles")];
+      for (const dir of [plain, marked]) {
+        await rm(dir, { recursive: true, force: true });
+        await cp(bundles, dir, { recursive: true });
+        const seedFile = path.join(dir, "TST-E0001", "seed.json");
+        const raw = JSON.parse(await readFile(seedFile, "utf8"));
+        delete raw.exam.at;
+        await write(seedFile, raw);
+        const account = structuredClone(BUNDLES_ACCOUNT) as { exams: Record<string, unknown>[] };
+        account.exams[0].title = raw.exam.title;
+        if (dir === plain) delete account.exams[0].atIsPlaceholderTime;
+        await write(path.join(dir, "account.json"), account);
+      }
+
+      const userId = await newUser();
+      const examOf = async () => (await t.db.select().from(exams).where(eq(exams.userId, userId)))[0];
+      const touchedBy = (answers: SeedAnswer[]) =>
+        answers.flatMap((a) => ("counts" in a ? Object.values(a.counts) : [])).reduce((s, c) => s + c.created + c.updated, 0);
+
+      // Without the mark: a real time.
+      await upload(userId, await loadSeed(ACCOUNT, plain));
+      const before = await examOf();
+      expect(before.timeIsPlaceholder).toBe(false);
+
+      // With it: both the account part and the course folder's seed carry it over the wire.
+      const input = await loadSeed(ACCOUNT, marked);
+      const sent = seedPartsOf(input).map((p) => readSeedPart(JSON.parse(serialisePart(p))));
+      const accountPart = sent.find((p) => p.part === "account") as { bundlesAccount: { exams: { atIsPlaceholderTime?: boolean }[] } };
+      expect(accountPart.bundlesAccount.exams[0].atIsPlaceholderTime).toBe(true);
+      const examPart = sent.find((p) => p.part === "bundle" && p.kind === "exam") as ExamBundlePart;
+      expect(examPart.seed.exam.atIsPlaceholderTime).toBe(true);
+
+      const second = await upload(userId, input);
+      const accountAnswer = second.find((a) => a.part === "account") as Extract<SeedAnswer, { part: "account" }>;
+      expect(accountAnswer.counts.exams).toEqual({ created: 0, skipped: 0, updated: 1 });
+      const after = await examOf();
+      expect([after.id, after.at, after.timeIsPlaceholder]).toEqual([before.id, before.at, true]);
+      // The course folder found it already set: one update in all.
+      expect(touchedBy(second)).toBe(1);
+
+      expect(touchedBy(await upload(userId, input))).toBe(0);
+      expect((await examOf()).timeIsPlaceholder).toBe(true);
+
+      // A fresh account gets it from the first upload.
+      const fresh = await newUser();
+      await upload(fresh, input);
+      const [hers] = await t.db.select().from(exams).where(eq(exams.userId, fresh));
+      expect(hers.timeIsPlaceholder).toBe(true);
     },
     T,
   );

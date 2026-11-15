@@ -8,7 +8,7 @@
  * Layout. A bundle root is either one course (it holds `seed.json`) or a folder of course
  * subfolders (`<root>/<CODE>/seed.json`), each the same shape as a one-course bundle. A course
  * folder holds:
- * - `seed.json`: `{ exam: {courseCode, title, kind, at, targetPct | gradeTarget, startNewOn?},
+ * - `seed.json`: `{ exam: {courseCode, title, kind, at, atIsPlaceholderTime?, targetPct | gradeTarget, startNewOn?},
  *   concepts: [{slug, name, lecture, position, weight}], lectures: [{n, title, file, deck, page}],
  *   map?, startNewOn?, documents? }`. Weights are renormalised to sum to 1. `gradeTarget` 1..5
  *   becomes `target_pct` with the M3-13 scale (`targetPctForGrade`) and is kept as given in
@@ -157,6 +157,12 @@ export const SeedSchema = z
             iss.input === undefined || iss.input === null ? NO_EXAM_DATE : "exam.at must be an ISO date and time.",
         })
         .refine((s) => !Number.isNaN(Date.parse(s)), { error: "exam.at must be an ISO date and time." }),
+      /**
+       * True when only the day of `at` is known and its clock time is a stand-in: stored as
+       * `exams.time_is_placeholder` (a whole-day exam). Left out: an exam that already exists
+       * keeps what it has, a new one has a real time.
+       */
+      atIsPlaceholderTime: z.boolean({ error: "exam.atIsPlaceholderTime must be true or false." }).optional(),
       targetPct: z.number().int().min(0).max(100).optional(),
       /**
        * A grade 1..5, or an object carrying it as `grade` (hand-made bundles add the points behind
@@ -631,13 +637,27 @@ function examFromAccount(raw: unknown, code: string, account: Account | null): {
     const title = typeof exam.title === "string" ? exam.title : "";
     const match = mine.find((e) => sameTitle(e.title, title));
     if (!match) return { raw, note: null };
-    return { raw: { ...raw, exam: { ...exam, at: match.at } }, note: "The exam's date is from account.json (the seed has none)." };
+    // The date comes with what account.json says about its clock time.
+    const placeholder =
+      exam.atIsPlaceholderTime === undefined && match.atIsPlaceholderTime !== undefined
+        ? { atIsPlaceholderTime: match.atIsPlaceholderTime }
+        : {};
+    return { raw: { ...raw, exam: { ...exam, at: match.at, ...placeholder } }, note: "The exam's date is from account.json (the seed has none)." };
   }
   if (exam !== undefined && exam !== null) return { raw, note: null };
   if (mine.length !== 1) return { raw, note: null };
   const e = mine[0];
   return {
-    raw: { ...raw, exam: { courseCode: e.courseCode, title: e.title, kind: examKindOf(e.kind), at: e.at } },
+    raw: {
+      ...raw,
+      exam: {
+        courseCode: e.courseCode,
+        title: e.title,
+        kind: examKindOf(e.kind),
+        at: e.at,
+        ...(e.atIsPlaceholderTime !== undefined ? { atIsPlaceholderTime: e.atIsPlaceholderTime } : {}),
+      },
+    },
     note: "The exam (title, kind, date) is from account.json (the seed has none).",
   };
 }
@@ -795,6 +815,8 @@ export type ImportPlan = {
     title: string;
     kind: (typeof EXAM_KINDS)[number];
     at: Date;
+    /** `exams.time_is_placeholder`: the clock time of `at` is a stand-in. Null when the seed does not say. */
+    timeIsPlaceholder: boolean | null;
     targetPct: number;
     /** `exams.study_map`, or null when the bundle has no map. */
     studyMap: StoredStudyMap | null;
@@ -1024,6 +1046,7 @@ export function planImport(course: CourseBundle): ImportPlan {
       title: exam.title,
       kind: exam.kind,
       at: new Date(exam.at),
+      timeIsPlaceholder: exam.atIsPlaceholderTime ?? null,
       targetPct,
       studyMap: map ? { prerequisites: map.prerequisites, threads: map.threads, studyOrder: map.studyOrder } : null,
       startNewOn: startDay,
@@ -1345,6 +1368,8 @@ export async function applyImport(
       if (plan.exam.studyMap && !sameJson(existingExam.studyMap, plan.exam.studyMap)) set.studyMap = plan.exam.studyMap;
       if (plan.exam.startNewOn && existingExam.startNewOn !== plan.exam.startNewOn) set.startNewOn = plan.exam.startNewOn;
       if (plan.exam.gradeTarget !== null && !sameJson(existingExam.gradeTarget, plan.exam.gradeTarget)) set.gradeTarget = plan.exam.gradeTarget;
+      // Whether the clock time is a placeholder follows the bundle too, when it says.
+      if (plan.exam.timeIsPlaceholder !== null && existingExam.timeIsPlaceholder !== plan.exam.timeIsPlaceholder) set.timeIsPlaceholder = plan.exam.timeIsPlaceholder;
       if (Object.keys(set).length) {
         await tx.update(exams).set(set).where(eq(exams.id, examId));
         counts.exam.updated += 1;
@@ -1368,6 +1393,7 @@ export async function applyImport(
           title,
           kind: plan.exam.kind,
           at: plan.exam.at,
+          timeIsPlaceholder: plan.exam.timeIsPlaceholder ?? false,
           targetPct: plan.exam.targetPct,
           studyMap: plan.exam.studyMap,
           startNewOn: plan.exam.startNewOn,

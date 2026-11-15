@@ -10,6 +10,12 @@
  * inside Suspense (cacheComponents).
  *
  * Choices:
+ * - An exam whose clock time is a placeholder (`exams.time_is_placeholder`) is a whole-day exam:
+ *   the header names its day with no time. "Exam day" lasts all of that Helsinki day for every
+ *   exam (`examView`'s `daysLeft` counts calendar days).
+ * - From 00:00 the day after, the exam is over: the header and the Today tab say "This exam is
+ *   over.", the Progress tab says it in place of the plan sentence, `examView` builds no bite,
+ *   and the sheet leaves the phase strip out. Practise, Lectures and Notes stay as they are.
  * - Before the study start (`exams.start_new_on` still ahead, M3-53) the page says one thing:
  *   "Starts Tue 24 Nov. Nothing to do here until then." in place of the verdict, the done plan
  *   and the plan sentence. A bite `examView` still builds (cards she has already graded) shows.
@@ -152,6 +158,9 @@ function reviewDay(key: string, today: string): string {
 
 const clockOf = new Intl.DateTimeFormat("en-GB", { timeZone: TIME_ZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
+/** What a past exam's page says in place of the verdict, today's plan and the plan sentence. */
+const OVER = "This exam is over.";
+
 /** How many following review days the Practise tab lists after today. */
 const REVIEW_DAYS = 3;
 
@@ -283,9 +292,10 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
     .from(courses)
     .where(and(eq(courses.id, view.exam.courseId), eq(courses.userId, user.id)));
   if (!course || course.hidden) notFound();
-  // What `examView` does not carry: the grade her bundle aims for and its study start.
+  // What `examView` does not carry: the grade her bundle aims for, its study start, and whether
+  // the clock time is a placeholder.
   const [stored] = await db
-    .select({ gradeTarget: exams.gradeTarget, startNewOn: exams.startNewOn })
+    .select({ gradeTarget: exams.gradeTarget, startNewOn: exams.startNewOn, wholeDay: exams.timeIsPlaceholder })
     .from(exams)
     .where(and(eq(exams.id, view.exam.id), eq(exams.userId, user.id)));
 
@@ -297,7 +307,9 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
   const tabs = await getExamTabs(user.id, { examId: exam.id, courseId: exam.courseId, courseName, now });
   // Before the study start: one calm line instead of a verdict, a done plan or a promised percent.
   const starts = startsOn(stored?.startNewOn, now);
-  const quiet = starts ? startsLine(starts) : null;
+  // The day after the exam (00:00 Helsinki) it is over: no "Exam day", no bite, no plan.
+  const over = view.daysLeft < 0;
+  const quiet = over ? OVER : starts ? startsLine(starts) : null;
   const from = typeof query.from === "string" && /^\d{1,3}$/.test(query.from) ? Math.min(100, Number(query.from)) : undefined;
 
   return (
@@ -305,9 +317,9 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
       examId={exam.id}
       kind={exam.kind}
       course={courseName}
-      sub={`${exam.title} · ${at.weekday} ${at.day} ${at.month} ${clockOf.format(exam.at)}`}
+      sub={`${exam.title} · ${at.weekday} ${at.day} ${at.month}${stored?.wholeDay ? "" : ` ${clockOf.format(exam.at)}`}`}
       forecast={view.forecastShown}
-      verdict={starts ? `Starts ${starts}` : view.verdict.text}
+      verdict={over ? OVER : starts ? `Starts ${starts}` : view.verdict.text}
       rollFrom={from !== undefined && from !== view.forecastShown ? from : undefined}
       today={await todayOf(user, view, deck, course.aiStudy, now, quiet)}
       documents={await loadExamDocuments(db, user.id, exam.id)}

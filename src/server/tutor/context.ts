@@ -55,11 +55,11 @@
  *
  * No AI SDK and no router in here (tests/arch/ai-boundary.test.ts).
  */
-import { and, asc, eq, gte, inArray, isNull, lte, not } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte, not, or } from "drizzle-orm";
 import { z } from "zod";
 import { assignmentHelp, studyAllowed, type AiAssignments, type AiStudy } from "@/lib/ai-policy";
 // dateLine, not listDate: the tutor is told the month too ("MON 23 NOV · 09:00"), it has no calendar.
-import { dateLine } from "@/lib/dates";
+import { dateLine, dayLine, daysBetween, startOfDay } from "@/lib/dates";
 import { conceptMastery } from "@/lib/study/ladder";
 import { newCard } from "@/lib/study/memory";
 import { asData, DATA_RULE } from "@/server/ai/as-data";
@@ -92,6 +92,9 @@ const CONCEPTS_MAX = 20;
 const DUE_DAYS = 14;
 const DUE_MAX = 8;
 const WEAKEST = 3;
+
+/** An exam's date for the tutor: "MON 23 NOV · 09:00", or the day alone when its clock time is a placeholder. */
+const examDate = (exam: { at: Date; wholeDay: boolean }) => (exam.wholeDay ? dayLine(exam.at) : dateLine(exam.at));
 
 /** Is the tutor switched on for this account (`users.settings.tutor.enabled === true`)? */
 export function tutorEnabled(settings: unknown): boolean {
@@ -381,7 +384,7 @@ async function lecturePlace(
 
 async function examPlace(userId: string, examId: string, byId: Map<string, CourseRow>, database: Db, now: Date): Promise<Place> {
   const [exam] = await database
-    .select({ id: exams.id, title: exams.title, at: exams.at, courseId: exams.courseId })
+    .select({ id: exams.id, title: exams.title, at: exams.at, wholeDay: exams.timeIsPlaceholder, courseId: exams.courseId })
     .from(exams)
     .where(and(eq(exams.id, examId), eq(exams.userId, userId)))
     .limit(1);
@@ -398,8 +401,11 @@ async function examPlace(userId: string, examId: string, byId: Map<string, Cours
     .sort((a, b) => a.mastery - b.mastery)
     .slice(0, WEAKEST)
     .map((c) => `${c.name} (${Math.round(c.mastery * 100)}% ready)`);
+  // A whole-day exam (its clock time is a placeholder) is named by its day alone, and is past
+  // only once that Helsinki day is over.
+  const past = exam.wholeDay ? daysBetween(now, exam.at) < 0 : exam.at < now;
   const lines = [
-    `She is on the page of the exam "${exam.title}" (${course.name}), on ${dateLine(exam.at)}${exam.at < now ? ", already past" : ""}.`,
+    `She is on the page of the exam "${exam.title}" (${course.name}), on ${examDate(exam)}${past ? ", already past" : ""}.`,
   ];
   if (scored.length) lines.push(`Its concepts: ${scored.map((c) => c.name).join("; ")}.`);
   if (weakest.length) lines.push(`Where she is weakest: ${weakest.join("; ")}.`);
@@ -504,15 +510,20 @@ async function anywherePlace(userId: string, list: CourseRow[], database: Db, no
           .limit(DUE_MAX)
       : Promise.resolve([]),
     database
-      .select({ title: exams.title, at: exams.at, courseId: exams.courseId })
+      .select({ title: exams.title, at: exams.at, wholeDay: exams.timeIsPlaceholder, courseId: exams.courseId })
       .from(exams)
-      .where(and(eq(exams.userId, userId), gte(exams.at, now), inArray(exams.courseId, visible.map((c) => c.id))))
+      .where(and(
+          eq(exams.userId, userId),
+          // Not past: to the minute, or for a whole-day exam until its Helsinki day ends.
+          or(gte(exams.at, now), and(eq(exams.timeIsPlaceholder, true), gte(exams.at, startOfDay(now)))),
+          inArray(exams.courseId, visible.map((c) => c.id)),
+        ))
       .orderBy(asc(exams.at))
       .limit(DUE_MAX),
   ]);
   const lines = [`Her courses: ${visible.map((c) => c.name).join("; ")}.`];
   if (upcoming.length) {
-    lines.push(`Exams coming: ${upcoming.map((e) => `${e.title} (${name.get(e.courseId)}), ${dateLine(e.at)}`).join("; ")}.`);
+    lines.push(`Exams coming: ${upcoming.map((e) => `${e.title} (${name.get(e.courseId)}), ${examDate(e)}`).join("; ")}.`);
   }
   if (due.length) {
     lines.push(

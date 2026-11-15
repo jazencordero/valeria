@@ -184,7 +184,7 @@ function ProgressBody({
           </ul>
         </section>
 
-        <PhaseStrip daysLeft={daysLeft} next={phaseNext} />
+        {daysLeft >= 0 && <PhaseStrip daysLeft={daysLeft} next={phaseNext} />}
 
         <div>
           <ConceptPath

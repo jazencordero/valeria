@@ -504,7 +504,8 @@ async function buildExamView(userId: string, examId: string, now: Date, database
   const daysLeft = daysBetween(now, exam.at);
   const shown = Math.round(state.forecast);
   const end = planEnd(shown, daysLeft);
-  const bite = todayBite(state, done);
+  // Past its day (whole-day or not): the exam is over, so no bite is offered.
+  const bite = daysLeft < 0 ? null : todayBite(state, done);
   return {
     exam: { id: exam.id, title: exam.title, kind: exam.kind, at: exam.at, targetPct: exam.targetPct, courseId: exam.courseId },
     daysLeft,

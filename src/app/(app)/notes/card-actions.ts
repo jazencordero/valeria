@@ -35,7 +35,7 @@
  * notepad is a client component, so it can only call actions from a
  * file-level "use server" module); the inputs are checked with zod.
  */
-import { and, asc, eq, gte, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { z } from "zod";
 import { attachLabel, type AttachLookups } from "@/lib/notes/attach";
@@ -44,6 +44,7 @@ import { contentHash, type BasicCard } from "@/lib/study/card-schema";
 import { newCard } from "@/lib/study/memory";
 import { currentUser, NotSignedIn } from "@/server/auth/session";
 import { shortNameOf } from "@/server/data/courses";
+import { examNotPast } from "@/server/data/exams";
 import { db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { lectureConcepts, lectures } from "@/server/db/schema/learn";
@@ -77,7 +78,7 @@ type TargetExam = { id: string; courseName: string };
 
 /** Her exams not yet past, soonest first, with the course name. */
 async function upcomingExams(userId: string, now: Date, courseId?: string) {
-  const where = [eq(exams.userId, userId), gte(exams.at, now)];
+  const where = [eq(exams.userId, userId), examNotPast(now)];
   if (courseId) where.push(eq(exams.courseId, courseId));
   return db
     .select({ id: exams.id, title: exams.title, courseName: courses.name })

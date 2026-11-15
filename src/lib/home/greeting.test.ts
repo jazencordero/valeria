@@ -167,3 +167,31 @@ describe("greeting: edges", () => {
     ).toBe("Nice. Strategy exam forecast is up to 72%.");
   });
 });
+
+describe("greeting: an exam whose time is a placeholder (a whole-day exam)", () => {
+  // The exam is "at" 09:00 on Friday 20 Nov; it is now Friday afternoon.
+  const FRIDAY_AFTERNOON = d("2026-11-20T12:00:00Z");
+  const at = (now: Date, over: Partial<GreetingInput>) => greeting({ firstName: "Aino", queue: buildQueue([], now), now, ...over });
+
+  // The offer is made after a hand-in ("Next up is ..., or a 5-minute bite for ...").
+  const handedIn = (now: Date) => ({ justHandedIn: { title: "Memo", submittedAt: now, dueAt: null } });
+
+  it("keeps offering a bite for today's exam all day, and stops the day after", () => {
+    const nextExam = { at: FRIDAY_EXAM, wholeDay: true };
+    expect(at(FRIDAY_AFTERNOON, { ...handedIn(FRIDAY_AFTERNOON), nextExam })).toContain("a 5-minute bite for today's exam");
+    const lastMinute = d("2026-11-20T21:59:00Z");
+    expect(at(lastMinute, { ...handedIn(lastMinute), nextExam })).toContain("a 5-minute bite for today's exam");
+    const midnight = d("2026-11-20T22:00:00Z");
+    expect(at(midnight, { ...handedIn(midnight), nextExam })).not.toContain("bite");
+  });
+
+  it("an exam with a real time is past once it has started", () => {
+    expect(at(FRIDAY_AFTERNOON, { ...handedIn(FRIDAY_AFTERNOON), nextExam: { at: FRIDAY_EXAM } })).not.toContain("bite");
+  });
+
+  it("names it today's exam after a session that afternoon", () => {
+    const studied = { forecast: 61, examAt: FRIDAY_EXAM, examTitle: "Retake" };
+    expect(at(FRIDAY_AFTERNOON, { justStudied: { ...studied, wholeDay: true } })).toBe("Nice. Today's exam forecast is up to 61%.");
+    expect(at(FRIDAY_AFTERNOON, { justStudied: studied })).toBe("Nice. Retake forecast is up to 61%.");
+  });
+});

@@ -48,6 +48,7 @@ import { calendarFeeds, events } from "@/server/db/schema/calendar";
 import { courses } from "@/server/db/schema/courses";
 import { exams } from "@/server/db/schema/study";
 import { assignments } from "@/server/db/schema/work";
+import { helsinkiDay } from "@/server/study/start-date";
 
 export const FEED_PROVIDERS = ["google", "apple", "outlook"] as const;
 export type FeedProvider = (typeof FEED_PROVIDERS)[number];
@@ -169,6 +170,7 @@ export async function itemsForUser(userId: string, database: Db = defaultDb): Pr
       kind: exams.kind,
       title: exams.title,
       at: exams.at,
+      wholeDay: exams.timeIsPlaceholder,
       eventId: exams.eventId,
       code: courses.code,
       shortName: courses.shortName,
@@ -222,7 +224,15 @@ export async function itemsForUser(userId: string, database: Db = defaultDb): Pr
     items.push({ id: a.id, kind: "deadline", title: a.title, course: courseLabel(a), at: a.at });
   }
   for (const e of examRows) {
-    items.push({ id: e.id, kind: e.kind, title: e.title, course: courseLabel(e), at: e.at });
+    // An exam whose clock time is a placeholder is an all-day entry on its Helsinki day.
+    items.push({
+      id: e.id,
+      kind: e.kind,
+      title: e.title,
+      course: courseLabel(e),
+      at: e.at,
+      ...(e.wholeDay ? { allDay: helsinkiDay(e.at) } : {}),
+    });
   }
   for (const e of eventRows) {
     if (covered.has(e.id)) continue;

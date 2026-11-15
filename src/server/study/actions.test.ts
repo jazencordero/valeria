@@ -432,3 +432,36 @@ describe("an exam with a study start (M3-53)", () => {
     expect(offered.some((id) => held.cardIds.includes(id))).toBe(false);
   }, DB_TIMEOUT);
 });
+
+describe("exam day and the day after", () => {
+  // The deck's exam is 20 days after NOW (12:00 in Helsinki): Friday 4 Dec 2026, 12:00.
+  const EXAM = NOW.getTime() + 20 * D;
+
+  it("exam day lasts the whole Helsinki day, bites included, whatever the exam's clock time", async () => {
+    setNow(new Date("2026-12-04T00:00:00+02:00").getTime());
+    expect(await examView(examId)).toMatchObject({ daysLeft: 0, phase: { name: "Exam day" } });
+    // Hours after the exam's own time.
+    setNow(new Date("2026-12-04T23:59:00+02:00").getTime());
+    const late = await examView(examId);
+    expect(late).toMatchObject({ daysLeft: 0, phase: { name: "Exam day" } });
+    expect(late.bite).not.toBeNull();
+    expect(EXAM).toBeLessThan(clock);
+  });
+
+  it("from 00:00 the day after the exam is over: days left are negative and no bite is built", async () => {
+    setNow(new Date("2026-12-05T00:00:00+02:00").getTime());
+    const over = await examView(examId);
+    expect(over.daysLeft).toBe(-1);
+    expect(over.bite).toBeNull();
+    // The deck is still there: it is the day that ended, not the cards that ran out.
+    expect(over.concepts).toHaveLength(3);
+    expect(over.counts.new).toBeGreaterThan(0);
+  });
+
+  it("counts days to the exam as Helsinki calendar days", async () => {
+    setNow(new Date("2026-12-03T23:59:00+02:00").getTime());
+    expect((await examView(examId)).daysLeft).toBe(1);
+    setNow(new Date("2026-11-27T00:01:00+02:00").getTime());
+    expect((await examView(examId)).daysLeft).toBe(7);
+  });
+});

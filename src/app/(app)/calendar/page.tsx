@@ -82,6 +82,7 @@ async function calendarItems(userId: string, now: Date): Promise<CalendarItem[]>
         kind: exams.kind,
         title: exams.title,
         at: exams.at,
+        wholeDay: exams.timeIsPlaceholder,
         course: courses.name,
         color: courses.color,
       })
@@ -114,6 +115,7 @@ async function calendarItems(userId: string, now: Date): Promise<CalendarItem[]>
       course: shortNameOf(e.course),
       color: e.color,
       at: e.at,
+      wholeDay: e.wholeDay,
     })),
   ];
 }

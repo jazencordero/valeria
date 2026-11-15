@@ -331,7 +331,8 @@ export async function updateExam(
   if (v.courseId !== undefined) await assertCourse(database, userId, v.courseId);
   const [row] = await database
     .update(exams)
-    .set(v)
+    // A time she types is a real one: the exam stops being a whole-day (placeholder-time) exam.
+    .set(v.at !== undefined ? { ...v, timeIsPlaceholder: false } : v)
     .where(and(eq(exams.id, examId), eq(exams.userId, userId)))
     .returning();
   if (!row) throw new ExamNotFound("exam", examId);

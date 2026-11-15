@@ -655,6 +655,35 @@ describe("applyImport", () => {
   );
 
   it(
+    "stores the seed's placeholder-time mark: on a new exam, and once on an exam that already exists",
+    async () => {
+      // The sample seed does not say: a new exam has a real time.
+      expect(plan.exam.timeIsPlaceholder).toBeNull();
+      const first = await applyImport(t.db, her, plan, { now: NOW });
+      const examOf = async () => (await t.db.select().from(exams).where(eq(exams.id, first.examId!)))[0];
+      expect((await examOf()).timeIsPlaceholder).toBe(false);
+
+      // The same bundle, now saying only the day is known.
+      const marked: ImportPlan = planImport({ ...course, seed: { ...course.seed, exam: { ...course.seed.exam, atIsPlaceholderTime: true } } });
+      expect(marked.exam.timeIsPlaceholder).toBe(true);
+      const second = await applyImport(t.db, her, marked, { now: NOW });
+      expect(second.counts.exam).toEqual({ created: 0, skipped: 0, updated: 1 });
+      expect((await examOf()).timeIsPlaceholder).toBe(true);
+      const third = await applyImport(t.db, her, marked, { now: NOW });
+      expect(third.counts.exam).toEqual({ created: 0, skipped: 1, updated: 0 });
+
+      // A seed that does not say leaves what she has; another user's new exam takes the mark.
+      const silent = await applyImport(t.db, her, plan, { now: NOW });
+      expect(silent.counts.exam).toEqual({ created: 0, skipped: 1, updated: 0 });
+      expect((await examOf()).timeIsPlaceholder).toBe(true);
+      const theirs = await applyImport(t.db, other, marked, { now: NOW });
+      const [row] = await t.db.select().from(exams).where(eq(exams.id, theirs.examId!));
+      expect(row.timeIsPlaceholder).toBe(true);
+    },
+    T,
+  );
+
+  it(
     "the deck sessions read is in the bundle's order: lecture by lecture, card by card",
     async () => {
       // Two lectures of twelve invented cards each. The ids are written so that neither the

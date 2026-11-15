@@ -526,6 +526,8 @@ export type PlannedExam = {
   title: string;
   kind: "exam" | "quiz";
   at: Date;
+  /** account.json's `atIsPlaceholderTime`: only the day is known (`exams.time_is_placeholder`). */
+  timeIsPlaceholder: boolean;
   targetPct: number;
 };
 
@@ -716,7 +718,7 @@ export function planSeed(input: SeedInput, now: Date = new Date()): SeedPlan {
       notes.push(`Exam "${title}" (${code}) is listed twice; the first one is used.`);
       continue;
     }
-    plannedExams.push({ courseCode: code, title, kind: examKindOf(e.kind), at: new Date(e.at), targetPct: twin?.targetPct ?? EXAM_TARGET_PCT });
+    plannedExams.push({ courseCode: code, title, kind: examKindOf(e.kind), at: new Date(e.at), timeIsPlaceholder: e.atIsPlaceholderTime === true, targetPct: twin?.targetPct ?? EXAM_TARGET_PCT });
   }
   if (examList.some((e) => (e as Record<string, unknown>).source !== undefined)) notStored.push("Exam sources (exams[].source): not stored.");
   if (bundlesAccount?.unknown !== undefined && bundlesAccount.unknown !== null) notStored.push("unknown: not stored.");
@@ -989,7 +991,7 @@ export async function applySeed(
         }
       }
 
-      // Exams, by course + title; account.json's date and kind win.
+      // Exams, by course + title; account.json's date, kind and placeholder-time mark win.
       for (const e of plan.exams) {
         const courseId = courseIdOf.get(e.courseCode)!;
         const [row] = await tx
@@ -998,11 +1000,11 @@ export async function applySeed(
           .where(and(eq(exams.userId, userId), eq(exams.courseId, courseId), eq(exams.title, e.title)))
           .limit(1);
         if (!row) {
-          await tx.insert(exams).values({ userId, courseId, title: e.title, kind: e.kind, at: e.at, targetPct: e.targetPct });
+          await tx.insert(exams).values({ userId, courseId, title: e.title, kind: e.kind, at: e.at, timeIsPlaceholder: e.timeIsPlaceholder, targetPct: e.targetPct });
           counts.exams.created += 1;
-        } else if (sameTime(row.at, e.at) && row.kind === e.kind) counts.exams.skipped += 1;
+        } else if (sameTime(row.at, e.at) && row.kind === e.kind && row.timeIsPlaceholder === e.timeIsPlaceholder) counts.exams.skipped += 1;
         else {
-          await tx.update(exams).set({ at: e.at, kind: e.kind }).where(eq(exams.id, row.id));
+          await tx.update(exams).set({ at: e.at, kind: e.kind, timeIsPlaceholder: e.timeIsPlaceholder }).where(eq(exams.id, row.id));
           counts.exams.updated += 1;
         }
       }

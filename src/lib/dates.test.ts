@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   byDay,
+  dayLine,
+  startOfDay,
   dateLine,
   daysBetween,
   dueLabel,
@@ -224,5 +226,31 @@ describe("byDay", () => {
   it("goes by the Helsinki day, not the UTC one", () => {
     // 22:30 UTC on Friday 20 Nov is Saturday 21 Nov in Helsinki: seven days out.
     expect(byDay(d("2026-11-20T22:30:00Z"), NOW)).toBe("Sat 21 Nov");
+  });
+});
+
+describe("startOfDay", () => {
+  it("is 00:00 Helsinki of that day, for any moment of it", () => {
+    expect(startOfDay(d("2026-11-22T22:00:00Z")).toISOString()).toBe("2026-11-22T22:00:00.000Z");
+    expect(startOfDay(d("2026-11-23T12:00:00Z")).toISOString()).toBe("2026-11-22T22:00:00.000Z");
+    expect(startOfDay(d("2026-11-23T21:59:59Z")).toISOString()).toBe("2026-11-22T22:00:00.000Z");
+    expect(startOfDay(d("2026-11-23T22:00:00Z")).toISOString()).toBe("2026-11-23T22:00:00.000Z");
+  });
+
+  it("holds on the 25-hour day in autumn and the 23-hour day in spring", () => {
+    // Sunday 25 Oct 2026: clocks go back at 04:00, so the day starts at UTC+3 and ends at UTC+2.
+    expect(startOfDay(d("2026-10-24T21:00:00Z")).toISOString()).toBe("2026-10-24T21:00:00.000Z");
+    expect(startOfDay(d("2026-10-25T21:59:00Z")).toISOString()).toBe("2026-10-24T21:00:00.000Z");
+    expect(startOfDay(d("2026-10-25T22:00:00Z")).toISOString()).toBe("2026-10-25T22:00:00.000Z");
+    // Sunday 28 Mar 2027: clocks go forward at 03:00.
+    expect(startOfDay(d("2027-03-28T20:59:00Z")).toISOString()).toBe("2027-03-27T22:00:00.000Z");
+    expect(startOfDay(d("2027-03-28T21:00:00Z")).toISOString()).toBe("2027-03-28T21:00:00.000Z");
+  });
+});
+
+describe("dayLine", () => {
+  it("is the day with its month and no clock time", () => {
+    expect(dayLine(d("2026-11-23T07:00:00Z"))).toBe("MON 23 NOV");
+    expect(dayLine(d("2026-11-23T22:30:00Z"))).toBe("TUE 24 NOV");
   });
 });

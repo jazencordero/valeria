@@ -56,7 +56,7 @@
  * A demo user (M1-37, `users.settings.demo`) gets a thin "Demo data" line at
  * the top of the page area, with "Restart demo" (GET /demo?reset=1).
  */
-import { asc, and, count, eq, gte, inArray, isNull, not } from "drizzle-orm";
+import { asc, and, count, eq, inArray, isNull, not } from "drizzle-orm";
 import { connection } from "next/server";
 import { cache, Suspense, type ReactNode } from "react";
 import { Notepad } from "@/components/notes/notepad";
@@ -73,6 +73,7 @@ import { Toaster } from "@/components/ui/toast";
 import { sameDay } from "@/lib/dates";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { shortNameOf } from "@/server/data/courses";
+import { examNotPast } from "@/server/data/exams";
 import { db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { exams } from "@/server/db/schema/study";
@@ -123,7 +124,7 @@ const shellCounts = cache(async (userId: string): Promise<ShellCounts> => {
           eq(exams.userId, userId),
           eq(courses.userId, userId),
           eq(courses.hidden, false),
-          gte(exams.at, now),
+          examNotPast(now),
         ),
       ),
     countNotes(userId),

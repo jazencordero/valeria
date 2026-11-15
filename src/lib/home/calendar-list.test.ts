@@ -170,3 +170,18 @@ describe("calendarRows", () => {
     ]);
   });
 });
+
+describe("calendarRows: a whole-day exam", () => {
+  it("shows no clock time, all of its day; an exam with a real time keeps it", () => {
+    const list = [
+      item({ id: "Retake", kind: "exam", course: "Statistics", at: hki(23, "09:00"), wholeDay: true }),
+      item({ id: "Final", kind: "exam", course: "Economics", at: hki(23, "13:00") }),
+    ];
+    const metas = (now: Date) =>
+      calendarRows(list, now).flatMap((r) => (r.type === "day" ? r.items.map((i) => `${r.label} | ${i.title} | ${i.meta}`) : []));
+    expect(metas(NOW)).toEqual(["MON 23 NOV | Retake | Statistics", "MON 23 NOV | Final | Economics · 13:00"]);
+    // Late on the day itself it is still under today.
+    expect(metas(hki(23, "23:30"))).toEqual(["MON 23 NOV · TODAY | Retake | Statistics", "MON 23 NOV · TODAY | Final | Economics · 13:00"]);
+    expect(metas(hki(24, "00:00"))).toEqual([]);
+  });
+});

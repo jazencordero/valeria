@@ -1,0 +1,1 @@
+ALTER TABLE "exams" ADD COLUMN "time_is_placeholder" boolean DEFAULT false NOT NULL;

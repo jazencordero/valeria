@@ -10,6 +10,9 @@
 //   (e.g. when the data last changed). Without it each event uses its own start time.
 // - Events are sorted by start time, then UID, so input order does not change the output.
 // - Items whose time cannot be read are left out rather than breaking the whole feed.
+// - `allDay` (a calendar day, `YYYY-MM-DD`) makes an all-day entry: `DTSTART;VALUE=DATE` on that
+//   day and `DTEND;VALUE=DATE` on the next, with no clock time. The caller picks the day (its
+//   own time zone's); `at` still orders the events. A day that cannot be read falls back to `at`.
 
 export type CalendarItemKind = "deadline" | "exam" | "quiz";
 
@@ -24,6 +27,8 @@ export type CalendarItem = {
   end?: Date | number | string;
   /** Optional length in minutes. */
   durationMinutes?: number;
+  /** The day of a whole-day item, `YYYY-MM-DD`: an all-day entry with no clock time. */
+  allDay?: string;
 };
 
 export type CalendarOptions = {
@@ -111,6 +116,18 @@ function summaryFor(item: CalendarItem): string {
 
 type Event = { uid: string; start: Date; end: Date; item: CalendarItem };
 
+const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** `YYYYMMDD` for a `YYYY-MM-DD` day and the day after it; null when it is not a real day. */
+function allDaySpan(day: string | undefined): { start: string; end: string } | null {
+  const m = day ? DAY.exec(day) : null;
+  if (!m) return null;
+  const at = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const compact = (ms: number) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, "");
+  if (compact(at) !== day!.replace(/-/g, "")) return null;
+  return { start: compact(at), end: compact(at + 24 * 60 * 60_000) };
+}
+
 function toEvent(item: CalendarItem): Event | null {
   const start = toDate(item.at);
   if (!start) return null;
@@ -128,12 +145,14 @@ function toEvent(item: CalendarItem): Event | null {
 function eventLines(event: Event, stamp: Date | null): string[] {
   const { item } = event;
   const summary = summaryFor(item);
+  const span = allDaySpan(item.allDay);
   const lines = [
     "BEGIN:VEVENT",
     `UID:${escapeText(event.uid)}`,
     `DTSTAMP:${formatUtc(stamp ?? event.start)}`,
-    `DTSTART:${formatUtc(event.start)}`,
-    `DTEND:${formatUtc(event.end)}`,
+    ...(span
+      ? [`DTSTART;VALUE=DATE:${span.start}`, `DTEND;VALUE=DATE:${span.end}`]
+      : [`DTSTART:${formatUtc(event.start)}`, `DTEND:${formatUtc(event.end)}`]),
     `SUMMARY:${escapeText(summary)}`,
   ];
   if (item.course.trim() !== "") lines.push(`DESCRIPTION:${escapeText(item.course)}`);

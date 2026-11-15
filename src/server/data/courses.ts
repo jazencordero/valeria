@@ -275,7 +275,8 @@ function finishOf(
 ): CoursePageFinish {
   if (finish?.kind === "exam") {
     return {
-      text: `${finish.title} · ${dayTimeText(finish.at)}`,
+      // A whole-day exam (its clock time is a placeholder) shows its day alone.
+      text: `${finish.title} · ${finish.wholeDay ? dayText(finish.at) : dayTimeText(finish.at)}`,
       exam: forecast === null ? null : { id: finish.examId, forecast },
       tone: "blush",
       href: examHref(finish.examId),

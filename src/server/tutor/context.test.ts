@@ -295,6 +295,30 @@ describe("buildTutorContext", () => {
     expect(text).toContain("Where she is weakest:");
   });
 
+  it("an exam whose clock time is a placeholder is told by its day alone, and is past only the day after", async () => {
+    const s = await student();
+    const examText = async (now: Date) => all((await buildTutorContext(s.user.id, { kind: "exam", examId: s.exam.id }, { now }, t.db)).parts);
+    const elsewhere = async (now: Date) => all((await buildTutorContext(s.user.id, { kind: "other" }, { now }, t.db)).parts);
+    // With a real time (11:00 in Helsinki on Tue 1 Dec) it is past from that minute, as before.
+    const afternoon = new Date("2026-12-01T14:00:00+02:00");
+    expect(await examText(afternoon)).toContain("on TUE 1 DEC · 11:00, already past.");
+    expect(await elsewhere(afternoon)).not.toContain("Exams coming");
+
+    await t.db.update(exams).set({ timeIsPlaceholder: true }).where(eq(exams.id, s.exam.id));
+    expect(await examText(NOW)).toContain('(Finance 101), on TUE 1 DEC.');
+    expect(await elsewhere(NOW)).toContain("Exams coming: Midterm (Finance 101), TUE 1 DEC.");
+    expect(await examText(NOW)).not.toContain("11:00");
+    expect(await elsewhere(NOW)).not.toContain("11:00");
+    // All of its day it is still coming.
+    expect(await examText(afternoon)).toContain("on TUE 1 DEC.");
+    expect(await examText(afternoon)).not.toContain("already past");
+    expect(await elsewhere(new Date("2026-12-01T23:59:00+02:00"))).toContain("Exams coming: Midterm (Finance 101), TUE 1 DEC.");
+    // From 00:00 the day after it is past.
+    const dayAfter = new Date("2026-12-02T00:00:00+02:00");
+    expect(await examText(dayAfter)).toContain("on TUE 1 DEC, already past.");
+    expect(await elsewhere(dayAfter)).not.toContain("Exams coming");
+  });
+
   it("someone else's lecture, exam, session or assignment loads nothing of it", async () => {
     const other = await student({ study: "allowed", help: "allowed" });
     const me = await student();

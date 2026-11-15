@@ -226,3 +226,33 @@ describe("buildCalendar", () => {
     );
   });
 });
+
+describe("buildCalendar: a whole-day item", () => {
+  const wholeDay: CalendarItem = { id: "w1", kind: "exam", title: "Retake", course: "Statistics", at: "2026-11-23T07:00:00Z", allDay: "2026-11-23" };
+  const eventOf = (text: string, uid: string) => {
+    const lines = logicalLines(text);
+    const at = lines.indexOf(`UID:${uid}`);
+    return lines.slice(at, lines.indexOf("END:VEVENT", at));
+  };
+
+  it("is an all-day entry: a date with no clock time, ending the next day", () => {
+    const event = eventOf(buildCalendar([wholeDay], { name: "Ready", stamp: STAMP }), "exam-w1@ready");
+    expect(event).toContain("DTSTART;VALUE=DATE:20261123");
+    expect(event).toContain("DTEND;VALUE=DATE:20261124");
+    expect(event.some((l) => /^DT(START|END):/.test(l))).toBe(false);
+    expect(event).toContain("SUMMARY:Exam: Retake");
+  });
+
+  it("ends in the next month or year when the day is the last one", () => {
+    const text = buildCalendar([{ ...wholeDay, at: "2026-12-31T07:00:00Z", allDay: "2026-12-31" }], { name: "Ready", stamp: STAMP });
+    expect(text).toContain("DTSTART;VALUE=DATE:20261231");
+    expect(text).toContain("DTEND;VALUE=DATE:20270101");
+  });
+
+  it("leaves a timed item as it was, and falls back to the time for a day that is not one", () => {
+    const text = buildCalendar([items[1], { ...wholeDay, id: "w2", allDay: "2026-02-30" }], { name: "Ready", stamp: STAMP });
+    expect(eventOf(text, "exam-e7@ready")).toContain("DTSTART:20261210T070000Z");
+    expect(eventOf(text, "exam-w2@ready")).toContain("DTSTART:20261123T070000Z");
+    expect(text).not.toContain("VALUE=DATE");
+  });
+});

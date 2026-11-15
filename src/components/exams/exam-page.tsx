@@ -521,7 +521,8 @@ export function ExamPage({
           "min-[1000px]:gap-x-6 min-[1000px]:[&>*+*]:mt-0 min-[1000px]:[&>*+*]:border-t-0 min-[1000px]:[&>*+*]:pt-0"
         }
       />
-      {gain.length > 0 && <GainMost concepts={gain} />}
+      {/* Not for an exam that is over: "on exam day" is behind her. */}
+      {gain.length > 0 && progress.daysLeft >= 0 && <GainMost concepts={gain} />}
       <ProgressSheet
         concepts={progress.concepts}
         focusId={progress.focusId}

@@ -5,6 +5,10 @@
  *
  * Reads our database only, by her user id:
  * - Upcoming means `at >= now`. Past exams are left out (no archive).
+ *   An exam whose clock time is a placeholder (`exams.time_is_placeholder`:
+ *   only the day is known) is a whole-day exam: it stays listed until its
+ *   Helsinki day ends, and its `when` line shows the day with no time
+ *   (`examNotPast`, `examWhen`). An exam with a real time is unchanged.
  * - Exams of a course she has hidden are left out, like its assignments.
  * - Order: `at`, then creation time, then id (the same as `listExams`).
  *
@@ -26,8 +30,8 @@
  * the cards then say "Starts Tue 24 Nov. Nothing to do here until then."
  * instead of a forecast, a verdict or a plan.
  */
-import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
-import { dateLine, dayMonth, daysBetween } from "@/lib/dates";
+import { and, asc, eq, gte, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { dateLine, dayLine, dayMonth, daysBetween, startOfDay } from "@/lib/dates";
 import { listCourses } from "@/server/courses/store";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courseFiles, courses } from "@/server/db/schema/courses";
@@ -51,8 +55,10 @@ export type ExamsTabExam = {
   title: string;
   /** The course's short name, for example "Forecasting Methods". */
   course: string;
-  /** "FRI 20 NOV · 09:00 · in 6 days". */
+  /** "FRI 20 NOV · 09:00 · in 6 days"; a whole-day exam has no time, "MON 23 NOV · today". */
   when: string;
+  /** True when only the day is known (`exams.time_is_placeholder`). */
+  wholeDay: boolean;
   /** Calendar days until the exam in Helsinki; 0 is today. */
   daysLeft: number;
   /** Forecast today, a whole percent. */
@@ -87,9 +93,18 @@ export function inDays(daysLeft: number): string {
   return `in ${daysLeft} days`;
 }
 
-/** "FRI 20 NOV · 09:00 · in 6 days". */
-export function examWhen(at: Date, now: Date): string {
-  return `${dateLine(at)} · ${inDays(daysBetween(now, at))}`;
+/** "FRI 20 NOV · 09:00 · in 6 days"; for a whole-day exam the day alone, "MON 23 NOV · in 8 days". */
+export function examWhen(at: Date, now: Date, wholeDay = false): string {
+  return `${wholeDay ? dayLine(at) : dateLine(at)} · ${inDays(daysBetween(now, at))}`;
+}
+
+/**
+ * The exams that have not passed at `now`, as a query condition. An exam with a real time
+ * counts to the minute (`at >= now`); a whole-day one until its Helsinki day ends, so from
+ * 00:00 the day after it is past.
+ */
+export function examNotPast(now: Date): SQL {
+  return or(gte(exams.at, now), and(eq(exams.timeIsPlaceholder, true), gte(exams.at, startOfDay(now))))!;
 }
 
 /** The grade 1..5 inside a stored `exams.grade_target` (a number, or an object carrying `grade`); else null. */
@@ -153,6 +168,7 @@ export async function getExamsView(
         title: exams.title,
         kind: exams.kind,
         at: exams.at,
+        wholeDay: exams.timeIsPlaceholder,
         targetPct: exams.targetPct,
         gradeTarget: exams.gradeTarget,
         startNewOn: exams.startNewOn,
@@ -160,7 +176,7 @@ export async function getExamsView(
       })
       .from(exams)
       .innerJoin(courses, eq(courses.id, exams.courseId))
-      .where(and(eq(exams.userId, userId), eq(courses.userId, userId), eq(courses.hidden, false), gte(exams.at, now)))
+      .where(and(eq(exams.userId, userId), eq(courses.userId, userId), eq(courses.hidden, false), examNotPast(now)))
       .orderBy(asc(exams.at), asc(exams.createdAt), asc(exams.id)),
     listCourses(userId, database, now),
   ]);
@@ -198,7 +214,8 @@ export async function getExamsView(
         phase: v.phase.name,
         title: row.title,
         course: shortNameOf(row.course),
-        when: examWhen(row.at, now),
+        when: examWhen(row.at, now, row.wholeDay),
+        wholeDay: row.wholeDay,
         daysLeft: v.daysLeft,
         forecast: v.forecastShown,
         spark: { history: v.history, forecast: v.forecast, daysLeft: v.daysLeft },

@@ -79,7 +79,7 @@ export type DeadlineFlag = PathFlag & {
 };
 
 export type CourseFinish =
-  | { kind: "exam"; examId: string; title: string; examKind: (typeof EXAM_KINDS)[number]; at: Date }
+  | { kind: "exam"; examId: string; title: string; examKind: (typeof EXAM_KINDS)[number]; at: Date; wholeDay: boolean }
   | { kind: "deadline"; assignmentId: string; title: string; at: Date; state: (typeof ASSIGNMENT_STATES)[number] };
 
 export type CourseHead = {
@@ -199,7 +199,7 @@ export async function courseView(
   let finish: CourseFinish | null = null;
   let finishAssignment: string | null = null;
   if (exam) {
-    finish = { kind: "exam", examId: exam.id, title: exam.title, examKind: exam.kind, at: exam.at };
+    finish = { kind: "exam", examId: exam.id, title: exam.title, examKind: exam.kind, at: exam.at, wholeDay: exam.timeIsPlaceholder };
   } else {
     const last = work
       .filter((a): a is typeof a & { dueAt: Date } => a.dueAt !== null)
