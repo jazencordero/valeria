@@ -71,8 +71,9 @@ async function fakeMoodleUser(ageMs: number): Promise<string> {
   return result.userId;
 }
 
-async function age(userId: string, ageMs: number, synced = true) {
-  const at = new Date(Date.now() - ageMs);
+/** Ages her data `ageMs` back from `from`: the real clock, or the time a test pins as "now". */
+async function age(userId: string, ageMs: number, synced = true, from: number = Date.now()) {
+  const at = new Date(from - ageMs);
   await t.db
     .update(moodleConnections)
     .set({ connectedAt: at, lastSyncAt: synced ? at : null })
@@ -84,7 +85,7 @@ let nextMoodleId = 900_000;
  * A user with a connection row of her own (the fake Moodle has one identity,
  * and connecting it twice merges the two users). Nothing here calls Moodle.
  */
-async function userWithData(ageMs: number, synced = true): Promise<string> {
+async function userWithData(ageMs: number, synced = true, from: number = Date.now()): Promise<string> {
   const { user } = await ensureSessionFor(t.db, newToken());
   await t.db.insert(moodleConnections).values({
     userId: user.id,
@@ -92,7 +93,7 @@ async function userWithData(ageMs: number, synced = true): Promise<string> {
     moodleUserId: nextMoodleId++,
     tokenSealed: seal("not-a-real-token"),
   });
-  await age(user.id, ageMs, synced);
+  await age(user.id, ageMs, synced, from);
   return user.id;
 }
 
@@ -197,9 +198,11 @@ describe("scheduleSyncs", () => {
   });
 
   it("spreads run times over the next two hours, the same for a user all day", { timeout: SLOW }, async () => {
-    const ids: string[] = [];
-    for (let i = 0; i < 6; i++) ids.push(await userWithData(STALE_MS + HOUR));
+    // "Now" is pinned, so the rows are aged from that same moment, not from the real clock
+    // (aged from the real clock they stop being stale once the real time passes the pinned one).
     const at = new Date("2026-11-15T09:00:00.000Z");
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) ids.push(await userWithData(STALE_MS + HOUR, true, at.getTime()));
     const { queued } = await scheduleSyncs({ db: t.db, now: () => at });
 
     expect(queued).toHaveLength(6);
@@ -220,7 +223,7 @@ describe("scheduleSyncs", () => {
     expect(jitterFraction(ids[0], at)).not.toBe(jitterFraction(ids[0], new Date("2026-11-16T09:00:00.000Z")));
 
     // An injected jitter is used as given.
-    const other = await userWithData(STALE_MS + HOUR);
+    const other = await userWithData(STALE_MS + HOUR, true, at.getTime());
     const half = await scheduleSyncs({ db: t.db, now: () => at, jitter: () => 0.5 });
     expect(half.queued).toEqual([{ userId: other, runAfter: new Date(at.getTime() + JITTER_MS / 2) }]);
   });
