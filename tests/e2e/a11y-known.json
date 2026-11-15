@@ -2,7 +2,6 @@
   "_about": "Accessibility findings we already know (M8-22). screen -> rule id -> the ticket that fixes it, or \"accepted: <reason>\". tests/e2e/a11y.spec.ts fails only on a finding that is not listed here. When a ticket is fixed, delete its lines. The findings, tickets and reasons are written up in the M8-22 findings note.",
   "known": {
     "home": {
-      "color-contrast": "M8-61 (the grades card on butter, light and dark)",
       "label-content-name-mismatch": "M8-62 (the Notes button is named Notepad). The side-nav links on the same screen are accepted, see assignments."
     },
     "assignments": {

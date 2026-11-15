@@ -92,13 +92,13 @@ export function GradesCard({ courses, lmsName, className = "" }: GradesCardProps
               >
                 <span className="min-w-0 text-[15px] font-medium">
                   <span className="block truncate">{c.name}</span>
-                  {early && <span className="mono mt-px block text-ink-3">too early</span>}
+                  {early && <span className="mono mt-px block text-ink-2">too early</span>}
                 </span>
                 <Scale filled={wholeGrade(c.trajectory)} target={c.target} />
                 <span
                   className={
                     "text-right font-display font-semibold leading-none [font-variation-settings:'SOFT'_100] " +
-                    (c.trajectory == null ? "text-[22px] text-ink-3" : "text-[28px]")
+                    (c.trajectory == null ? "text-[22px] text-ink-2" : "text-[28px]")
                   }
                 >
                   {c.trajectory == null ? (
