@@ -52,11 +52,13 @@ describe("file names: which are lectures, their number and title", () => {
     ["Kalvot 5 Laskentatoimi.ppt", 5, "Laskentatoimi"],
     ["Vierailuluento 8 Yrittäjyys.pdf", 8, "Vierailuluento Yrittäjyys"],
   ];
-  it.each(cases)("%s -> lecture %i, %s", (name, n, title) => {
+  it.each(cases)("%s -> a lecture titled %s (its number %i is read but not used)", (name, n, title) => {
     const out = single(name);
     expect(out).toHaveLength(1);
-    expect(out[0].n).toBe(n);
+    // Numbers come from course order (M9-04), so a lone lecture is 1 whatever its name says.
+    expect(out[0].n).toBe(1);
     expect(out[0].title).toBe(title);
+    expect(parseNumber(name).n).toBe(n);
   });
 });
 
@@ -93,7 +95,7 @@ describe("exclusions", () => {
   it("exercise words are kept when the name is clearly a lecture", () => {
     const out = single("Lecture 4 exercise walkthrough slides.pdf");
     expect(out).toHaveLength(1);
-    expect(out[0].n).toBe(4);
+    expect(out[0].title).toBe("exercise walkthrough");
   });
 
   it("an exclusion section drops its files unless the file is clearly a lecture", () => {
@@ -101,7 +103,7 @@ describe("exclusions", () => {
       section("Assignments", 1, [resource("Case brief", "case.pdf"), resource("Week 2 instructions", "w2.pdf")]),
       section("Readings", 2, [resource("Lecture 2 slides", "lecture2.pdf")]),
     ]);
-    expect(out.map((l) => l.n)).toEqual([2]);
+    expect(out.map((l) => [l.n, l.section])).toEqual([[1, "Readings"]]);
   });
 
   it("assign, url, page and quiz modules are never lectures", () => {
@@ -150,7 +152,7 @@ describe("signals from module and section", () => {
 
   it("uses the file name when the module name is only numbering", () => {
     const out = lecturesFrom([section("Week 2", 1, [resource("Lecture 2 slides", "Lecture 2 Sourcing.pdf")])]);
-    expect(out[0]).toMatchObject({ n: 2, title: "Sourcing" });
+    expect(out[0]).toMatchObject({ n: 1, title: "Sourcing" });
   });
 
   it("title may be empty when nothing but numbering is left", () => {
@@ -160,7 +162,7 @@ describe("signals from module and section", () => {
 });
 
 describe("numbering and order", () => {
-  it("fills missing numbers from order, around named ones", () => {
+  it("numbers 1..n in course order, whatever numbers the names carry", () => {
     const out = lecturesFrom([
       section("Lectures", 1, [
         resource("Introduction", "intro.pdf"),
@@ -172,12 +174,12 @@ describe("numbering and order", () => {
     expect(out.map((l) => [l.n, l.title])).toEqual([
       [1, "Introduction"],
       [2, "Markets"],
-      [3, "Pricing"],
-      [4, "Guest talk"],
+      [3, "Guest talk"],
+      [4, "Pricing"],
     ]);
   });
 
-  it("orders by number, then section position, then name, whatever the input order", () => {
+  it("orders by section position, then module position, whatever the input order", () => {
     const sections = [
       section("Week 2", 2, [resource("Lecture 3 Pricing", "c.pdf")]),
       section("Week 1", 1, [resource("Lecture 2 Markets", "b.pdf"), resource("Lecture 1 Intro", "a.pdf")]),
@@ -185,10 +187,10 @@ describe("numbering and order", () => {
     ];
     const out = lecturesFrom(sections);
     expect(out.map((l) => [l.n, l.section, l.title])).toEqual([
-      [1, "Week 1", "Intro"],
-      [2, "Week 1", "Markets"],
-      [2, "Extra", "Markets (part b)"],
+      [1, "Week 1", "Markets"],
+      [2, "Week 1", "Intro"],
       [3, "Week 2", "Pricing"],
+      [4, "Extra", "Markets (part b)"],
     ]);
     expect(lecturesFrom([...sections].reverse())).toEqual(out);
   });
@@ -246,7 +248,7 @@ describe("restricted modules", () => {
         },
       ]),
     ]);
-    expect(out[0]).toMatchObject({ n: 4, title: "Rahoitus", opensAt: new Date(1796112000 * 1000).toISOString() });
+    expect(out[0]).toMatchObject({ n: 1, title: "Rahoitus", opensAt: new Date(1796112000 * 1000).toISOString() });
   });
 
   it("a restricted module without a readable date is left out", () => {
@@ -278,6 +280,138 @@ describe("restricted modules", () => {
     expect(parseOpensAt("It is before 12 December 2026")).toBeNull();
     expect(parseOpensAt("You complete Quiz 1")).toBeNull();
     expect(parseOpensAt(null)).toBeNull();
+  });
+});
+
+describe("what her real courses look like (M9-04)", () => {
+  // Finding 1: decks named by topic, no lecture numbers anywhere.
+  it("topic-named decks in a lecture section are lectures, numbered by page order", () => {
+    const out = lecturesFrom([
+      section("Lecture slides", 2, [
+        resource("Why prices stick", "prices.pdf"),
+        resource("Queues and waiting", "Queues.pdf"),
+        resource("Trust, contracts, enforcement", "trust-contracts.pdf"),
+      ]),
+    ]);
+    expect(out.map((l) => [l.n, l.title])).toEqual([
+      [1, "Why prices stick"],
+      [2, "Queues and waiting"],
+      [3, "Trust, contracts, enforcement"],
+    ]);
+  });
+
+  it("a presentation file is a deck by its type; a topic-named PDF in a neutral section is not", () => {
+    const out = lecturesFrom([
+      section("Materials", 1, [resource("Why prices stick", "prices.pptx"), resource("Queues and waiting", "queues.pdf")]),
+    ]);
+    expect(out.map((l) => [l.n, l.title])).toEqual([[1, "Why prices stick"]]);
+    // A template is not a lecture, whatever its type.
+    expect(single("Report template.pptx")).toEqual([]);
+  });
+
+  // Finding 2: numbered background readings beside the decks.
+  it("a folder of numbered files beside the decks is readings, not lectures", () => {
+    const out = lecturesFrom([
+      section("Lecture slides", 2, [
+        resource("Why prices stick", "prices.pdf"),
+        resource("Queues and waiting", "queues.pdf"),
+        folder("Background", ["Lecture 1.pdf", "Lecture 2.pdf", "Lecture 10.pdf"]),
+      ]),
+    ]);
+    expect(out.map((l) => l.title)).toEqual(["Why prices stick", "Queues and waiting"]);
+  });
+
+  it("a folder beside the decks still counts when its own name says slides", () => {
+    const out = lecturesFrom([
+      section("Lectures", 1, [
+        resource("Why prices stick", "prices.pdf"),
+        folder("Guest lecture slides", ["Guest 2.pdf", "Guest 10.pdf"]),
+      ]),
+    ]);
+    expect(out.map((l) => [l.n, l.title])).toEqual([
+      [1, "Why prices stick"],
+      [2, "Guest 2"],
+      [3, "Guest 10"],
+    ]);
+  });
+
+  it("a folder of numbered files on its own still gives one lecture per file, in natural name order", () => {
+    const out = lecturesFrom([section("Lectures", 1, [folder("Background", ["Lecture 10.pdf", "Lecture 2.pdf", "Lecture 1.pdf"])])]);
+    expect(out.map((l) => [l.n, l.fileRef?.split("/").pop()])).toEqual([
+      [1, "Lecture 1.pdf"],
+      [2, "Lecture 2.pdf"],
+      [3, "Lecture 10.pdf"],
+    ]);
+  });
+
+  it("chapter and luku readings are left out", () => {
+    expect(single("Chapter 3 Auctions.pdf", "Lecture week 3")).toEqual([]);
+    expect(single("Luku 4 Hinnoittelu.pdf", "Luennot")).toEqual([]);
+  });
+
+  it("one deck posted as PDF and as PowerPoint is one lecture, with the PDF, where the first copy sits", () => {
+    const out = lecturesFrom([
+      section("Week 1", 1, [
+        resource("Why prices stick", "why-prices-stick.pptx"),
+        resource("Why prices stick (PDF)", "why-prices-stick.pdf"),
+        resource("Queues, part 1", "queues.pdf"),
+        resource("Queues, part 2", "queues.pdf"),
+      ]),
+    ]);
+    expect(out.map((l) => [l.n, l.fileRef?.split("/").pop()])).toEqual([
+      [1, "why-prices-stick.pdf"],
+      [2, "queues.pdf"],
+      [3, "queues.pdf"],
+    ]);
+  });
+
+  it("a PDF and a PowerPoint with the same lecture number are one deck, even when one was renamed", () => {
+    const out = lecturesFrom([
+      section("Week 1", 1, [
+        resource("Why we forecast", "lecture-01-why-we-forecast.pdf"),
+        resource("Why forecast", "lecture-01-why-forecast.pptx"),
+        resource("Smoothing", "lecture-02-smoothing.pptx"),
+      ]),
+    ]);
+    expect(out.map((l) => [l.n, l.title, l.fileRef?.split("/").pop()])).toEqual([
+      [1, "Why we forecast", "lecture-01-why-we-forecast.pdf"],
+      [2, "Smoothing", "lecture-02-smoothing.pptx"],
+    ]);
+  });
+
+  // Finding 3: order from the page, not from numbers in names.
+  it("order comes from sections and module positions, not from numbers in names", () => {
+    const out = lecturesFrom([
+      section("Week 2", 2, [resource("Queues and waiting", "Reading 7 queues slides.pdf")]),
+      section("Week 1", 1, [resource("Why prices stick (ch 9)", "prices.pdf"), resource("Lecture 5 recap", "recap.pdf")]),
+    ]);
+    expect(out.map((l) => [l.n, l.section])).toEqual([
+      [1, "Week 1"],
+      [2, "Week 1"],
+    ]);
+    expect(out.map((l) => l.title)).toEqual(["Why prices stick (ch 9)", "recap"]);
+  });
+
+  // Finding 4: other students' results must never show.
+  const resultFiles = [
+    "Midterm 2 RESULTS.pdf",
+    "Lecture 5 results.pdf",
+    "Quiz results week 3.pdf",
+    "Grades week 2.pdf",
+    "Final scores.pdf",
+    "Tulokset viikko 3.pdf",
+    "Välikokeen tulokset luento 4.pdf",
+    "Arvosanat luento 4.pdf",
+    "Pisteet 1. luento.pdf",
+  ];
+  it.each(resultFiles)("%s is never a lecture, even in a lecture section", (name) => {
+    expect(single(name, "Lectures")).toEqual([]);
+    expect(single(name.replace(/\.pdf$/, ".pptx"), "Luennot")).toEqual([]);
+  });
+
+  it("a results file inside a lecture-slides folder is left out too", () => {
+    const out = lecturesFrom([section("Lectures", 1, [folder("Lecture slides", ["01 Intro.pdf", "Exam 1 results.pdf"])])]);
+    expect(out.map((l) => l.title)).toEqual(["Intro"]);
   });
 });
 

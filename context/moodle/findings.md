@@ -69,3 +69,32 @@ Checked, no change needed:
 - **Hidden flags.** Every course has `visible: 1` and `hidden: false`; assignments carry no visible flag. Nothing to change.
 - **Site info** matches the docs: `release` is there, `uploadfiles` is 1 (a number, not a boolean), `usermaxuploadfilesize` is 419,430,400.
 - **Submission status** sends `timestarted` and `extensionduedate` as `null`. The reader does not read them, so it parses.
+
+## Lecture files
+
+From M9-04: `lecturesFrom` (src/lib/courses/lectures.ts) run on the shape-only copy of her first course's page (`core_course_get_contents.json`, read through M2-07's `getCourseContents`; test `src/lib/courses/lectures.real.test.ts`), plus what the planner saw on her real course pages.
+
+What the course page looks like:
+
+- Moodle 5 **subsections**. Section 0 holds a forum and two `subsection` modules; the subsections come back as their own sections (`component: mod_subsection`), one "Assignments" and one "Lecture ...". Their section numbers (1, 2) are not the order the links sit in section 0 (lectures first). The reader does not pass `component` on, so we cannot tell; it does not matter while lectures sit in one section.
+- The lecture section holds **six PDFs, one `resource` each, named by topic with no number** (in one course the decks have no lecture numbers anywhere). They are large (1.6 to 12 MB).
+- Beside them, **Panopto recordings** as `lti` modules, five of them, three named like a deck. Not files, never lectures.
+- In the same section a **folder of ten small PDFs named "Lecture 1.pdf" to "Lecture 10.pdf"** (0.2 to 1 MB). These are the **background readings**, numbered per lecture. So a number, or even the word "lecture", in a file name does not make it a lecture deck.
+- The "Assignments" section has two assignments, a folder with one zip, and an **exam results PDF**: in one course a midterm results file lists other students' results. It must never show.
+
+Rules that handle this (each is written next to its code):
+
+- **Order and numbers come from the page**, not from names: sections by position, modules in listed order, a folder's files by natural name order; lectures are numbered 1..n in that order. Numbers in names are only cut from titles.
+- **Signal**: a slide file counts when its file, module or section name has a lecture word (lecture, slides, luento, kalvot, week 3, viikko 3, L01, ...) or it is a presentation file (pptx, ppt, key, odp). A topic-named PDF counts only through its section ("Lecture ..."); in a neutral section it does not.
+- **Folder beside lectures**: in a section that already has one-resource-per-lecture decks, a folder is extra material and is left out, unless the folder's own name has a lecture word ("Lecture slides"). A folder alone in a section still gives one lecture per file.
+- **Readings** are left out by name too: reading, article, literature, chapter, "Ch. 3", "Luku 4", lukemisto, artikkeli, kirjallisuus.
+- **Results** are always left out, whatever else the name says: results, grades, gradebook, scores, tulokset, arvosana/arvosanat, pisteet. Exams were already left out.
+- **One deck, two formats**: a PDF and a presentation in one section with the same file name, or the same lecture number in both names, are one lecture with the PDF (M9-03's sync relies on this).
+
+Result on her course: the six topic-named decks, numbered 1 to 6 in page order. The readings folder, the results file, the zip and the recordings are left out.
+
+Not checked yet (the ticket's cut is one course):
+
+- Her other five courses. The planner's notes cover one more course's naming; the rest may need rules.
+- Whether lectures spread over many "Week n" sections come out right with subsections in between.
+- Because numbers now follow page order, a deck the teacher inserts above earlier ones shifts every later number. M9-03 ties a lecture row (and her read mark) to its number, so the read mark would stay on the number, not the file.

@@ -5,8 +5,16 @@
  * `getCourseContents`, ticket M2-07) and returns its lectures in order.
  * `lectureState(lectures, readSet, now)` marks each one done / cur / up / soon.
  *
- * The rules are a first guess (the ticket's Cut): M9-04 re-tests them on a
- * real course. Every rule is written next to the code that applies it.
+ * The rules were a first guess; M9-04 checked them on her real course (see
+ * `context/moodle/findings.md`, "Lecture files"). What that changed:
+ * - Lecture decks can be named by topic, with no number at all, and readings
+ *   in the same course can be numbered ("Lecture 3.pdf" as the reading for
+ *   lecture 3). So a number in a name says nothing about order: lectures are
+ *   numbered 1..n in course-page order (section, then module, then file).
+ * - A folder sitting beside per-lecture files in the same section is extras
+ *   (readings), not lectures, unless its own name says lecture or slides.
+ * - Results and grade lists ("... exam 1 RESULTS") are never lectures.
+ * Every rule is written next to the code that applies it.
  *
  * ## Input
  *
@@ -65,7 +73,7 @@ export type CourseSection = {
 };
 
 export type Lecture = {
-  /** Lecture number: from the name, else from order. Two files may share one (two parts of lecture 3). */
+  /** Lecture number: 1..n in course-page order. Never read from the name (see the header). */
   n: number;
   /** Name with numbering, generic words ("slides") and extension removed. May be "": the screen then says "Lecture n". */
   title: string;
@@ -97,6 +105,13 @@ const SLIDE_MIME = [
   "application/vnd.apple.keynote",
   "application/x-iwork-keynote",
 ];
+
+/**
+ * Rule: a presentation file (pptx, ppt, key, odp, pps) is a slide deck by its
+ * type, so it is a lecture signal on its own, even when named only by topic.
+ * A PDF is not: readings, briefs and results are PDFs too.
+ */
+const DECK_EXT = new Set(["ppt", "pptx", "pps", "ppsx", "key", "odp"]);
 
 /** Rule: only `resource` and `folder` modules hold lecture files. `assign` (assignment briefs), `url`, `page`, `quiz` never do. */
 const FILE_KINDS = new Set(["resource", "folder"]);
@@ -135,13 +150,22 @@ const HARD_EXCLUDE: { why: string; re: RegExp }[] = [
   {
     why: "assignment",
     re: new RegExp(
-      `(?<![${L}])(assignments?|brief|homework|instructions|hand-?in)(?![${L}])|tehtävänanto|tehtävä|palautus|ohjeet`,
+      `(?<![${L}])(assignments?|brief|homework|instructions|hand-?in|templates?)(?![${L}])|tehtävänanto|tehtävä|palautus|ohjeet`,
       "i",
     ),
   },
   {
+    // "Luku" only with a number after it ("Luku 4"): alone it is too common a word part.
     why: "reading",
-    re: new RegExp(`(?<![${L}])(readings?|articles?|literature)(?![${L}])|lukemisto|artikkel|luettava|kirjallisuus`, "i"),
+    re: new RegExp(
+      `(?<![${L}])(readings?|articles?|literature|chapters?|ch\\.\\s*\\d)(?![${L}])|(?<![${L}])luku\\s*\\d|lukemisto|artikkel|luettava|kirjallisuus`,
+      "i",
+    ),
+  },
+  {
+    // Other students' results or a grade list. Never shown, whatever else the name says (M9-04).
+    why: "results",
+    re: new RegExp(`(?<![${L}])(results?|grades?|gradebook|scores)(?![${L}])|tulokset|arvosan|pisteet`, "i"),
   },
   {
     why: "syllabus",
@@ -196,6 +220,14 @@ function isSlideFile(file: CourseFile): boolean {
   if (ext) return SLIDE_EXT.has(ext);
   const mime = (file.mime ?? "").toLowerCase();
   return SLIDE_MIME.some((m) => mime.startsWith(m));
+}
+
+/** Rule: a presentation by type (see DECK_EXT); no extension falls back to the mime type. */
+function isDeckFile(file: CourseFile): boolean {
+  const ext = extOf(file.name);
+  if (ext) return DECK_EXT.has(ext);
+  const mime = (file.mime ?? "").toLowerCase();
+  return SLIDE_MIME.some((m) => m !== "application/pdf" && mime.startsWith(m));
 }
 
 function hasLectureSignal(text: string): boolean {
@@ -386,17 +418,52 @@ function isRestricted(mod: CourseModule): boolean {
 // ---------------------------------------------------------------------------
 // lecturesFrom
 
-type Candidate = {
-  parsedN: number | null;
-  title: string;
-  fileRef: string | null;
-  url: string | null;
-  section: string;
-  postedAt: string | null;
-  opensAt: string | null;
-  sortName: string;
-  order: [number, number, number, number];
-};
+/** A lecture before it gets its number. */
+type Candidate = Omit<Lecture, "n">;
+
+function fileNameOf(c: Candidate): string | null {
+  return c.fileRef === null ? null : c.fileRef.slice(c.fileRef.indexOf("/") + 1);
+}
+
+/** File name without extension, case and separators, to spot one deck saved in two formats. */
+function stemOf(name: string): string {
+  return normalise(stripExt(name).replace(/[-–—.]+/g, " ")).toLowerCase();
+}
+
+/**
+ * Rule 6: the same deck posted twice in one section, once as PDF and once as
+ * a presentation, is one lecture. Two copies are the same deck when their
+ * file names match without the extension ("week-1-intro.pdf",
+ * "week-1-intro.pptx"), or when both file names carry the same lecture number
+ * ("lecture-01-why.pdf", "lecture-01-old-title.pptx"). Here a number only
+ * pairs a PDF with its presentation; it never orders or numbers lectures.
+ * Two files of the same format are never merged (two parts of one lecture
+ * are two lectures). Each copy pairs once. The lecture stays where the first
+ * copy sits and keeps the PDF (the lecture page is written from its text).
+ */
+function oneDeckPerFormat(items: Candidate[]): Candidate[] {
+  type Slot = { c: Candidate; pdf: boolean; stem: string; num: number | null; paired: boolean };
+  const out: Slot[] = [];
+  for (const c of items) {
+    const name = fileNameOf(c);
+    // A restricted lecture has no file yet, so nothing to pair: mark it paired.
+    if (name === null) {
+      out.push({ c, pdf: false, stem: "", num: null, paired: true });
+      continue;
+    }
+    const pdf = extOf(name) === "pdf";
+    const stem = stemOf(name);
+    const num = parseNumber(name).n;
+    const twin = out.find((o) => !o.paired && o.pdf !== pdf && (o.stem === stem || (num !== null && o.num === num)));
+    if (twin) {
+      twin.paired = true;
+      if (pdf) twin.c = c;
+      continue;
+    }
+    out.push({ c, pdf, stem, num, paired: false });
+  }
+  return out.map((o) => o.c);
+}
 
 /**
  * Exclusion check for one name set. Hard words in the file or module name
@@ -413,29 +480,83 @@ function excluded(names: string[], sectionName: string): boolean {
   return false;
 }
 
+/** Natural name order ("Lecture 2" before "Lecture 10"), as a folder lists its files. */
+const byName = (a: CourseFile, b: CourseFile) =>
+  a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+
+/** The lecture candidates of one module, in order. */
+function fromModule(mod: CourseModule, sectionName: string, sectionSignal: boolean): Candidate[] {
+  const isFolder = mod.kind === "folder";
+
+  if (isRestricted(mod)) {
+    if (!(sectionSignal || hasLectureSignal(mod.name))) return [];
+    if (excluded([mod.name], sectionName)) return [];
+    const opensAt = toIso(mod.opensAt ?? null) ?? parseOpensAt(mod.availabilityInfo);
+    if (!opensAt) return [];
+    return [
+      { title: titleFrom(mod.name), fileRef: null, url: null, section: sectionName, postedAt: null, opensAt },
+    ];
+  }
+
+  if (isFolder && hardExcluded(mod.name)) return [];
+  const slides = mod.files.filter(isSlideFile);
+  if (isFolder) slides.sort(byName);
+
+  const out: Candidate[] = [];
+  for (const file of slides) {
+    const names = [file.name, mod.name];
+    const signal = sectionSignal || names.some(hasLectureSignal) || isDeckFile(file);
+    if (!signal) continue;
+    // For a folder, the folder name alone does not excuse a file named "exercise".
+    if (excluded(isFolder ? [file.name] : names, sectionName)) continue;
+
+    let title = isFolder ? titleFrom(file.name) : titleFrom(mod.name);
+    if (!title) title = isFolder ? "" : titleFrom(file.name);
+    out.push({
+      title,
+      fileRef: `${mod.moodleRef}/${file.name}`,
+      url: file.url,
+      section: sectionName,
+      postedAt: toIso(file.modifiedAt ?? null),
+      opensAt: null,
+    });
+  }
+  return out;
+}
+
 /**
  * The ordered lectures of one course.
  *
  * Rules, in order:
- * 1. Sections are walked by `position`, modules and files in their listed order.
+ * 1. Sections are walked by `position`, modules in their listed order, files
+ *    of a resource in listed order and files of a folder by natural name order.
  * 2. Only `resource`/`folder` modules count (see FILE_KINDS).
- * 3. A file is a lecture when it is a slide file (see SLIDE_EXT) AND its file
- *    name, module name or section name has a lecture signal (lecture, lect,
- *    luento, luennot, slides, kalvot, L1/L01, week 3, viikko 3, session 2,
- *    "3. luento") AND it is not excluded (see `excluded`).
+ * 3. A file is a lecture when it is a slide file (see SLIDE_EXT) AND it has a
+ *    lecture signal AND it is not excluded (see `excluded`, HARD_EXCLUDE). A
+ *    signal is: a lecture word or numbering in the file, module or section
+ *    name (lecture, lect, luento, luennot, slides, kalvot, L1/L01, week 3,
+ *    viikko 3, session 2, "3. luento"), or a presentation file type (see
+ *    DECK_EXT). So topic-named decks count in a "Lecture ..." section, and a
+ *    topic-named PDF in a neutral section does not.
  * 4. A restricted module (see `isRestricted`) whose module or section name has
  *    a lecture signal and is not excluded becomes a lecture with `opensAt`,
  *    no file and no postedAt. The date is the structured `opensAt` when given,
  *    else parsed from `availabilityInfo`. Without a readable date it is left
  *    out: we cannot say when it comes, and the next sync will show it.
- * 5. Number: from the file name, else (for a resource, or a folder with one
- *    slide file) from the module name. Lectures without one get, in course
- *    order, the smallest unused number above the previous lecture's number,
- *    so [Intro, Lecture 2, Lecture 3] numbers Intro 1.
- * 6. Title: for a resource, the module name (people name modules for humans,
+ * 5. Folder beside lectures: when a section already has lectures that are
+ *    separate resources (one module per lecture), a folder in that section is
+ *    extra material (her course keeps numbered background readings there,
+ *    named "Lecture 1.pdf" ... ) and is left out, unless the folder's own name
+ *    has a strong lecture word ("Lecture slides", "Luentokalvot"). A folder in
+ *    a section with no such resources still gives one lecture per file.
+ * 6. One deck in two formats (PDF and pptx with the same file name, or the
+ *    same lecture number in both names) in one section is one lecture, with
+ *    the PDF (see `oneDeckPerFormat`).
+ * 7. Number: 1..n in the order of rule 1. Numbers in names are never used for
+ *    order or numbering: they can belong to readings, weeks or chapters.
+ * 8. Title: for a resource, the module name (people name modules for humans,
  *    files for machines) with numbering removed; if that leaves nothing, the
  *    file name. For a folder, the file name. May end up "".
- * 7. Output sorted by number, then section order, then name, then listed order.
  * Nothing matches: []. No guessing.
  */
 export function lecturesFrom(sections: readonly CourseSection[]): Lecture[] {
@@ -445,97 +566,25 @@ export function lecturesFrom(sections: readonly CourseSection[]): Lecture[] {
 
   const found: Candidate[] = [];
 
-  for (const { s, i: si } of ordered) {
+  for (const { s } of ordered) {
     const sectionName = s.section ?? "";
     const sectionSignal = hasLectureSignal(sectionName);
+    const perModule = s.modules
+      .filter((mod) => FILE_KINDS.has(mod.kind))
+      .map((mod) => ({ mod, items: fromModule(mod, sectionName, sectionSignal) }));
 
-    s.modules.forEach((mod, mi) => {
-      if (!FILE_KINDS.has(mod.kind)) return;
-      const isFolder = mod.kind === "folder";
-
-      if (isRestricted(mod)) {
-        if (!(sectionSignal || hasLectureSignal(mod.name))) return;
-        if (excluded([mod.name], sectionName)) return;
-        const opensAt = toIso(mod.opensAt ?? null) ?? parseOpensAt(mod.availabilityInfo);
-        if (!opensAt) return;
-        found.push({
-          parsedN: parseNumber(mod.name).n,
-          title: titleFrom(mod.name),
-          fileRef: null,
-          url: null,
-          section: sectionName,
-          postedAt: null,
-          opensAt,
-          sortName: mod.name,
-          order: [s.position, si, mi, 0],
-        });
-        return;
-      }
-
-      const slides = mod.files.filter(isSlideFile);
-      slides.forEach((file, fi) => {
-        const names = [file.name, mod.name];
-        const signal = sectionSignal || names.some(hasLectureSignal);
-        if (!signal) return;
-        // For a folder, the folder name alone does not excuse a file named "exercise".
-        if (excluded(isFolder ? [file.name] : names, sectionName)) return;
-        if (isFolder && hardExcluded(mod.name)) return;
-
-        const moduleNameCounts = !isFolder || slides.length === 1;
-        const parsedN = parseNumber(file.name).n ?? (moduleNameCounts ? parseNumber(mod.name).n : null);
-        let title = isFolder ? titleFrom(file.name) : titleFrom(mod.name);
-        if (!title) title = isFolder ? "" : titleFrom(file.name);
-
-        found.push({
-          parsedN,
-          title,
-          fileRef: `${mod.moodleRef}/${file.name}`,
-          url: file.url,
-          section: sectionName,
-          postedAt: toIso(file.modifiedAt ?? null),
-          opensAt: null,
-          sortName: isFolder ? file.name : mod.name,
-          order: [s.position, si, mi, fi],
-        });
-      });
-    });
+    // Rule 5.
+    const hasResourceLectures = perModule.some(({ mod, items }) => mod.kind !== "folder" && items.length > 0);
+    const kept: Candidate[] = [];
+    for (const { mod, items } of perModule) {
+      if (mod.kind === "folder" && hasResourceLectures && !isStrong(mod.name)) continue;
+      kept.push(...items);
+    }
+    found.push(...oneDeckPerFormat(kept));
   }
 
-  if (found.length === 0) return [];
-
-  // Rule 5: fill missing numbers from order.
-  const taken = new Set(found.map((c) => c.parsedN).filter((n): n is number => n !== null));
-  let last = 0;
-  const numbered = found.map((c) => {
-    let n = c.parsedN;
-    if (n === null) {
-      n = last + 1;
-      while (taken.has(n)) n++;
-      taken.add(n);
-    }
-    last = n;
-    return { c, n };
-  });
-
-  numbered.sort((a, b) => {
-    if (a.n !== b.n) return a.n - b.n;
-    const oa = a.c.order;
-    const ob = b.c.order;
-    if (oa[0] !== ob[0]) return oa[0] - ob[0];
-    if (oa[1] !== ob[1]) return oa[1] - ob[1];
-    if (a.c.sortName !== b.c.sortName) return a.c.sortName < b.c.sortName ? -1 : 1;
-    return oa[2] - ob[2] || oa[3] - ob[3];
-  });
-
-  return numbered.map(({ c, n }) => ({
-    n,
-    title: c.title,
-    fileRef: c.fileRef,
-    url: c.url,
-    section: c.section,
-    postedAt: c.postedAt,
-    opensAt: c.opensAt,
-  }));
+  // Rule 7.
+  return found.map((c, i) => ({ n: i + 1, ...c }));
 }
 
 // ---------------------------------------------------------------------------
