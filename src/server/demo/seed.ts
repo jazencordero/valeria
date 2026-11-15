@@ -26,6 +26,10 @@
  * A forced sync (POST /api/sync with force) still writes the sample's dates;
  * /demo?reset=1 shifts them again.
  *
+ * Then `seedStudy` (./seed-study, M3-40) adds the prototype's exam and quiz on
+ * the synced courses: concepts, cards and 13 days of review history, dated
+ * from the same `now`.
+ *
  * No `identities` row is written: every fake user is the same Moodle user
  * (4242), and an identity would make the next demo browser merge into this one.
  *
@@ -56,6 +60,7 @@ import { getAssignments, getSubmissionStatus, type Assignment } from "@/server/m
 import { getCourses } from "@/server/moodle/read/courses";
 import { getSiteInfo } from "@/server/moodle/read/site";
 import { syncNow, type SyncNowDeps } from "@/server/sync/run";
+import { seedStudy } from "./seed-study";
 
 /** The key in `users.settings` that marks a demo user. */
 export const DEMO_FLAG = "demo";
@@ -166,7 +171,7 @@ export function shiftToDemoWeek(list: Assignment[], now: Date): Assignment[] {
 // Seeding.
 
 export type SeedOptions = { now?: Date };
-export type SeedResult = { userId: string; assignments: number };
+export type SeedResult = { userId: string; assignments: number; exams: number };
 
 async function markDemo(database: Db, userId: string): Promise<void> {
   await database
@@ -221,8 +226,11 @@ export async function seedDemo(userId: string, database: Db = defaultDb, opts: S
     .set({ lastSyncAt: new Date(Date.now() + FROZEN_FOR_MS) })
     .where(eq(moodleConnections.userId, userId));
 
+  // The prototype's exam and quiz with cards and history (M3-40), on the synced courses.
+  const study = await seedStudy(userId, now, database);
+
   const rows = await database.select({ id: assignments.id }).from(assignments).where(eq(assignments.userId, userId));
-  return { userId, assignments: rows.length };
+  return { userId, assignments: rows.length, exams: study.exams.length };
 }
 
 /**

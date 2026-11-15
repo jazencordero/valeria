@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentUserFor, ensureSessionFor, newToken } from "@/server/auth/session";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { courses } from "@/server/db/schema/courses";
+import { cards, exams, reviews } from "@/server/db/schema/study";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import { users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
@@ -79,6 +80,27 @@ describe("seedDemo", () => {
     expect(own.length).toBeGreaterThan(0);
   }, SLOW);
 
+  it("adds the prototype's exam and quiz on the synced courses, with cards and reviews (M3-40)", async () => {
+    const { user } = await browser();
+    const result = await seedDemo(user.id, t.db, { now: NOW });
+    expect(result.exams).toBe(2);
+
+    const rows = await t.db
+      .select({ title: exams.title, kind: exams.kind, at: exams.at, course: courses.name })
+      .from(exams)
+      .innerJoin(courses, eq(courses.id, exams.courseId))
+      .where(eq(exams.userId, user.id))
+      .orderBy(asc(exams.at));
+    expect(rows.map((r) => [r.title, r.kind, r.at.toISOString()])).toEqual([
+      ["Exam", "exam", "2026-11-20T07:00:00.000Z"],
+      ["Quiz 4: ARIMA basics", "quiz", "2026-11-27T10:00:00.000Z"],
+    ]);
+    expect(rows[0].course).toMatch(/Strategic IT Management/);
+    expect(rows[1].course).toMatch(/Forecasting Methods/);
+    expect(await t.db.select().from(cards).where(eq(cards.userId, user.id))).toHaveLength(16);
+    expect((await t.db.select().from(reviews).where(eq(reviews.userId, user.id))).length).toBeGreaterThan(68 + 11);
+  }, SLOW);
+
   it("keeps the shifted dates through Home's sync (not forced)", async () => {
     const { user } = await browser();
     await seedDemo(user.id, t.db, { now: NOW });
@@ -134,6 +156,9 @@ describe("openDemo", () => {
 
     const rows = await assignmentRows(result.userId);
     expect(rows.map((r) => r.name)).toEqual(["Assignment 3", "Case memo 2", "Service blueprint"]);
+    // The demo deck comes back fresh, and the old user's went with it.
+    expect(await t.db.select().from(exams).where(eq(exams.userId, user.id))).toHaveLength(0);
+    expect(await t.db.select().from(exams).where(eq(exams.userId, result.userId))).toHaveLength(2);
     expect(rows.every((r) => r.state === "open")).toBe(true);
     expect(rows.map((r) => r.dueAt?.toISOString())).toEqual(EXPECTED_DUE);
     // The fake forgot the old user's hand-in.

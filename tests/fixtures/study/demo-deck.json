@@ -1,0 +1,170 @@
+{
+  "about": "Demo only (M3-40). The prototype's two exams, copied from EXAM_DATA and CARD_DATA in context/tickets/prototype/main-flow.html, lines 2484 to 2571. Invented course content, no real course data. Each card is in the card format (src/lib/study/card-schema.ts); the prototype's `st` scheduler state is left out, the seed makes the memory. `course` is matched against the demo's synced course names; `daysAhead`, `hour` and `minute` place the exam relative to today in Helsinki. `mastery` is the prototype's starting mastery (m0), `hist` the forecast on the 13 days before today and `heat` the reviews on those days, oldest first.",
+  "exams": [
+    {
+      "key": "exam",
+      "title": "Exam",
+      "kind": "exam",
+      "course": "Strategic IT Management",
+      "daysAhead": 6,
+      "hour": 9,
+      "minute": 0,
+      "target": 80,
+      "hist": [22, 24, 24, 27, 31, 31, 35, 38, 38, 42, 46, 49, 51],
+      "heat": [0, 4, 7, 0, 9, 12, 5, 0, 3, 8, 14, 0, 6],
+      "concepts": [
+        { "id": "gov", "name": "IT governance", "lecture": "Lecture 3", "weight": 0.15, "mastery": 0.8 },
+        { "id": "dec", "name": "Decision rights", "lecture": "Lecture 3", "weight": 0.15, "mastery": 0.7 },
+        { "id": "src", "name": "Sourcing and vendors", "lecture": "Lecture 5", "weight": 0.2, "mastery": 0.55 },
+        { "id": "sla", "name": "Contracts and SLAs", "lecture": "Lecture 5", "weight": 0.15, "mastery": 0.5 },
+        { "id": "dsa", "name": "Strategic alignment", "lecture": "Lecture 7", "weight": 0.2, "mastery": 0.42 },
+        { "id": "val", "name": "IT value and investment", "lecture": "Lecture 8", "weight": 0.15, "mastery": 0.25 }
+      ],
+      "cards": [
+        {
+          "id": "s1", "type": "basic", "concept": "gov",
+          "q": "What is the difference between IT governance and IT management?",
+          "a": "Governance decides who makes which IT decisions and who answers for them. Management makes and carries out those decisions day to day.",
+          "src": "Lecture 3, slide 8"
+        },
+        {
+          "id": "s2", "type": "cloze", "concept": "dec",
+          "q": "Weill and Ross name five key IT decisions: IT principles, IT architecture, IT infrastructure, {{business application needs}} and {{IT investment and prioritisation}}.",
+          "src": "Lecture 3, slide 14"
+        },
+        {
+          "id": "s3", "type": "mcq", "concept": "src",
+          "q": "A firm outsources its help desk but keeps architecture decisions in-house. What is this called?",
+          "opts": [["Selective sourcing", true], ["Total outsourcing", false], ["Backsourcing", false], ["Offshoring", false]],
+          "why": "Selective sourcing hands over well-defined commodity services and keeps the strategic decisions inside.",
+          "src": "Lecture 5, slide 6"
+        },
+        {
+          "id": "s4", "type": "basic", "concept": "src",
+          "q": "Name two risks of vendor lock-in.",
+          "a": "High switching costs, and less bargaining power because you depend on the vendor's prices and roadmap.",
+          "src": "Lecture 5, slide 19"
+        },
+        {
+          "id": "s5", "type": "explain", "concept": "dsa",
+          "q": "Explain strategic alignment between business and IT in your own words.",
+          "rubric": [
+            ["Business strategy shapes IT choices", ["business strategy", "drive", "shape", "support"]],
+            ["It goes both ways: IT can also open up new strategy", ["both", "two-way", "enable", "new"]],
+            ["Structure and processes have to fit too, not only strategy", ["structure", "process", "organisation", "organization"]]
+          ],
+          "model": "Alignment means business strategy and IT strategy fit and inform each other, and that the organisation's structures and processes are set up to deliver on both.",
+          "src": "Lecture 7, slides 4 to 9"
+        },
+        {
+          "id": "s6", "type": "basic", "concept": "sla",
+          "q": "What does a service level agreement define?",
+          "a": "The measurable level of service the vendor must deliver, how it is measured, and what happens when it is missed.",
+          "src": "Lecture 5, slide 11"
+        },
+        {
+          "id": "m1", "type": "match", "concept": "sla",
+          "q": "Match each term to what it means.",
+          "pairs": [
+            ["SLA", "The service level a vendor must hit"],
+            ["Lock-in", "Switching vendor costs too much"],
+            ["Selective sourcing", "Outsource commodity work, keep strategy"],
+            ["Backsourcing", "Bring outsourced work back in-house"]
+          ],
+          "order": [2, 0, 3, 1],
+          "src": "Lecture 5, slides 6 to 19"
+        },
+        {
+          "id": "b1", "type": "mcq", "boss": true, "concept": "src", "concepts": ["src", "sla"],
+          "q": "Your CRM vendor has missed its SLA three months running, and switching would take a year. What is the strongest first move?",
+          "opts": [
+            ["Use the SLA penalties to renegotiate, and plan an exit path", true],
+            ["Switch vendor right away", false],
+            ["Bring CRM in-house next month", false],
+            ["Accept it. Lock-in means you have no options", false]
+          ],
+          "why": "The SLA gives you leverage now. Lock-in makes a sudden switch costly, so you press on the contract while you prepare a way out.",
+          "src": "Past exam 2024, question 3"
+        },
+        {
+          "id": "p1", "type": "cloze", "concept": "sla",
+          "q": "A {{service level agreement}} sets the measurable level of service a vendor must deliver.",
+          "src": "Lecture 5, slide 11"
+        },
+        {
+          "id": "p2", "type": "mcq", "concept": "dec",
+          "q": "According to Weill and Ross, who should set the IT principles?",
+          "opts": [["Business and IT leaders together", true], ["The IT department alone", false], ["External consultants", false], ["Each business unit on its own", false]],
+          "why": "IT principles say how IT creates value for the business, so business and IT leaders set them together.",
+          "src": "Lecture 3, slide 16"
+        },
+        {
+          "id": "p3", "type": "explain", "concept": "src",
+          "q": "Explain when a firm should keep an IT activity in-house.",
+          "rubric": [
+            ["It is strategic or a source of advantage", ["strateg", "advantage", "core", "differentiat"]],
+            ["The firm has, or needs, the know-how inside", ["skill", "know-how", "knowhow", "expertise", "capabilit"]],
+            ["Outsourcing would create a risky dependence", ["lock-in", "lock in", "depend", "risk", "switch"]]
+          ],
+          "model": "Keep an activity in-house when it is strategic or a source of advantage, when you need the know-how inside, and when handing it over would make you dangerously dependent on one vendor.",
+          "src": "Lecture 5, slides 4 to 9"
+        },
+        {
+          "id": "p4", "type": "basic", "concept": "val",
+          "q": "What is the difference between IT cost and IT value?",
+          "a": "Cost is what you spend. Value is the business benefit it creates: more revenue, lower costs elsewhere, or less risk.",
+          "src": "Lecture 8, slide 3"
+        },
+        {
+          "id": "b2", "type": "mcq", "boss": true, "concept": "dsa", "concepts": ["dsa", "val"],
+          "q": "The board asks whether a new data platform \"fits the strategy\". Which answer shows alignment thinking?",
+          "opts": [
+            ["It supports how we plan to win on service, and our teams can actually use it", true],
+            ["It is the cheapest platform on the market", false],
+            ["IT chose it, so it fits IT strategy", false],
+            ["Our competitors bought it last year", false]
+          ],
+          "why": "Alignment ties the choice to the business strategy and checks the organisation can deliver on it. Price and imitation are not alignment.",
+          "src": "Past exam 2023, question 5"
+        }
+      ]
+    },
+    {
+      "key": "quiz",
+      "title": "Quiz 4: ARIMA basics",
+      "kind": "quiz",
+      "course": "Forecasting Methods",
+      "daysAhead": 13,
+      "hour": 12,
+      "minute": 0,
+      "target": 80,
+      "hist": [10, 10, 14, 14, 18, 18, 18, 25, 29, 29, 33, 38, 41],
+      "heat": [0, 0, 3, 0, 2, 0, 0, 4, 0, 0, 2, 0, 0],
+      "concepts": [
+        { "id": "sta", "name": "Stationarity", "lecture": "Lecture 7", "weight": 0.3, "mastery": 0.6 },
+        { "id": "dif", "name": "Differencing", "lecture": "Lecture 7", "weight": 0.3, "mastery": 0.5 },
+        { "id": "acf", "name": "Reading ACF and PACF plots", "lecture": "Lecture 8", "weight": 0.4, "mastery": 0.3 }
+      ],
+      "cards": [
+        {
+          "id": "q1", "type": "basic", "concept": "sta",
+          "q": "What does it mean for a time series to be stationary?",
+          "a": "Its mean, variance and autocorrelation do not change over time.",
+          "src": "Lecture 7, slide 5"
+        },
+        {
+          "id": "q2", "type": "cloze", "concept": "dif",
+          "q": "Differencing a series once removes a {{linear trend}}; seasonal differencing removes {{seasonality}}.",
+          "src": "Lecture 7, slide 9"
+        },
+        {
+          "id": "q3", "type": "mcq", "concept": "acf",
+          "q": "The ACF cuts off after lag 2 and the PACF tails off. Which model fits?",
+          "opts": [["MA(2)", true], ["AR(2)", false], ["ARMA(2,2)", false], ["White noise", false]],
+          "why": "A sharp ACF cut-off with a decaying PACF is the signature of a moving-average process.",
+          "src": "Lecture 8, slide 14"
+        }
+      ]
+    }
+  ]
+}
