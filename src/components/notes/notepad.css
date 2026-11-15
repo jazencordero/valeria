@@ -124,7 +124,10 @@
 .np-top.folded { flex: none; }
 .np-top.folded .np-scroll { flex: none; overflow: hidden; padding-bottom: 4px; }
 .np-top.folded .np-title-row { margin-top: 4px; }
-.np-top.folded .np-quote { margin-top: 4px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* Two whole lines, then an ellipsis. The clamp cuts at the padding edge, so bottom padding would
+   show the top of a third line: the vertical padding becomes a see-through border instead (the
+   paper background still fills it), and nothing of line three can show. */
+.np-top.folded .np-quote { margin-top: 4px; padding-block: 0; border-block: 8px solid transparent; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .np-edge { position: absolute; top: 0; bottom: 0; left: -8px; width: 16px; z-index: 1; cursor: col-resize; touch-action: none; user-select: none; }
 .np-edge::after { content: ""; position: absolute; left: 6px; top: 50%; width: 4px; height: 44px; margin-top: -22px; border-radius: 999px; background: var(--line); transition: background-color var(--t-quick) var(--e-out); }
 .np-edge:hover::after { background: var(--ink-3); }

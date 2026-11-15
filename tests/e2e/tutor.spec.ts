@@ -420,3 +420,24 @@ test('a note made from "Ask about this card" is attached to the card\'s exam, an
   await expect(card).toContainText(label.split(",")[0]);
   await expect(card).not.toContainText("General");
 });
+
+test("on a phone: the folded quote shows two whole lines, never part of a third", async ({ page }) => {
+  test.skip((page.viewportSize()?.width ?? 0) >= 700, "phones only: the note folds there");
+  await page.setViewportSize({ width: 390, height: 844 });
+  // The preview page opens the notes panel on a long quote with a chat that already has turns.
+  await page.goto("/dev/tutor#mid");
+  const quote = page.locator(".np-top.folded .np-quote");
+  await expect(quote).toBeVisible();
+  const box = await quote.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return {
+      inner: el.clientHeight, // the padding box: what the clamp may show
+      line: parseFloat(cs.lineHeight),
+      padding: parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom),
+      full: el.scrollHeight,
+    };
+  });
+  expect(box.full, "the quote is longer than two lines, so the clamp is at work").toBeGreaterThan(box.inner + 1);
+  expect(box.padding, "no padding for a third line to show through").toBe(0);
+  expect(Math.abs(box.inner - 2 * box.line), "exactly two lines tall").toBeLessThanOrEqual(1);
+});
