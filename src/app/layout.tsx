@@ -29,8 +29,12 @@ export const metadata: Metadata = {
   description: "Know if you'll be ready. Start studying in 10 seconds.",
 };
 
-// Runs before paint so a saved theme never flashes the wrong colours.
-const themeScript = `try{var t=localStorage.getItem('ready-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}`;
+// Runs before paint so a saved theme never flashes the wrong colours, and a
+// folded sidebar (M4-01, localStorage['ready-side'], same key as SIDE_KEY in
+// @/components/shell/use-side) never jumps. It lives here, not in the app
+// layout: the root layout renders only on a full page load, so React never
+// meets a <script> while rendering on the client.
+const themeScript = `try{var t=localStorage.getItem('ready-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);var s=localStorage.getItem('ready-side');if(s==='collapsed'||s==='expanded')document.documentElement.setAttribute('data-side',s)}catch(e){}`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

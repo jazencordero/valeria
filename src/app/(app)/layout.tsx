@@ -13,9 +13,11 @@
  * The side nav folds to a 72 px icon rail (M4-01, logic in
  * `@/components/shell/use-side`). Folded between 700 and 1000 px, open from
  * 1000 px, unless she chose: her choice is in localStorage['ready-side'] and
- * mirrored on <html data-side>. The server cannot read localStorage, so
- * SIDE_BOOT runs before the side nav is parsed and copies the choice onto
- * <html> (which already has suppressHydrationWarning for the theme script).
+ * mirrored on <html data-side>. The server cannot read localStorage, so the
+ * root layout's boot script (src/app/layout.tsx) copies the choice onto
+ * <html> before paint; on a client navigation into the app the use-side hook
+ * does it on mount. (A <script> here would make React warn when this layout
+ * renders on the client, e.g. after logging in.)
  * The grid turns that and the width into `--side-c` (1 folded, 0 open), which
  * sizes the side nav in plain CSS: no jump on reload, no hydration mismatch.
  *
@@ -184,10 +186,6 @@ async function NotepadForUser() {
   return <Notepad tutor={tutorEnabled(user.settings)} />;
 }
 
-// Same key as SIDE_KEY in @/components/shell/use-side (a client module, so
-// its exports cannot be read here).
-const SIDE_BOOT = `try{var s=localStorage.getItem('ready-side');if(s==='collapsed'||s==='expanded')document.documentElement.setAttribute('data-side',s)}catch(e){}`;
-
 /** `--side-c`: 1 folded, 0 open. Her choice on <html> beats the width default. */
 const SIDE_VAR =
   "[--side-c:0] max-[1000px]:[--side-c:1] " +
@@ -196,7 +194,6 @@ const SIDE_VAR =
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <>
-      <script dangerouslySetInnerHTML={{ __html: SIDE_BOOT }} />
       <div
         className={`${SIDE_VAR} grid h-dvh grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-surface min-[700px]:grid-cols-[auto_minmax(0,1fr)] min-[700px]:grid-rows-[minmax(0,1fr)] min-[700px]:bg-paper`}
       >
