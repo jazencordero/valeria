@@ -177,10 +177,10 @@ export type BuildContextOptions = {
 
 /** What the tools say when the material may not be read (any more). */
 export const NOT_SHARED_ERROR =
-  "The course material is not available: this course is not marked as allowing AI help.";
-/** What `write_draft` says when the course does not allow AI (any more). Nothing was saved. */
+  "The course material is not available: this course is not marked as fully allowing AI help on its assignments.";
+/** What `write_draft` says when the course is no longer marked 'allowed'. Nothing was saved. */
 export const DRAFT_NOT_ALLOWED_ERROR =
-  "The draft was not saved: this course is not marked as allowing AI help.";
+  "The draft was not saved: this course is not marked as fully allowing AI help on its assignments.";
 /** What the file tools say when she turned her own switch off. */
 export const FILES_OFF_ERROR =
   'Her course files are not available: she turned off "Use my course files with AI" in Settings.';
@@ -316,7 +316,7 @@ const FILES_OFF_RULE =
   "Tell her once, the first time a file would have helped, that her files are not shared with you and that she can turn this on in Settings. Do not repeat it after that.";
 
 const NO_DRAFTING_RULE =
-  "This course does not allow AI help with the work itself. Explain concepts and give feedback on text she " +
+  "This course allows AI help only to explain, not with the work itself. Explain concepts and give feedback on text she " +
   "wrote herself, and nothing more. Do not write hand-in text: no drafts, no paragraphs, no rewritten " +
   "sentences and no finished answers she could hand in. If she asks for that, say the course does not allow it and offer to explain or give feedback instead.";
 
@@ -352,7 +352,7 @@ function namesOnly(files: Attached[]): string {
 /** The explain-only prompt: no course text, no drafting. */
 function withheldPrompt(scope: Scope, files: Attached[], now: Date, timeZone: string): string {
   const why =
-    "You have not been given the course material (the brief and the files), because this course has not allowed AI help.";
+    "You have not been given the course material (the brief and the files), because this course allows AI help on its assignments only to explain.";
   const lines = [
     "You only know the assignment name, the course name, the due time and the names of the attached files. Do not guess what the brief or any file says, and do not infer their content from their names. If she asks what the brief says, tell her plainly that you have not been given it.",
     "You may explain general concepts and give feedback on text she writes or pastes herself.",

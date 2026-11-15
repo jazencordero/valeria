@@ -132,7 +132,7 @@ export default function PrivacyPage() {
           </li>
         </List>
         <p>
-          A new course starts as &ldquo;not allowed&rdquo; until you say otherwise. Assignment help and studying from
+          A new course starts as &ldquo;not answered yet&rdquo;, which Ready treats as a no until you say otherwise. Assignment help and studying from
           slides are two separate choices for each course.
         </p>
         <p>What is sent then:</p>

@@ -12,14 +12,18 @@ import { courses } from "@/server/db/schema/courses";
 import { users } from "@/server/db/schema/users";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import {
+  AI_CHAT_OFF_LINE,
   AI_OFF_LINE,
+  AI_UNKNOWN_LINE,
   AiPolicyCard,
   ANSWER_POLICY,
   chatHidden,
   EXPLAIN_ONLY_LINE,
   isExplainOnly,
+  policyLine,
   type PolicyAnswer,
 } from "./ai-policy";
+import { chatProblem } from "./workspace";
 
 const h = vi.hoisted(() => ({ db: undefined as unknown, userId: null as string | null }));
 
@@ -140,22 +144,47 @@ describe("AiPolicyCard", () => {
       />,
     );
 
-  it("asks while the answer is unknown, with the four buttons and the off line", () => {
+  it("asks while the answer is unknown, with the four buttons and the unknown line, never 'does not allow'", () => {
     const out = html("unknown");
     expect(out).toContain("Does Sample Course allow AI help on homework?");
     expect(out).toContain("Check the syllabus.");
     for (const label of ["Yes", "Only to explain", "No", "Not sure"]) expect(out).toContain(`>${label}<`);
-    expect(out).toContain(AI_OFF_LINE);
+    expect(out).toContain("We don&#x27;t know this course&#x27;s rule on AI help yet. Hand-in works as usual.");
+    expect(out).toContain('data-testid="ai-policy-unknown"');
+    expect(out).not.toContain(AI_OFF_LINE);
     expect(out).not.toContain(EXPLAIN_ONLY_LINE);
+    expect(out).not.toContain("does not allow");
+    // While the question is open there is nothing to change yet.
+    expect(out).not.toContain("Change answer");
   });
 
-  it("the off line reads exactly as the ticket gives it", () => {
+  it("the lines read exactly as the ticket gives them", () => {
     expect(AI_OFF_LINE).toBe("This course does not allow AI help on assignments. Hand-in works as usual.");
+    expect(AI_UNKNOWN_LINE).toBe("We don't know this course's rule on AI help yet. Hand-in works as usual.");
+    expect(EXPLAIN_ONLY_LINE).toBe("Explain-only: this course does not allow AI-written homework.");
+  });
+
+  it("one line per state, and 'does not allow AI help' only for an answered No", () => {
+    expect(policyLine("unknown")).toBe(AI_UNKNOWN_LINE);
+    expect(policyLine("off")).toBe(AI_OFF_LINE);
+    expect(policyLine("explain")).toBe(EXPLAIN_ONLY_LINE);
+    expect(policyLine("allowed")).toBeNull();
+    for (const p of ["unknown", "explain", "allowed"] as const) {
+      expect(policyLine(p) ?? "").not.toContain("does not allow AI help");
+    }
+  });
+
+  it("the chat endpoint's 403 reads true for off and unknown alike", () => {
+    expect(chatProblem(new Error(JSON.stringify({ error: "ai_off_for_assignments" })))).toBe(AI_CHAT_OFF_LINE);
+    expect(AI_CHAT_OFF_LINE).toBe("AI help is off for this course's assignments. Hand-in works as usual.");
+    expect(AI_CHAT_OFF_LINE).not.toContain("does not allow");
   });
 
   it("shows the off line with a way to change the answer for off, and does not ask again", () => {
     const out = html("off");
     expect(out).toContain(AI_OFF_LINE);
+    expect(out).toContain('data-testid="ai-policy-off"');
+    expect(out).not.toContain("rule on AI help yet");
     expect(out).toContain("Change answer");
     expect(out).not.toContain(EXPLAIN_ONLY_LINE);
     expect(out).not.toContain("allow AI help on homework?");
@@ -166,6 +195,8 @@ describe("AiPolicyCard", () => {
     expect(out).toContain(EXPLAIN_ONLY_LINE);
     expect(out).toContain("Change answer");
     expect(out).not.toContain(AI_OFF_LINE);
+    expect(out).not.toContain("rule on AI help yet");
+    expect(out).not.toContain("does not allow AI help");
     expect(out).not.toContain("allow AI help on homework?");
   });
 

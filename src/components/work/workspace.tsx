@@ -61,7 +61,7 @@ import { DraftCard, draftFileName } from "@/components/chat/draft-card";
 import { MessageList, type MessageListHandle } from "@/components/chat/message-list";
 import { AssistantMessage, TypingDots, UserMessage } from "@/components/chat/message";
 import { Suggestion } from "@/components/chat/suggestion";
-import { AiPolicyCard, AI_OFF_LINE } from "@/components/work/ai-policy";
+import { AiPolicyCard, AI_CHAT_OFF_LINE } from "@/components/work/ai-policy";
 import { Brief } from "@/components/work/brief";
 import { FilePick } from "@/components/work/file-pick";
 import { HandinSheet, type HandinReview, type Result } from "@/components/work/handin-sheet";
@@ -188,7 +188,7 @@ export function chatProblem(error: Error | undefined): string {
     if (body.error === "ai_busy" && typeof body.message === "string") return body.message;
     if (body.error === "ai_busy") return "AI is busy. Try again in a few minutes.";
     if (body.error === "slow_down") return "That is a lot of questions for one hour. Try again a bit later.";
-    if (body.error === "ai_off_for_assignments") return AI_OFF_LINE;
+    if (body.error === "ai_off_for_assignments") return AI_CHAT_OFF_LINE;
     if (body.error === "not_signed_in") return "You are signed out. Open Ready again, then ask.";
     return "Something went wrong, so nothing was sent. Try again.";
   }

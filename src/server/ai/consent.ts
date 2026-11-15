@@ -26,7 +26,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { assignmentHelp, studyAllowed } from "@/lib/ai-policy";
+import { assignmentHelp, studyAllowed, type AiStudy } from "@/lib/ai-policy";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { users } from "@/server/db/schema/users";
@@ -53,9 +53,22 @@ async function rulesFor(userId: string, courseId: string, database: Db) {
 
 /** True when this course's study material (file text) may be sent to an AI model for this user. */
 export async function mayUseFiles(userId: string, courseId: string, database: Db = defaultDb): Promise<boolean> {
+  const why = await studyFilesRule(userId, courseId, database);
+  return why !== null && studyAllowed({ aiStudy: why.study }) && why.switchOn;
+}
+
+/**
+ * The two parts of `mayUseFiles`, so a sentence can say which one said no: the course's study
+ * rule as stored, and her switch. Null when the course is not hers.
+ */
+export async function studyFilesRule(
+  userId: string,
+  courseId: string,
+  database: Db = defaultDb,
+): Promise<{ study: AiStudy; switchOn: boolean } | null> {
   const row = await rulesFor(userId, courseId, database);
-  if (!row) return false;
-  return studyAllowed(row) && filesSwitchOn(row.settings);
+  if (!row) return null;
+  return { study: row.aiStudy, switchOn: filesSwitchOn(row.settings) };
 }
 
 /** True when the assignment chat of this course may read her file text. */

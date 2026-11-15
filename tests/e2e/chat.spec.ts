@@ -28,6 +28,7 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { connectFakeAi, toolCallBody, type FakeAiClient } from "../fake-ai/server";
 
 const OFF_LINE = "This course does not allow AI help on assignments. Hand-in works as usual.";
+const UNKNOWN_LINE = "We don't know this course's rule on AI help yet. Hand-in works as usual.";
 const EXPLAIN_LINE = "Explain-only: this course does not allow AI-written homework.";
 const BUSY_LINE = "AI is busy. Try again in a few minutes.";
 
@@ -107,8 +108,15 @@ async function openDemoAssignment(page: Page) {
   const hero = page.getByRole("region", { name: "DO FIRST" }).getByRole("article", { name: "Assignment 3" });
   await hero.getByRole("link", { name: "Start" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Assignment 3" })).toBeVisible();
-  // Not answered yet counts as off: the question, and no chat.
+  // Not answered yet counts as off: the question, and no chat. The line says the rule is not
+  // known; it never says the course does not allow AI help.
   await expect(page.getByTestId("ai-policy").getByText(/allow AI help on homework\?/)).toBeVisible();
+  await expect(page.getByTestId("ai-policy").getByText(/Check the syllabus\./)).toBeVisible();
+  for (const label of ["Yes", "Only to explain", "No", "Not sure"]) {
+    await expect(page.getByTestId("ai-policy").getByRole("button", { name: label, exact: true })).toBeVisible();
+  }
+  await expect(page.getByTestId("ai-policy-unknown")).toHaveText(UNKNOWN_LINE);
+  await expect(page.getByText(OFF_LINE)).toHaveCount(0);
   await expect(page.getByRole("log", { name: "Conversation" })).toHaveCount(0);
 }
 
@@ -180,6 +188,7 @@ test('"No" turns assignment help off: no chat, only the line and the hand-in', a
   const policy = page.getByTestId("ai-policy");
   await expect(policy.getByRole("button", { name: "Change answer" })).toBeVisible();
   await expect(page.getByTestId("ai-policy-off")).toContainText(OFF_LINE);
+  await expect(page.getByTestId("ai-policy-unknown")).toHaveCount(0);
   await expect(policy.getByText(/allow AI help on homework\?/)).toHaveCount(0);
 
   // No chat at all: no conversation, no message box, no suggestion.

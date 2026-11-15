@@ -16,11 +16,14 @@
  * database and the card is hidden for the rest of this view only; it asks
  * again on her next visit. That is on purpose: unknown is the safe state.
  *
- * What shows under the card:
- *   "off" / "unknown"  the page shows no chat (`chatHidden`), only AI_OFF_LINE
- *                      and the link to change the answer.
- *   "explain"          the chat is there, with EXPLAIN_ONLY_LINE and the link.
- *   "allowed"          nothing.
+ * What shows under the card (`policyLine`):
+ *   "unknown"   the page shows no chat (`chatHidden`), only AI_UNKNOWN_LINE: we do
+ *               not know the rule, so it never says the course forbids AI. The
+ *               question card sits above it until she answers.
+ *   "off"       no chat, AI_OFF_LINE (only an answered "No" says the course does
+ *               not allow AI help) and the link to change the answer.
+ *   "explain"   the chat is there, with EXPLAIN_ONLY_LINE and the link.
+ *   "allowed"   nothing.
  *
  * Study material (cards and lecture pages from the course's slides) is a
  * separate rule, `ai_study`. It is not asked here; it is set where cards and
@@ -38,9 +41,24 @@ import type { AiPolicy, PolicyResult } from "@/app/(app)/assignments/[id]/policy
 export type { AiPolicy };
 export type PolicyAnswer = "yes" | "explain" | "no" | "not_sure";
 
-/** Shown instead of the chat when AI help on assignments is off or not answered. */
+/** Shown instead of the chat when she answered "No" (`ai_assignments` is "off"). */
 export const AI_OFF_LINE = "This course does not allow AI help on assignments. Hand-in works as usual.";
+/** Shown instead of the chat while she has not said ("unknown"). Never claims the course forbids AI. */
+export const AI_UNKNOWN_LINE = "We don't know this course's rule on AI help yet. Hand-in works as usual.";
 export const EXPLAIN_ONLY_LINE = "Explain-only: this course does not allow AI-written homework.";
+/**
+ * The chat endpoint's 403 (`ai_off_for_assignments`) covers both "off" and "unknown", so its
+ * sentence says only what is true in both: the chat is off here.
+ */
+export const AI_CHAT_OFF_LINE = "AI help is off for this course's assignments. Hand-in works as usual.";
+
+/** The line under the card for each state; null where AI help is fully allowed. */
+export function policyLine(policy: AiPolicy): string | null {
+  if (policy === "off") return AI_OFF_LINE;
+  if (isExplainOnly(policy)) return EXPLAIN_ONLY_LINE;
+  if (chatHidden(policy)) return AI_UNKNOWN_LINE;
+  return null;
+}
 
 /** What each button stores in `courses.ai_assignments`. */
 export const ANSWER_POLICY: Record<PolicyAnswer, AiPolicy> = {
@@ -97,7 +115,7 @@ export function AiPolicyCard({ courseName, policy: initial, setPolicy, className
 
   const asking = editing || (policy === "unknown" && !answered);
   // The line under the card: none where AI help is fully allowed.
-  const line = chatHidden(policy) ? AI_OFF_LINE : isExplainOnly(policy) ? EXPLAIN_ONLY_LINE : null;
+  const line = policyLine(policy);
 
   async function answer(choice: PolicyAnswer) {
     if (pending) return;
@@ -156,7 +174,9 @@ export function AiPolicyCard({ courseName, policy: initial, setPolicy, className
       {line && (
         <p
           className="text-[14px] leading-[1.45] text-ink-2"
-          data-testid={line === AI_OFF_LINE ? "ai-policy-off" : "ai-policy-explain-only"}
+          data-testid={
+            line === AI_OFF_LINE ? "ai-policy-off" : line === EXPLAIN_ONLY_LINE ? "ai-policy-explain-only" : "ai-policy-unknown"
+          }
         >
           {line}
           {!asking && (

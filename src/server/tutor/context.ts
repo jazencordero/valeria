@@ -26,10 +26,12 @@
  * Hard rules, in code and not only in the prompt:
  * - Course text (lecture text, card text) is put in only when `mayUseFiles(userId, courseId)`
  *   (her switch AND the course's study rule `allowed`, M2-26/M2-27). Otherwise the prompt says
- *   she has no material here and to say so once.
+ *   she has no material here, and why (`noMaterialReason`: the study rule not answered yet, the
+ *   course says no, or her switch is off), and to say so once.
  * - A course whose assignment help is `off` (or not answered yet, which counts as off) puts no
  *   assignment row of it in the context, and the prompt names the course and says not to
- *   discuss its assignments at all.
+ *   discuss its assignments at all. Only an answered "No" is described as not allowing AI help;
+ *   a course not answered yet is described as "rule not known yet" (same behaviour).
  * - Everything that came from her school (names, titles, text) is wrapped with `asData`, and
  *   `DATA_RULE` is in the prompt.
  * - It never writes assignment answers or hand-in text (rule), and it can change nothing.
@@ -55,13 +57,13 @@
  */
 import { and, asc, eq, gte, inArray, isNull, lte, not } from "drizzle-orm";
 import { z } from "zod";
-import { assignmentHelp, type AiAssignments, type AiStudy } from "@/lib/ai-policy";
+import { assignmentHelp, studyAllowed, type AiAssignments, type AiStudy } from "@/lib/ai-policy";
 // dateLine, not listDate: the tutor is told the month too ("MON 23 NOV · 09:00"), it has no calendar.
 import { dateLine } from "@/lib/dates";
 import { conceptMastery } from "@/lib/study/ladder";
 import { newCard } from "@/lib/study/memory";
 import { asData, DATA_RULE } from "@/server/ai/as-data";
-import { mayUseFiles } from "@/server/ai/consent";
+import { studyFilesRule } from "@/server/ai/consent";
 import { sectionsOf } from "@/server/data/lecture";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
@@ -159,9 +161,31 @@ const RULES = [
   "- You cannot change anything in her account, her courses or her school's course platform, and you cannot see her screen beyond what is written below.",
 ].join("\n");
 
-const NO_MATERIAL_FIRST =
-  "You do not have her course material here: either the course does not allow AI for studying, or her switch for course files is off. " +
-  "Answer from general knowledge, and say once, at the start of this answer, that you are not using her course material.";
+/** The course's study rule and her switch, when they are why course text is missing. */
+export type NoMaterialWhy = { study: AiStudy; switchOn: boolean };
+
+/**
+ * Why her course text is not in the prompt, as a clause about her ("she has not said yet ..."),
+ * true for each case. Null when the course text is not missing because of a rule.
+ */
+export function noMaterialReason(why: NoMaterialWhy | null): string | null {
+  if (!why) return null;
+  const course =
+    why.study === "unknown"
+      ? "she has not said yet whether this course allows AI for studying"
+      : why.study === "not_allowed"
+        ? "this course does not allow AI for studying"
+        : null;
+  if (course) return why.switchOn ? course : `${course}, and her switch for course files is off`;
+  return why.switchOn ? null : "her switch for course files is off";
+}
+
+function noMaterialFirst(reason: string | null): string {
+  return (
+    `You do not have her course material here${reason ? `: ${reason}` : ""}. ` +
+    "Answer from general knowledge, and say once, at the start of this answer, that you are not using her course material."
+  );
+}
 const NO_MATERIAL_AGAIN =
   "You do not have her course material here. You already told her so; do not say it again. Answer from general knowledge.";
 
@@ -176,11 +200,21 @@ const PASSAGE_RULE = [
 const HER_WORDS_RULE =
   "She quoted the text above. It is not from her course material as far as Ready can tell, so treat it as her own words: explain it, but do not call it her course material.";
 
+/** Courses where she answered "No" to AI help on assignments (`ai_assignments` 'off'). */
 function offCoursesRule(names: string[]): string {
   return [
     "These courses do not allow AI help on their assignments. Do not discuss their assignments at all, not even to explain what one asks or to give hints for it. " +
       "If she asks about one, say that the course does not allow AI help on its assignments and that her teacher is the one to ask. You may still explain the course's topics for her exams.",
     asData("Courses with no AI help on assignments", names.join("\n")),
+  ].join("\n");
+}
+
+/** Courses where she has not said yet (`ai_assignments` 'unknown'): the same hold, a true reason. */
+function unknownCoursesRule(names: string[]): string {
+  return [
+    "For these courses the rule on AI help for assignments is not known yet: she has not said whether the course allows it. Until she does, do not discuss their assignments at all, not even to explain what one asks or to give hints for it. " +
+      "If she asks about one, say that Ready does not know yet whether the course allows AI help on its assignments, and that she can answer that on the assignment's page after checking the syllabus. Do not say the course forbids it. You may still explain the course's topics for her exams.",
+    asData("Courses whose rule on AI help for assignments is not known yet", names.join("\n")),
   ].join("\n");
 }
 
@@ -429,7 +463,10 @@ async function assignmentPlace(userId: string, assignmentId: string, byId: Map<s
       courseId: course.id,
       where: `She is on an assignment page of the course "${course.name}".`,
       material: null,
-      note: "This course does not allow AI help on its assignments, so you have nothing about this assignment and must not discuss it.",
+      note:
+        course.aiAssignments === "off"
+          ? "This course does not allow AI help on its assignments, so you have nothing about this assignment and must not discuss it."
+          : "This course's rule on AI help for assignments is not known yet (she has not said), so you have nothing about this assignment and must not discuss it until she answers that on the page.",
       anchor: GENERAL,
     };
   }
@@ -514,12 +551,18 @@ async function coursesOf(userId: string, database: Db): Promise<CourseRow[]> {
 async function checkedPlace(userId: string, where: TutorWhere, database: Db, now: Date, quote: string | null = null) {
   const list = await coursesOf(userId, database);
   const place = await placeOf(userId, where, list, database, now, quote);
-  const allowed = place.courseId ? await mayUseFiles(userId, place.courseId, database) : false;
+  const rule = place.courseId ? await studyFilesRule(userId, place.courseId, database) : null;
+  // The same answer as mayUseFiles, from the same read.
+  const allowed = rule !== null && studyAllowed({ aiStudy: rule.study }) && rule.switchOn;
   const material = allowed ? place.material : null;
   const passage = allowed && material ? (place.passage ?? null) : null;
   const conceptNames = allowed && material ? (place.concepts ?? []) : [];
-  const off = list.filter((c) => assignmentHelp(c) === "off").map((c) => c.name);
-  return { place, material, passage, conceptNames, off, hasCourse: place.courseId !== null };
+  // Both hold the same (no assignment of theirs is discussed); only the words differ.
+  const off = list.filter((c) => assignmentHelp(c) === "off" && c.aiAssignments === "off").map((c) => c.name);
+  const unknown = list.filter((c) => assignmentHelp(c) === "off" && c.aiAssignments !== "off").map((c) => c.name);
+  // Why the course text is missing, when a rule (not an empty place) is the reason.
+  const why: NoMaterialWhy | null = rule && !allowed ? rule : null;
+  return { place, material, passage, conceptNames, off, unknown, why, hasCourse: place.courseId !== null };
 }
 
 /** The chat a place belongs to when there is no note (only ids that are hers count). */
@@ -568,7 +611,7 @@ export async function buildTutorContext(
 ): Promise<TutorContext> {
   const now = options.now ?? new Date();
   const quote = options.quote?.trim() ? options.quote.trim() : null;
-  const { place, material, passage, conceptNames, off } = await checkedPlace(userId, where, database, now, quote);
+  const { place, material, passage, conceptNames, off, unknown, why } = await checkedPlace(userId, where, database, now, quote);
   // A passage that is not her lecture's text is her own words; one that is, but may not be
   // sent (study not allowed), is course text and stays out.
   const isCourse = place.passage != null;
@@ -576,6 +619,7 @@ export async function buildTutorContext(
 
   const parts: SystemPart[] = [{ text: [RULES, DATA_RULE].join("\n\n") }];
   if (off.length) parts.push({ text: offCoursesRule(off) });
+  if (unknown.length) parts.push({ text: unknownCoursesRule(unknown) });
   if (material) {
     // The passage first, then the section it sits in, then the lecture's concepts.
     const blocks: string[] = [];
@@ -589,7 +633,7 @@ export async function buildTutorContext(
   if (place.note) volatile.push(place.note);
   if (passage) volatile.push(PASSAGE_RULE);
   if (herWords) volatile.push(`${asData("Text she quoted", herWords)}\n${HER_WORDS_RULE}`);
-  if (!material) volatile.push(options.firstAnswer === false ? NO_MATERIAL_AGAIN : NO_MATERIAL_FIRST);
+  if (!material) volatile.push(options.firstAnswer === false ? NO_MATERIAL_AGAIN : noMaterialFirst(noMaterialReason(why)));
   parts.push({ text: volatile.join("\n\n") });
 
   return {
@@ -613,8 +657,17 @@ export type CopyPrompt = {
   note: string | null;
 };
 
-export const COPY_NO_COURSE_TEXT =
-  "Copied without course text: this course does not allow AI for studying, or your switch for course files is off.";
+/** The note under "Copy for Claude" when course text was left out, true for each reason. */
+export function copyNoCourseText(why: NoMaterialWhy): string {
+  const course =
+    why.study === "unknown"
+      ? "you have not said yet whether this course allows AI for studying."
+      : why.study === "not_allowed"
+        ? "this course does not allow AI for studying."
+        : null;
+  if (course) return `Copied without course text: ${course}${why.switchOn ? "" : " Your switch for course files is off too."}`;
+  return "Copied without course text: your switch for course files is off.";
+}
 
 const COPY_HEAD = [
   "Be my tutor. I'm a university student preparing for an exam.",
@@ -637,12 +690,12 @@ export async function buildCopyPrompt(
   database: Db = defaultDb,
 ): Promise<CopyPrompt> {
   const now = options.now ?? new Date();
-  const { place, material, hasCourse } = await checkedPlace(userId, where, database, now);
+  const { place, material, hasCourse, why } = await checkedPlace(userId, where, database, now);
   const q = question.trim();
   const lines = [COPY_HEAD, "", `My question: ${q || "(I will ask in my next message.)"}`];
   if (material) {
     lines.push("", `Here is the part of my course material I'm on (${material.label}):`, "---", material.text, "---");
   }
-  const lostText = hasCourse && !material && place.material !== null;
-  return { text: lines.join("\n"), courseText: material !== null, note: lostText ? COPY_NO_COURSE_TEXT : null };
+  const lostText = hasCourse && !material && place.material !== null && why !== null;
+  return { text: lines.join("\n"), courseText: material !== null, note: lostText ? copyNoCourseText(why) : null };
 }

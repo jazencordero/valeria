@@ -37,6 +37,10 @@ import { tutorMessages } from "@/server/db/schema/learn";
  * - claude-fable-5-2 (the large Claude, "Deep" and "Go deeper"): $8 in / $40 out, cache reads
  *   $0.20, 5-minute cache writes 1.25x ($10). A server-side refusal fallback answers in the
  *   same call and is counted here at these (higher) rates.
+ * Confirmed on https://platform.claude.com/docs/en/about-claude/pricing on 2026-11-15, all
+ * matching the constants below: Haiku 5.5 (prompts up to 100K tokens) $0.10 in / $0.50 out,
+ * 5-minute cache write $0.125, cache read $0.01; Sonnet 5.5 $2 / $10, $2.50, $0.10; Fable 5.2
+ * $8 / $40, $10, $0.20.
  * Re-check all three before relying on the euro line; a price change is a one-line edit here.
  *
  * Answer caps (output tokens, thinking included where the model thinks): Quick 500, Balanced

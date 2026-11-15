@@ -12,7 +12,7 @@ import { createTestDb, type TestDb } from "@/server/db/test-db";
 import {
   buildCopyPrompt,
   buildTutorContext,
-  COPY_NO_COURSE_TEXT,
+  copyNoCourseText,
   findPassage,
   tutorAnchor,
   SECTION_MAX_CHARS,
@@ -193,10 +193,79 @@ describe("buildTutorContext", () => {
         const text = all(ctx.parts);
         expect(text).not.toContain("ASSIGNMENT-NAME");
         expect(text).not.toContain("BRIEF-TEXT");
-        expect(text).toContain("Do not discuss their assignments at all");
-        expect(text).toContain(`<<<COURSE MATERIAL: Courses with no AI help on assignments>>>\nLaw ${help}`);
+        expect(text).toMatch(/do not discuss their assignments at all/i);
       }
     }
+  });
+
+  it("only an answered No is described as not allowing AI help; not answered yet is 'rule not known yet'", async () => {
+    const off = await student({ help: "off", name: "Law off" });
+    for (const where of [{ kind: "assignment", assignmentId: off.assignment.id }, { kind: "other" }] as TutorWhere[]) {
+      const text = all((await buildTutorContext(off.user.id, where, { now: NOW }, t.db)).parts);
+      expect(text).toContain("These courses do not allow AI help on their assignments. Do not discuss their assignments at all");
+      expect(text).toContain("<<<COURSE MATERIAL: Courses with no AI help on assignments>>>\nLaw off");
+      expect(text).not.toContain("not known yet");
+      if (where.kind === "assignment") {
+        expect(text).toContain(
+          "This course does not allow AI help on its assignments, so you have nothing about this assignment and must not discuss it.",
+        );
+      }
+    }
+
+    const unknown = await student({ help: "unknown", name: "Law unknown" });
+    for (const where of [{ kind: "assignment", assignmentId: unknown.assignment.id }, { kind: "other" }] as TutorWhere[]) {
+      const text = all((await buildTutorContext(unknown.user.id, where, { now: NOW }, t.db)).parts);
+      expect(text).toContain(
+        "For these courses the rule on AI help for assignments is not known yet: she has not said whether the course allows it. Until she does, do not discuss their assignments at all",
+      );
+      expect(text).toContain("<<<COURSE MATERIAL: Courses whose rule on AI help for assignments is not known yet>>>\nLaw unknown");
+      expect(text).not.toContain("Courses with no AI help on assignments");
+      expect(text).not.toContain("do not allow AI help");
+      expect(text).not.toContain("does not allow AI help");
+      if (where.kind === "assignment") {
+        expect(text).toContain(
+          "This course's rule on AI help for assignments is not known yet (she has not said), so you have nothing about this assignment and must not discuss it until she answers that on the page.",
+        );
+      }
+    }
+
+    for (const help of ["explain", "allowed"] as const) {
+      const s = await student({ help, name: `Law ${help}` });
+      const text = all((await buildTutorContext(s.user.id, { kind: "other" }, { now: NOW }, t.db)).parts);
+      expect(text).not.toContain("do not allow AI help");
+      expect(text).not.toContain("not known yet");
+    }
+  });
+
+  it("the no-material line gives the true reason: not answered, not allowed, or her switch", async () => {
+    const lectureOf = (s: { course: { id: string } }): TutorWhere => ({ kind: "lecture", courseId: s.course.id, n: 3, section: 0 });
+    const cases = [
+      { study: "unknown", switchOn: true, line: "You do not have her course material here: she has not said yet whether this course allows AI for studying." },
+      { study: "not_allowed", switchOn: true, line: "You do not have her course material here: this course does not allow AI for studying." },
+      { study: "allowed", switchOn: false, line: "You do not have her course material here: her switch for course files is off." },
+      {
+        study: "unknown",
+        switchOn: false,
+        line: "You do not have her course material here: she has not said yet whether this course allows AI for studying, and her switch for course files is off.",
+      },
+    ] as const;
+    for (const c of cases) {
+      const s = await student({ study: c.study });
+      if (!c.switchOn) await t.db.update(users).set({ settings: { ai: { useFiles: false } } }).where(eq(users.id, s.user.id));
+      const text = all((await buildTutorContext(s.user.id, lectureOf(s), { now: NOW }, t.db)).parts);
+      expect(text).toContain(c.line);
+      expect(text).not.toContain("SECTION-ONE-TEXT");
+      expect(text).not.toContain("either the course");
+      if (c.study !== "not_allowed") expect(text).not.toContain("does not allow AI for studying");
+    }
+    // Allowed and her switch on: course text, no such line.
+    const open = await student({ study: "allowed" });
+    const text = all((await buildTutorContext(open.user.id, lectureOf(open), { now: NOW }, t.db)).parts);
+    expect(text).toContain("SECTION-ONE-TEXT");
+    expect(text).not.toContain("You do not have her course material here");
+    // No course in view (Home): no reason is made up.
+    const home = all((await buildTutorContext(open.user.id, { kind: "other" }, { now: NOW }, t.db)).parts);
+    expect(home).toContain("You do not have her course material here. Answer from general knowledge");
   });
 
   it("an assignment of a course that explains: its name and due time, never the brief", async () => {
@@ -267,9 +336,33 @@ describe("buildCopyPrompt", () => {
     const s = await student({ study: "not_allowed" });
     const copy = await buildCopyPrompt(s.user.id, { kind: "lecture", courseId: s.course.id, n: 3, section: 0 }, "", { now: NOW }, t.db);
     expect(copy.courseText).toBe(false);
-    expect(copy.note).toBe(COPY_NO_COURSE_TEXT);
+    expect(copy.note).toBe(copyNoCourseText({ study: "not_allowed", switchOn: true }));
     expect(copy.text).not.toContain("SECTION-ONE-TEXT");
     expect(copy.text).toContain("My question: (I will ask in my next message.)");
+  });
+
+  it("the copy note is true for each reason, and says 'does not allow' only for a course that said no", async () => {
+    const cases = [
+      { study: "unknown", switchOn: true, note: "Copied without course text: you have not said yet whether this course allows AI for studying." },
+      { study: "not_allowed", switchOn: true, note: "Copied without course text: this course does not allow AI for studying." },
+      { study: "allowed", switchOn: false, note: "Copied without course text: your switch for course files is off." },
+      {
+        study: "not_allowed",
+        switchOn: false,
+        note: "Copied without course text: this course does not allow AI for studying. Your switch for course files is off too.",
+      },
+    ] as const;
+    for (const c of cases) {
+      const s = await student({ study: c.study });
+      if (!c.switchOn) await t.db.update(users).set({ settings: { ai: { useFiles: false } } }).where(eq(users.id, s.user.id));
+      const copy = await buildCopyPrompt(s.user.id, { kind: "lecture", courseId: s.course.id, n: 3, section: 0 }, "", { now: NOW }, t.db);
+      expect(copy.courseText).toBe(false);
+      expect(copy.note).toBe(c.note);
+      if (c.study !== "not_allowed") expect(copy.note).not.toContain("does not allow");
+    }
+    const open = await student({ study: "allowed" });
+    const copy = await buildCopyPrompt(open.user.id, { kind: "lecture", courseId: open.course.id, n: 3, section: 0 }, "", { now: NOW }, t.db);
+    expect(copy.note).toBeNull();
   });
 
   it("a card only after she answered it; never assignment text", async () => {

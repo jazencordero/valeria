@@ -207,7 +207,7 @@ describe("POST /api/ai/explain-check", () => {
     expect(ai.calls).toHaveLength(0);
   });
 
-  it("uses only the keyword check, flagged fallback, when the course does not allow AI study", async () => {
+  it("uses only the keyword check, flagged fallback, when AI study is not allowed or not answered yet", async () => {
     for (const aiStudy of ["not_allowed", "unknown"] as const) {
       const s = await student(aiStudy);
       const res = await POST(post({ cardId: s.card.id, text: "a core advantage" }, s.cookie));

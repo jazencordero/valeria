@@ -294,7 +294,9 @@ describe("buildContext, assignment help 'explain'", () => {
     expect(ctx.system).not.toContain("osmosis in plant cells");
     expect(ctx.system).not.toContain("Grading: structure counts");
     expect(ctx.system).not.toContain(f.id);
-    expect(ctx.system).toContain("this course has not allowed AI help");
+    expect(ctx.system).toContain(
+      "You have not been given the course material (the brief and the files), because this course allows AI help on its assignments only to explain.",
+    );
     expect(ctx.system).toContain("Do not guess what the brief or any file says");
     expect(ctx.system).toContain("give feedback on text she writes or pastes herself");
     expect(ctx.system).toContain("Do not write hand-in text");
@@ -302,6 +304,17 @@ describe("buildContext, assignment help 'explain'", () => {
     expect(ctx.system).not.toContain("search_material");
     expect(ctx.system).not.toContain("write_draft");
     expect(ctx.system.length).toBeLessThanOrEqual(SYSTEM_BUDGET_CHARS);
+  });
+
+  it("says why the material is withheld truthfully, whatever the study rule: never 'does not allow' or 'has not allowed'", async () => {
+    for (const aiStudy of ["unknown", "not_allowed", "allowed"] as const) {
+      const { user, assignment } = await seed("explain", `Student ${aiStudy}`, aiStudy);
+      const ctx = await buildContext(user.id, assignment.id, opts());
+      expect(ctx.system).toContain("because this course allows AI help on its assignments only to explain.");
+      expect(ctx.system).toContain("This course allows AI help only to explain, not with the work itself.");
+      expect(ctx.system).not.toContain("has not allowed");
+      expect(ctx.system).not.toContain("does not allow AI");
+    }
   });
 
   it("write_draft is not offered and an old draft is not sent", async () => {
