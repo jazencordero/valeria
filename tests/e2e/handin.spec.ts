@@ -62,6 +62,8 @@ test("hand in Assignment 3 from the demo and see it done", async ({ page }) => {
 
 test("a bad key on /connect shows the error sentence", async ({ page }) => {
   await page.goto("/connect");
+  // M5-08: the key field is one step in, under "Paste a key instead".
+  await page.getByRole("button", { name: "Paste a key instead" }).click();
   await page.getByLabel("Your key").fill("not-a-real-key");
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Connect", exact: true }).click();
