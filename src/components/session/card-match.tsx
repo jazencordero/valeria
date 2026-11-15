@@ -15,7 +15,8 @@
  * Tab to and press Enter on) a term, then its meaning. A right pair turns mint,
  * bumps and is disabled; focus moves to the next open term. A wrong pair gets a
  * due border on blush, shakes, and clears after 420 ms; it counts a slip.
- * Tapping a meaning with no term picked wiggles it. When every pair is done,
+ * Tapping a meaning with no term picked wiggles it. When every pair is done, the meanings
+ * line up beside their terms (term order), so the finished card reads as true pairs, and
  * `onResult` is called once: grade 3 with no slips, else grade 2, and the
  * parent shows the feedback strip with `matchSub(slips)`.
  *
@@ -256,7 +257,8 @@ export function CardMatch({
           })}
         </div>
         <div className="grid content-start gap-2" data-testid="match-meanings">
-          {order.map((k, i) => {
+          {/* Finished: each meaning moves beside its term, so every green row is a true pair. */}
+          {(done ? card.pairs.map((_, k) => k) : order).map((k, i) => {
             const state = matched.has(k) ? "ok" : wrong?.r === k ? "bad" : undefined;
             return (
               <motion.button

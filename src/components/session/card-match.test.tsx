@@ -195,3 +195,18 @@ describe("CardMatch", () => {
     expect(onResult).not.toHaveBeenCalled();
   });
 });
+
+describe("CardMatch, finished", () => {
+  it("shows each meaning beside its term, in the term order, so every green row is a true pair", () => {
+    render(<CardMatch card={CARD} initialMatched={[0, 1, 2]} />);
+    const meanings = [...screen.getByTestId("match-meanings").querySelectorAll("button")].map((b) => b.textContent?.replace(" (matched)", ""));
+    expect(meanings).toEqual(CARD.pairs.map(([, m]) => m));
+  });
+
+  it("keeps the card's shuffled order while she is still matching", () => {
+    render(<CardMatch card={CARD} initialMatched={[0]} />);
+    const meanings = [...screen.getByTestId("match-meanings").querySelectorAll("button")].map((b) => b.textContent?.replace(" (matched)", ""));
+    expect(meanings).toEqual(CARD.order.map((k) => CARD.pairs[k][1]));
+  });
+});
+
