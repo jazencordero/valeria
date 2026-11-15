@@ -32,7 +32,10 @@
  * empty note is never stored, and a stored note emptied before closing is
  * deleted by the same save. Closing sends what is left at once.
  *
- * Other screens can open it with a quote (M9-16) through `openNotepad`.
+ * Other screens can open it with a quote (M9-16) through `openNotepad`, or
+ * on a note she already wrote (`openNotepad({ note })`, the Notes tab, M9-14).
+ * Every stored save is announced as `NOTE_SAVED_EVENT` on window, so the
+ * Notes tab can pop a new card in and keep an edited one up to date.
  *
  * `Notepad` wires the path and the real actions; `NotepadView` takes both as
  * props so tests can drive it.
@@ -86,6 +89,21 @@ const RETRIES_AFTER_CLOSE = 6;
 const WIDE_QUERY = "(min-width: 700px)";
 const HINT_KEY = "ready-notes-hint";
 const OPEN_EVENT = "ready:notepad";
+/** Fired on window after each save that stored a note; detail is `NoteSavedDetail`. */
+export const NOTE_SAVED_EVENT = "ready:note-saved";
+
+/** A stored note to open again (M9-14). `label` is its attachment chip text. */
+export type OpenNote = {
+  id: string;
+  title: string;
+  body: string;
+  quote: string | null;
+  highlighted: boolean;
+  label: string;
+};
+
+/** `created` is true for the save that first stored the note. */
+export type NoteSavedDetail = Draft & { id: string; created: boolean };
 /** Visual viewport this much shorter than the window means the keyboard is up. */
 const KEYBOARD_PX = 150;
 
@@ -113,7 +131,9 @@ class NoteSaver {
     draft: Draft,
     private readonly save: NotepadActions["save"],
     onState: (s: SaveState) => void,
+    id: string | null = null,
   ) {
+    this.id = id;
     this.latest = draft;
     this.onState = onState;
   }
@@ -145,7 +165,12 @@ class NoteSaver {
       .then((r) => {
         this.inflight = false;
         if (r.ok) {
+          const created = this.id === null;
           this.id = r.id;
+          if (r.id !== null) {
+            const detail: NoteSavedDetail = { ...sent, id: r.id, created };
+            window.dispatchEvent(new CustomEvent(NOTE_SAVED_EVENT, { detail }));
+          }
           this.retryMs = RETRY_FIRST_MS;
           if (this.dirty) this.flush();
           else this.onState?.("saved");
@@ -180,8 +205,11 @@ class NoteSaver {
   }
 }
 
-/** Opens the notepad on a new note, from anywhere (M9-16 passes the selected text). */
-export function openNotepad(detail: { quote?: string } = {}): void {
+/**
+ * Opens the notepad on a new note, from anywhere (M9-16 passes the selected
+ * text), or on a stored note when `note` is given (M9-14).
+ */
+export function openNotepad(detail: { quote?: string; note?: OpenNote } = {}): void {
   window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail }));
 }
 
@@ -331,24 +359,32 @@ export function NotepadView({ pathname, actions }: NotepadViewProps) {
   }, [wide, path]);
 
   const startNote = useCallback(
-    (quote: string | null) => {
+    (quote: string | null, stored?: OpenNote) => {
       saver.current?.close();
       const seq = ++noteSeq.current;
-      const fresh: Draft = { ...EMPTY, quote };
+      const fresh: Draft = stored
+        ? { title: stored.title, body: stored.body, quote: stored.quote, highlighted: stored.highlighted }
+        : { ...EMPTY, quote };
       setDraft(fresh);
       setSaveState("idle");
-      setLabel(attachFromPath(path).kind === "general" ? GENERAL : null);
-      saver.current = new NoteSaver(path, fresh, actions.save, (s) => {
+      const onState = (s: SaveState) => {
         if (noteSeq.current === seq) setSaveState(s);
-      });
-      actions
-        .context(path)
-        .then((r) => {
-          if (noteSeq.current === seq) setLabel(r.ok ? r.label : GENERAL);
-        })
-        .catch(() => {
-          if (noteSeq.current === seq) setLabel(GENERAL);
-        });
+      };
+      if (stored) {
+        setLabel(stored.label);
+        saver.current = new NoteSaver(path, fresh, actions.save, onState, stored.id);
+      } else {
+        setLabel(attachFromPath(path).kind === "general" ? GENERAL : null);
+        saver.current = new NoteSaver(path, fresh, actions.save, onState);
+        actions
+          .context(path)
+          .then((r) => {
+            if (noteSeq.current === seq) setLabel(r.ok ? r.label : GENERAL);
+          })
+          .catch(() => {
+            if (noteSeq.current === seq) setLabel(GENERAL);
+          });
+      }
       if (!open) {
         opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       }
@@ -415,7 +451,12 @@ export function NotepadView({ pathname, actions }: NotepadViewProps) {
 
   useEffect(() => {
     const onOpen = (e: Event) => {
-      const quote = (e as CustomEvent<{ quote?: string }>).detail?.quote?.trim();
+      const detail = (e as CustomEvent<{ quote?: string; note?: OpenNote }>).detail;
+      if (detail?.note) {
+        startNote(null, detail.note);
+        return;
+      }
+      const quote = detail?.quote?.trim();
       startNote(quote ? quote : null);
     };
     window.addEventListener(OPEN_EVENT, onOpen);

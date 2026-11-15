@@ -15,6 +15,9 @@
  *   answer is `id: null`. When the page's thing is not hers the note is saved
  *   as general rather than lost.
  *
+ * - `removeNote(id)` (M9-14): deletes one of her notes, from the Notes tab's
+ *   card menu. A note that is not hers (or already gone) answers not_found.
+ *
  * Creating or deleting a note changes the sidebar's Notes count, so those two
  * call `refresh()` (the app layout re-reads `countNotes`). A plain edit does
  * not, so typing never re-renders the page.
@@ -34,7 +37,7 @@ import { courses } from "@/server/db/schema/courses";
 import { lectures } from "@/server/db/schema/learn";
 import { exams } from "@/server/db/schema/study";
 import { assignments } from "@/server/db/schema/work";
-import { NoteNotFound, saveNote } from "@/server/notes/store";
+import { deleteNote, NoteNotFound, saveNote } from "@/server/notes/store";
 
 export type NotepadFailure = { ok: false; reason: "invalid" | "not_found" | "signed_out" };
 
@@ -42,6 +45,8 @@ export type NotepadContextResult = { ok: true; label: string } | NotepadFailure;
 
 /** `id` is the stored note, or null when nothing is stored (empty, or emptied and deleted). */
 export type NotepadSaveResult = { ok: true; id: string | null } | NotepadFailure;
+
+export type NoteRemoveResult = { ok: true } | NotepadFailure;
 
 const Path = z.string().max(500);
 
@@ -158,4 +163,14 @@ export async function saveNotepad(input: unknown): Promise<NotepadSaveResult> {
   }
   if (saved) refresh();
   return { ok: true, id: saved?.id ?? null };
+}
+
+export async function removeNote(id: unknown): Promise<NoteRemoveResult> {
+  const parsed = z.uuid().safeParse(id);
+  if (!parsed.success) return { ok: false, reason: "invalid" };
+  const userId = await userIdOrNull();
+  if (!userId) return { ok: false, reason: "signed_out" };
+  if (!(await deleteNote(userId, parsed.data))) return { ok: false, reason: "not_found" };
+  refresh();
+  return { ok: true };
 }
