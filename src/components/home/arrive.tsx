@@ -25,14 +25,21 @@
  * - 200 ms after the last part started rising the outlines fade (300 ms);
  * - the greeting types by its own rule (`Greeting`: the first time a sentence
  *   is shown in a tab), as its part rises in.
- * `arrive` is taken out of the address when the build starts, so a reload
- * shows Home at rest.
+ * `arrive` is taken out of the address when this component is live, so a
+ * reload shows Home at rest.
  *
- * The rise is plain CSS, so the page does not flash before the script runs:
- * the server sends the parts held back (`data-arrive="wait"`), and the build
- * starts when this component is live in the browser. Without script the
- * parts simply appear when the hold runs out (3 s). No extra elements in the
- * flow, so nothing shifts.
+ * The content never waits for the script (M8-70). The rise is plain CSS and
+ * the server sends it already playing (`data-arrive="play"`): the parts
+ * start rising 80 ms after the page is first styled, with or without script.
+ * What the script does depends on when it is live:
+ * - nothing is showing yet (a normal phone or laptop): it starts the build
+ *   above from the top (`data-arrive="build"`), outlines first;
+ * - some parts are showing: it joins the rise that is playing. Outlines are
+ *   sketched, and the rings and numbers of the parts still to come draw and
+ *   count; what she can already see is left alone (no number drops to 0);
+ * - every part is showing (a slow phone): it adds nothing
+ *   (`data-arrive="late"`).
+ * No extra elements in the flow, so nothing shifts.
  *
  * Reduced motion: one 150 ms fade of the whole page, nothing else. The test
  * switch (?fast=1 or READY_FAST): nothing at all.
@@ -60,34 +67,84 @@ export const RISE_MAX_STEPS = 8;
 /** Rings draw and numbers count from here, for this long. */
 export const COUNT_START_MS = 120 + 4 * RISE_STEP_MS;
 export const COUNT_MS = 600;
-/** Without script, held-back parts appear after this long. */
-export const HOLD_MS = 3000;
+/** The rise the server sends starts this soon: it does not wait for the outlines, which need the script. */
+export const EARLY_START_MS = 80;
 
 const EASE_OUT = `cubic-bezier(${ease.out.join(",")})`;
 const PARTS = "[data-arrive-part]";
 const GUIDED = '[data-arrive-part]:not([data-arrive-part="bare"])';
 const REDUCE = "(prefers-reduced-motion: reduce)";
 
-const ARRIVE_CSS = `@keyframes arrive-hold{0%,90%{opacity:0}100%{opacity:1}}
-@keyframes arrive-rise{from{opacity:0;transform:translateY(6px)}}
+const delay = (start: number) => `calc(${start}ms + min(var(--arrive-i,0),${RISE_MAX_STEPS}) * ${RISE_STEP_MS}ms)`;
+
+const rise = (name: string, start: number) =>
+  `animation:${name} ${RISE_MS}ms ${EASE_OUT} backwards,arrive-show 1ms linear backwards;animation-delay:${delay(start)}`;
+
+// Two names for the same rise: changing the name is what starts it again
+// ("build"); "late" keeps the name, so the rise that is playing goes on.
+//
+// `arrive-show` makes the browser paint a part again on the first frame of
+// its rise. The rise itself runs off the main thread, and without this
+// Chrome only notices the part has appeared when the rise ends (which is the
+// time it would report as largest contentful paint, 260 ms late).
+const ARRIVE_CSS = `@keyframes arrive-rise{from{opacity:0;transform:translateY(6px)}}
+@keyframes arrive-build{from{opacity:0;transform:translateY(6px)}}
+@keyframes arrive-show{from{visibility:hidden}}
 @keyframes arrive-fade{from{opacity:0}}
-[data-arrive="wait"] ${PARTS}{animation:arrive-hold ${HOLD_MS}ms linear backwards}
-[data-arrive="play"] ${PARTS}{animation:arrive-rise ${RISE_MS}ms ${EASE_OUT} backwards;animation-delay:calc(${RISE_START_MS}ms + min(var(--arrive-i,0),${RISE_MAX_STEPS}) * ${RISE_STEP_MS}ms)}
+[data-arrive="play"] ${PARTS},[data-arrive="late"] ${PARTS}{${rise("arrive-rise", EARLY_START_MS)}}
+[data-arrive="build"] ${PARTS}{${rise("arrive-build", RISE_START_MS)}}
+[data-arrive="late"] [data-guides]{display:none}
 @media ${REDUCE}{
 [data-arrive] ${PARTS}{animation:none}
-[data-arrive="wait"]{animation:arrive-fade ${calmDurationMs}ms linear backwards}
+[data-arrive]{animation:arrive-fade ${calmDurationMs}ms linear backwards}
 }
 :root[data-fast] [data-arrive],:root[data-fast] [data-arrive] ${PARTS}{animation:none!important}`;
 
+/**
+ * The times below are counted from the start of the rise's own clock. `start`
+ * is when the first part starts rising: `RISE_START_MS` in the full build,
+ * `EARLY_START_MS` when the script joins the rise the server started.
+ */
+
+/** When the last of this many parts has risen. */
+export function riseEndsAt(parts: number, start = RISE_START_MS): number {
+  return start + Math.min(Math.max(parts - 1, 0), RISE_MAX_STEPS) * RISE_STEP_MS + RISE_MS;
+}
+
 /** When the outlines start to fade, for this many parts. */
-export function guidesFadeAt(parts: number): number {
-  return RISE_START_MS + Math.min(parts, RISE_MAX_STEPS) * RISE_STEP_MS + 200;
+export function guidesFadeAt(parts: number, start = RISE_START_MS): number {
+  return start + Math.min(parts, RISE_MAX_STEPS) * RISE_STEP_MS + 200;
+}
+
+/** When the rings start to draw and the numbers to count. */
+export function countStartsAt(start = RISE_START_MS): number {
+  return start + COUNT_START_MS - RISE_START_MS;
 }
 
 /** When the whole build is over, for this many parts. */
-export function buildEndsAt(parts: number): number {
-  return Math.max(guidesFadeAt(parts) + GUIDE_FADE_MS, COUNT_START_MS + COUNT_MS) + 50;
+export function buildEndsAt(parts: number, start = RISE_START_MS): number {
+  return Math.max(guidesFadeAt(parts, start) + GUIDE_FADE_MS, countStartsAt(start) + COUNT_MS) + 50;
 }
+
+/**
+ * Where a part's rise stands: `at` ms on its clock, visible from `from` ms.
+ * `null` when it has finished (or never ran); `undefined` when the browser
+ * cannot say (then the script acts as if nothing is showing yet).
+ */
+type Rise = { at: number; from: number } | null | undefined;
+
+function riseOf(part: HTMLElement): Rise {
+  if (typeof part.getAnimations !== "function") return undefined;
+  for (const a of part.getAnimations()) {
+    const name = (a as Partial<CSSAnimation>).animationName;
+    if (name !== "arrive-rise" && name !== "arrive-build") continue;
+    return { at: Number(a.currentTime ?? 0), from: Number(a.effect?.getComputedTiming().delay ?? 0) };
+  }
+  return null;
+}
+
+/** Still fully invisible: its rise has not reached its first frame. */
+const waiting = (rise: Rise): boolean => rise === undefined || (rise !== null && rise.at < rise.from);
 
 /** Takes `arrive` out of the address without a navigation. */
 function dropFlag(): void {
@@ -103,12 +160,12 @@ const MINUTES = /\d+(?=[ -]?min)/i;
 /** Clock text ("15 h 41 min left", "5 h 8 min early") is not counted: it is a time, not an amount. */
 const CLOCK = /\d\s?h\b|\b(left|early|late|ago)\b/i;
 
-/** Every number that counts up: ring labels, `[data-pct]`, and minutes in running text. */
-function findCounters(root: HTMLElement): Counter[] {
+/** Every number that counts up: ring labels, `[data-pct]`, and minutes in running text. `skip`: leave these alone. */
+function findCounters(root: HTMLElement, skip: (n: Node) => boolean): Counter[] {
   const out: Counter[] = [];
   const whole = (el: Element) => {
     const node = el.firstChild;
-    if (!(node instanceof Text) || !/^\d+$/.test(node.data)) return;
+    if (!(node instanceof Text) || !/^\d+$/.test(node.data) || skip(node)) return;
     out.push({ node, rest: node.data, to: Number(node.data), show: String, last: node.data });
   };
   root.querySelectorAll('[role="img"][data-value] > b, [data-pct]').forEach(whole);
@@ -116,7 +173,7 @@ function findCounters(root: HTMLElement): Counter[] {
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const node = n as Text;
     const m = MINUTES.exec(node.data);
-    if (!m || CLOCK.test(node.parentElement?.textContent ?? node.data)) continue;
+    if (!m || skip(node) || CLOCK.test(node.parentElement?.textContent ?? node.data)) continue;
     const before = node.data.slice(0, m.index);
     const after = node.data.slice(m.index + m[0].length);
     out.push({ node, rest: node.data, to: Number(m[0]), show: (v) => `${before}${v}${after}`, last: node.data });
@@ -131,12 +188,12 @@ function write(c: Counter, text: string): void {
   c.last = text;
 }
 
-/** Redraws every ring from empty, starting at `delay`. Returns the running animations. */
-function drawRings(root: HTMLElement, delay: number): Animation[] {
+/** Redraws every ring from empty, starting at `delay`. `skip`: leave these alone. Returns the running animations. */
+function drawRings(root: HTMLElement, delay: number, skip: (n: Node) => boolean): Animation[] {
   const out: Animation[] = [];
   root.querySelectorAll<SVGCircleElement>('[role="img"][data-value] circle.stroke-accent').forEach((circle) => {
     const value = Number(circle.closest("[data-value]")?.getAttribute("data-value"));
-    if (!value || typeof circle.animate !== "function") return;
+    if (!value || typeof circle.animate !== "function" || skip(circle)) return;
     out.push(
       circle.animate([{ strokeDashoffset: value }, { strokeDashoffset: 0 }], {
         duration: COUNT_MS,
@@ -176,28 +233,37 @@ export function Arrive({ play = false, className = "", children }: ArriveProps) 
       const t = window.setTimeout(finish, calmDurationMs);
       return () => window.clearTimeout(t);
     }
-    const parts = root.querySelectorAll<HTMLElement>(PARTS);
-    const first = parts[0];
-    // Already showing (the hold ran out before the script was live): leave it.
-    // (Under React strict mode this runs twice; the second time the rise is on.)
-    const shown =
-      typeof first?.getAnimations === "function" &&
-      !first.getAnimations().some((a) => a instanceof CSSAnimation && a.animationName.startsWith("arrive-"));
-    if (shown) {
-      const t = window.setTimeout(finish, 0);
+    // The rise has been playing since the server's HTML was styled. Where is it?
+    const parts = Array.from(root.querySelectorAll<HTMLElement>(PARTS));
+    const rises = parts.map(riseOf);
+    const showing = parts.filter((_, i) => !waiting(rises[i]));
+    // React keeps rendering "play" until the build is done, so it leaves the
+    // attribute alone when it is changed here.
+    if (showing.length === parts.length) {
+      // Every part is showing or has finished: add nothing, let the rise end.
+      root.dataset.arrive = "late";
+      const at = Math.max(0, ...rises.map((r) => r?.at ?? Infinity).filter(Number.isFinite));
+      const left = rises.some((r) => r) ? riseEndsAt(parts.length, EARLY_START_MS) - at + 50 : 0;
+      const t = window.setTimeout(finish, Math.max(0, left));
       return () => window.clearTimeout(t);
     }
+    // Nothing is showing yet: start the full build from the top, outlines
+    // first. (Under React strict mode this runs twice; the second time the
+    // build's own rise is on, and still waiting.) Otherwise join the rise
+    // that is playing, `at` ms in.
+    const full = showing.length === 0;
+    const start = full ? RISE_START_MS : EARLY_START_MS;
+    const at = full ? 0 : Math.max(0, ...rises.map((r) => r?.at ?? 0));
+    if (full) root.dataset.arrive = "build";
+    const seen = (n: Node) => showing.some((p) => p.contains(n));
+    const from = (ms: number) => Math.max(0, ms - at);
 
-    // Start the rise now, in step with the outlines. React keeps rendering
-    // "wait" until the build is done, so it leaves this attribute alone.
-    root.dataset.arrive = "play";
-
-    const rings = drawRings(root, COUNT_START_MS);
-    const counters = findCounters(root);
+    const rings = drawRings(root, from(countStartsAt(start)), seen);
+    const counters = findCounters(root, seen);
     counters.forEach((c) => write(c, c.show(0)));
     const count = animate(0, 1, {
       duration: COUNT_MS / 1000,
-      delay: COUNT_START_MS / 1000,
+      delay: from(countStartsAt(start)) / 1000,
       ease: ease.out,
       onUpdate: (p) => counters.forEach((c) => write(c, c.show(Math.round(c.to * p)))),
     });
@@ -205,11 +271,14 @@ export function Arrive({ play = false, className = "", children }: ArriveProps) 
       count.stop();
       counters.forEach((c) => write(c, c.rest));
     };
-    const fading = window.setTimeout(() => setFade(true), guidesFadeAt(parts.length));
-    const end = window.setTimeout(() => {
-      settle();
-      finish();
-    }, buildEndsAt(parts.length));
+    const fading = window.setTimeout(() => setFade(true), from(guidesFadeAt(parts.length, start)));
+    const end = window.setTimeout(
+      () => {
+        settle();
+        finish();
+      },
+      from(buildEndsAt(parts.length, start)),
+    );
 
     return () => {
       window.clearTimeout(fading);
@@ -222,7 +291,7 @@ export function Arrive({ play = false, className = "", children }: ArriveProps) 
   const live = play && !done && mode !== "instant";
 
   return (
-    <div ref={ref} className={`relative ${className}`.trim()} data-arrive={live ? "wait" : undefined}>
+    <div ref={ref} className={`relative ${className}`.trim()} data-arrive={live ? "play" : undefined}>
       {live && (
         <style href="ready-arrive" precedence="default">
           {ARRIVE_CSS}
