@@ -84,11 +84,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type
 import { DoodleDefs } from "@/components/doodle";
 import { Button } from "@/components/ui/button";
 import { useInertOthers } from "@/lib/a11y/inert";
-import { daysBetween } from "@/lib/dates";
 import { biteMinutes, type CardType, type SectionKind } from "@/lib/study/bite";
 import type { McqOption, MatchPair, RubricPoint } from "@/lib/study/card-schema";
 import { aimedDue } from "@/lib/study/exam-aim";
-import { planEnd } from "@/lib/study/forecast";
 import { rungOf } from "@/lib/study/ladder";
 import { GRADES, grade as gradeMemory, newCard, type Grade, type MemoryState } from "@/lib/study/memory";
 import {
@@ -864,7 +862,6 @@ function DoneLayer({
   };
   const dayNew = !props.reviewedTodayBefore && data.stats.reviews > 0;
   const goalNew = dayNew && data.week.met && data.week.count === data.week.goal;
-  const daysLeft = Math.max(0, daysBetween(new Date(), new Date(props.examAt)));
 
   return (
     <section
@@ -890,7 +887,8 @@ function DoneLayer({
           forecastAfter={data.forecastAfterShown}
           target={props.targetPct}
           targetGrade={props.targetGrade ?? null}
-          planEnd={planEnd(data.forecastAfterShown, daysLeft)}
+          planEnd={data.planEnd}
+          planLead={data.planLead}
           examDay={props.examDay}
           concepts={names}
           week={week}

@@ -102,6 +102,24 @@ export function aimedDue(
   return clamped > t0 ? clamped : null;
 }
 
+/**
+ * The card's due date when it is due at `now` or earlier, else null: the same
+ * answer as `aimedDue(state, examAt, now) ?? state.dueAt` whenever that is at
+ * or before `now`, found with one recall prediction instead of a search. It
+ * is what "is this card due?" needs (a bite, a count, a simulation over many
+ * days).
+ */
+export function dueNow(state: MemoryState, examAt: Time, now: Time): number | null {
+  const exam = ms(examAt);
+  const t0 = ms(now);
+  if (state.dueAt <= t0) return state.dueAt;
+  if (t0 >= exam) return null;
+  const graded = state.lastReviewAt !== null && state.state !== 0;
+  if (!graded) return null;
+  // Not due by its own date: due now only if recall has already fallen to the wanted recall.
+  return recallAt(state, new Date(t0)) - wantedRecall((exam - t0) / DAY) <= 0 ? t0 : null;
+}
+
 /** A card as the final pass sees it: `dueAt` is its planned due (or null). */
 export type PlannedCard = {
   id: string;

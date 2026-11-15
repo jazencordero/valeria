@@ -2,8 +2,10 @@
 
 /**
  * Forecast chart on the exam page: 13 days of history (solid), then two
- * futures to exam day: "a bite a day" (dashed accent) and "if you stop"
- * (fainter, thinner). Grid at 0, 50, 100; the target line labelled
+ * futures to exam day: the plan (dashed accent; "a bite a day", or whatever
+ * pace the exam's plan has) and "if you stop" (fainter, thinner). The plan
+ * line is the page's projection (`plan`, one value per day from today to exam
+ * day); without one, the previews' rule of thumb (`planCurve`). Grid at 0, 50, 100; the target line labelled
  * "target 80% · a 4" (the grade only when her bundle names one); axis labels "2 WEEKS AGO", "TODAY" and the exam day; a
  * flag at the exam; a now dot with a halo; end labels on both futures.
  * No band between the futures, no legend, no hover read-out.
@@ -33,7 +35,14 @@ export type ForecastChartData = {
   targetGrade?: number | null;
   /** Exam day as the axis shows it, for example "DEC 12". */
   examDay: string;
+  /** The plan's projection, one value per day from today to exam day (`Plan.curve`). */
+  plan?: readonly number[];
+  /** The plan's end as every screen shows it (`Plan.endShown`): the end label says this number, not its own rounding. */
+  planEndShown?: number;
+  /** The plan's pace inside the spoken summary: "a bite a day" (default), "two bites a day", "the plan". */
+  planName?: string;
 };
+
 
 export type ForecastChartProps = ForecastChartData &
   Omit<HTMLAttributes<HTMLDivElement>, "children" | "role">;
@@ -48,6 +57,11 @@ const MIN_W = 260;
 const textW = (s: string, size: number, spacing = 0) => s.length * size * (0.6 + spacing);
 
 const clamp = (p: number) => Math.min(100, Math.max(0, p));
+
+/** The plan line's points: the page's projection when it fits the days left, else the rule of thumb. */
+function planPoints(data: ForecastChartData, f: number, D: number): number[] {
+  return data.plan && data.plan.length === D + 1 ? data.plan.map(clamp) : planCurve(f, D);
+}
 
 export const chartHeight = (W: number) => (W < 420 ? 176 : 196);
 
@@ -69,7 +83,7 @@ export function forecastChartLayout(data: ForecastChartData, width: number) {
   const Y = (p: number) => T + ((100 - clamp(p)) / 100) * ih;
   const pt = (x: number, y: number) => `${x.toFixed(1)} ${y.toFixed(1)}`;
 
-  const plan = planCurve(f, D);
+  const plan = planPoints(data, f, D);
   const stop = stopCurve(f, D);
   const planEndPct = plan[plan.length - 1];
   const stopEndPct = stop[stop.length - 1];
@@ -143,7 +157,7 @@ export function forecastChartLayout(data: ForecastChartData, width: number) {
     histD: "M" + hist.map((p, i) => pt(X(i - nh), Y(p))).join(" L"),
     planD: "M" + plan.map((p, i) => pt(X(i), Y(p))).join(" L"),
     stopD: "M" + stop.map((p, i) => pt(X(i), Y(p))).join(" L"),
-    planEnd: { y: Y(planEndPct), label: `${Math.round(planEndPct)}%`, labelY: lpY },
+    planEnd: { y: Y(planEndPct), label: `${data.planEndShown ?? Math.round(planEndPct)}%`, labelY: lpY },
     stopEnd: { y: Y(stopEndPct), label: `${Math.round(stopEndPct)}%`, labelY: lsY },
     axis: { y: axY, todayX, examX, showToday: showToday && D > 0, showStart },
     planEndPct,
@@ -155,11 +169,11 @@ export function forecastChartLayout(data: ForecastChartData, width: number) {
 export function forecastChartLabel(data: ForecastChartData): string {
   const f = clamp(data.forecast);
   const D = Math.max(0, Math.floor(data.daysLeft));
-  const plan = planCurve(f, D);
+  const plan = planPoints(data, f, D);
   const stop = stopCurve(f, D);
   return (
     `Forecast chart. ${Math.round(f)}% today. ` +
-    `With a bite a day, about ${Math.round(plan[plan.length - 1])}% on exam day. ` +
+    `With ${data.planName ?? "a bite a day"}, about ${data.planEndShown ?? Math.round(plan[plan.length - 1])}% on exam day. ` +
     `If you stop, about ${Math.round(stop[stop.length - 1])}%. ` +
     `Target ${Math.round(data.target)}%.`
   );

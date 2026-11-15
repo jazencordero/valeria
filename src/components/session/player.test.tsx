@@ -123,6 +123,8 @@ function doneScreen(over: Partial<DoneScreen> = {}): DoneScreen {
     sessionId: SID,
     examId: "exam-1",
     mode: "bite",
+    planEnd: 88,
+    planLead: "Keep a bite a day",
     stats: { cards: 3, reviews: 4, missed: 1, seconds: 95, best: 2, perfect: false },
     forecastBefore: 57.6,
     forecastAfter: 61.2,

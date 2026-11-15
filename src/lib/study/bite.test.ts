@@ -71,7 +71,6 @@ function expectLimits(b: Bite) {
   expect(section(b, "boss").length).toBeLessThanOrEqual(1);
   expect(all.length).toBeLessThanOrEqual(BITE_MAX);
   expect(b.minutes).toBe(Math.max(2, Math.round(all.length * 0.6)));
-  expect(b.gainEstimate).toBe(Math.max(2, Math.round(all.length * 0.85)));
 }
 
 describe("buildBite size limits", () => {

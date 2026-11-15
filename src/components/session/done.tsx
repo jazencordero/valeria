@@ -47,8 +47,10 @@ export type SessionDoneProps = {
   target: number;
   /** The grade she aims for (the exam's own grade target, never the generic scale); null: unknown. */
   targetGrade?: number | null;
-  /** Where a bite a day lands on exam day, percent. */
+  /** Where the exam's pace lands on exam day, percent. */
   planEnd: number;
+  /** The pace, as the sentence starts: "Keep a bite a day" (default), "Keep two bites a day", "Keep to the plan". */
+  planLead?: string;
   /** Exam day as a sentence says it: "Friday" within six days, else "Mon 23 Nov". */
   examDay: string;
   /** Names (and optional icons) for the concept ids in `result.climbs`. */
@@ -130,6 +132,7 @@ export function SessionDone({
   target,
   targetGrade = null,
   planEnd,
+  planLead = "Keep a bite a day",
   examDay,
   concepts,
   week,
@@ -364,7 +367,7 @@ export function SessionDone({
             </i>
           </div>
           <p className="text-[13px] text-ink-2">
-            Keep a bite a day and you land around <b className="text-ink">{Math.round(planEnd)}%</b> on{" "}
+            {planLead} and you land around <b className="text-ink">{Math.round(planEnd)}%</b> on{" "}
             {examDay}.
           </p>
         </section>

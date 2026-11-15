@@ -32,7 +32,7 @@ export type DetailConcept = {
   lecture: number;
   /** Share of the exam, 0..1. */
   weight: number;
-  /** Mastery on exam day, 0..1. The rung comes from it. */
+  /** Mastery as it stands today, 0..1 (labelled "now"). The rung comes from it. */
   mastery: number;
   /** Defaults to iconFor(name). */
   icon?: ConceptIconName;
@@ -188,7 +188,7 @@ export function ConceptDetail({
                   <b className="font-display text-[26px] leading-none font-semibold [font-variation-settings:'SOFT'_100]">
                     {Math.round(concept.mastery * 100)}%
                   </b>
-                  <span className="text-[11px] text-ink-3">on exam day</span>
+                  <span className="text-[11px] text-ink-3">now</span>
                 </p>
               </div>
 

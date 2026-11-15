@@ -3,12 +3,13 @@
 /**
  * Where you gain most (M3-48): the three concepts on the Progress tab with the
  * largest `weight * (1 - mastery)`, each a small card with its icon, a rose bar
- * and "72% on exam day". One column on a phone, three from 700 px.
+ * and "72% now". One column on a phone, three from 700 px.
  * Source: prototype merged-2.html JS 6029-6038 (progressHTML, .cm3) and CSS
  * 1457-1461, 1502.
  *
- * Plain props: the page passes every concept with the mastery it expects on
- * exam day. Ties keep the caller's order (stable sort), as in the prototype.
+ * Plain props: the page passes every concept with its mastery as it stands
+ * today (what the forecast is made of: no further study is counted in, so
+ * the figure is labelled "now", like "right if it were today"). Ties keep the caller's order (stable sort), as in the prototype.
  */
 import { useId } from "react";
 import { ConceptIcon, iconFor, type ConceptIconName } from "@/components/exams/concept-icons";
@@ -61,7 +62,7 @@ export function GainMost({ concepts, count = 3, className = "" }: GainMostProps)
                 <span className="min-w-0">{c.name}</span>
               </span>
               <Bar value={c.mastery} label={c.name} className="[&>span]:bg-accent" />
-              <span className="mono text-right text-ink-2">{pct}% on exam day</span>
+              <span className="mono text-right text-ink-2">{pct}% now</span>
             </li>
           );
         })}

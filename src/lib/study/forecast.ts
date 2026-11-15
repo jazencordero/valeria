@@ -2,13 +2,26 @@
  * The exam forecast: the share of the exam she would get right today, and the
  * two futures drawn after it (a bite a day, or stop).
  *
- * Pure: no clock, no storage. Formulas are the prototype's (main-flow.html
- * fcRaw / fcOf / fcPlanEnd / fcPlanAt / fcStopAt / gradeAt / verdictExam).
- * The two futures are rules of thumb, labelled "about" on screen; there is no
- * simulation behind them.
+ * Pure: no clock, no storage. `forecastNow`, `stopCurve` and `history` are the
+ * prototype's formulas (main-flow.html fcRaw / fcOf / fcStopAt).
+ *
+ * The forecast of a whole deck (`deckForecast`) is the one model every number
+ * on screen comes from: the concepts' masteries, weighted (the readiness
+ * model is written out at `deckMasteries`: all cards for an unmarked deck,
+ * core cards first for a bundle with core marks). The
+ * gain of a session (`gainOf`) is that forecast if each of its cards is
+ * recalled now, minus the forecast now. Where a plan lands on exam day is a
+ * simulation of the same model (`./plan`).
+ *
+ * `planEnd`, `planCurve` and the three-argument `verdict` are the prototype's
+ * rules of thumb (fcPlanEnd / fcPlanAt / verdictExam). No screen of the app
+ * reads them any more: they overpromised on a large deck. They remain for the
+ * component previews under `src/app/dev`, which have no deck to simulate.
  */
 import { gradeStep } from "../grades/scale";
-import type { WeightedConcept } from "./ladder";
+import type { Deck } from "./bite";
+import { conceptMastery, type WeightedConcept } from "./ladder";
+import { grade, newCard, type MemoryState } from "./memory";
 
 /** Best a bite a day can reach by exam day, in percent. */
 export const PLAN_CAP = 94;
@@ -34,6 +47,94 @@ export function forecastNow(concepts: readonly WeightedConcept[]): number {
     s += c.weight * c.mastery;
   }
   return sw > 0 ? (100 * s) / sw : 0;
+}
+
+const time = (t: number | Date) => (typeof t === "number" ? t : t.getTime());
+
+/**
+ * Each concept's mastery (0..1) for the given card memories.
+ *
+ * READINESS MODEL
+ * - A deck without core marks (AI-made, demo): a concept's mastery is the
+ *   mean predicted recall on exam day over all its active cards (a card
+ *   belongs to its `conceptId`; one never graded counts as 0). Unchanged.
+ * - A deck with core marks (a hand-made bundle): readiness is measured on
+ *   what the bundle calls essential. A concept's mastery is the mean
+ *   predicted recall on exam day over its active CORE cards; a core card she
+ *   has never graded counts as 0 (not known).
+ *   Other cards add on top once core is covered: when every core card of the
+ *   concept has been graded at least once, each of the concept's other cards
+ *   that she has graded joins that mean. A card she has not met never counts
+ *   against her, and none counts before the concept's core cards are all
+ *   seen. (A seen extra card she recalls worse than her core cards lowers the
+ *   mean a little: it is part of what she now carries.)
+ *   A concept with no core card at all is measured as in an unmarked deck.
+ * - The forecast is the concepts' masteries weighted by the concept weights
+ *   (the bundle's), 0..100.
+ * So the core-first pace and the forecast tell one story: seeing and holding
+ * the 184 core cards of a 401-card bundle is 100% of what is measured until
+ * the extras are opened, not 46%.
+ */
+export function deckMasteries(
+  deck: Deck,
+  states: Readonly<Record<string, MemoryState>> = deck.states,
+): Record<string, number> {
+  const examAt = new Date(time(deck.examAt));
+  const blank = newCard(examAt);
+  const marked = deck.coreMarked ?? deck.cards.some((c) => c.core === true);
+  const seen = (id: string) => (states[id]?.lastReviewAt ?? null) !== null;
+  const own = new Map<string, Deck["cards"][number][]>();
+  for (const c of deck.cards) {
+    if (!c.active) continue;
+    const list = own.get(c.conceptId);
+    if (list) list.push(c);
+    else own.set(c.conceptId, [c]);
+  }
+  const out: Record<string, number> = {};
+  for (const concept of deck.concepts) {
+    let cards = own.get(concept.id) ?? [];
+    const core = marked ? cards.filter((c) => c.core === true) : [];
+    if (core.length > 0) {
+      const covered = core.every((c) => seen(c.id));
+      cards = covered ? cards.filter((c) => c.core === true || seen(c.id)) : core;
+    }
+    out[concept.id] = conceptMastery(
+      cards.map((c) => ({ state: states[c.id] ?? blank, active: true })),
+      examAt,
+    );
+  }
+  return out;
+}
+
+/** The deck's forecast, 0..100, not rounded, for the given card memories. */
+export function deckForecast(deck: Deck, states: Readonly<Record<string, MemoryState>> = deck.states): number {
+  const mastery = deckMasteries(deck, states);
+  return forecastNow(deck.concepts.map((c) => ({ weight: c.weight, mastery: mastery[c.id] ?? 0 })));
+}
+
+/**
+ * What a session is worth, in forecast points: the forecast if each of the
+ * cards `ids` is recalled now (graded Good at `deck.now`), minus the forecast
+ * now. Measured on the deck, so a 400-card deck gives a fraction of a point.
+ */
+export function gainOf(deck: Deck, ids: readonly string[]): number {
+  if (ids.length === 0) return 0;
+  const now = new Date(time(deck.now));
+  const after: Record<string, MemoryState> = { ...deck.states };
+  for (const id of new Set(ids)) after[id] = grade(after[id] ?? newCard(now), 3, now);
+  return deckForecast(deck, after) - deckForecast(deck);
+}
+
+/** A gain below this is not shown: it would read as "+0%". */
+export const GAIN_SHOWN_FROM = 0.5;
+
+/**
+ * A gain as screens show it: "+0.5%", "+3.2%", from 10 points a whole number
+ * ("+12%"). Null under half a point: the line is left out.
+ */
+export function gainLabel(gain: number | null | undefined): string | null {
+  if (gain == null || !Number.isFinite(gain) || gain < GAIN_SHOWN_FROM) return null;
+  return `+${gain < 9.95 ? gain.toFixed(1) : Math.round(gain)}%`;
 }
 
 /** The forecast as screens show it: `forecastNow` rounded to a whole percent. */
@@ -83,16 +184,16 @@ export function stopCurve(f: number, daysLeft: number): number[] {
   return out;
 }
 
-export type VerdictKey = "ready" | "on_track" | "tight";
+export type VerdictKey = "ready" | "on_track" | "reachable" | "not_reachable" | "before_start" | "tight";
 
 export type Verdict = {
   key: VerdictKey;
   text: string;
-  /** False only for `tight` (the prototype's `ok`). */
+  /** True only for `ready` and `on_track` (the prototype's `ok`). */
   ok: boolean;
 };
 
-export const VERDICTS: Readonly<Record<VerdictKey, Verdict>> = {
+export const VERDICTS: Readonly<Record<"ready" | "on_track" | "tight", Verdict>> = {
   ready: { key: "ready", text: "Ready. Keep it warm.", ok: true },
   on_track: { key: "on_track", text: "On track with a bite a day", ok: true },
   tight: { key: "tight", text: "Tight. Two bites a day gets you there.", ok: false },

@@ -313,7 +313,11 @@ describe("getHomeView: bite row and exam cards", () => {
       const bite = view.bite as Extract<typeof view.bite, { state: "bite" }>;
       expect(bite.cards).toBeGreaterThan(0);
       expect(bite.minutes).toBe(Math.max(2, Math.round(bite.cards * 0.6)));
-      expect(bite.gain).toBe(Math.max(2, Math.round(bite.cards * 0.85)));
+      // Measured on the deck, not a flat estimate; the exam's card draws the same plan as the verdict.
+      expect(bite.gain).toBeGreaterThan(0);
+      expect(bite.gain).toBeLessThan(100);
+      expect(view.exams[0].spark.plan).toHaveLength(view.exams[0].daysLeft + 1);
+      expect(view.exams[0].spark.plan[0]).toBe(view.exams[0].spark.forecast);
       // An assignment is open, so the bite stays under DO FIRST.
       expect(view.biteFirst).toBe(false);
       expect(view.exams.map((e) => e.id)).toEqual([soon.id, later.id]);

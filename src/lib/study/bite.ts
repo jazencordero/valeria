@@ -63,12 +63,14 @@
  * extra are built from the cards she has graded. Before the cut-off an extra
  * session is the next 5 new cards of the plan, whatever the budget.
  *
- * `minutes = max(2, round(n * 0.6))`; `gainEstimate = max(2, round(n * 0.85))`
- * is the prototype's display formula, shown as "about".
+ * `minutes = max(2, round(n * 0.6))`. `gain` is measured, not estimated: the
+ * deck's forecast if each card of the session is recalled, minus the forecast
+ * now (`gainOf` in `./forecast`), in forecast points, not rounded.
  */
 
 import { startOfDay } from "../dates";
-import { aimedDue, type Time } from "./exam-aim";
+import { dueNow, type Time } from "./exam-aim";
+import { gainOf } from "./forecast";
 import { conceptMastery, focusConcept, rungOf } from "./ladder";
 import { newCard, type MemoryState } from "./memory";
 import { isPaced, newQueue, paceOf, reviewsOnly } from "./pace";
@@ -145,7 +147,8 @@ export type Section = [SectionKind, string[]];
 export type Bite = {
   sections: Section[];
   minutes: number;
-  gainEstimate: number;
+  /** Forecast points this session is worth if every card is recalled (`gainOf`), not rounded. */
+  gain: number;
 };
 
 export const BITES_PER_DAY: Record<ExamKind, number> = { exam: 2, quiz: 1 };
@@ -158,28 +161,59 @@ export const BITE_MIN = 8;
 export const BITE_MAX = 12;
 
 export const biteMinutes = (n: number) => Math.max(2, Math.round(n * 0.6));
-export const biteGain = (n: number) => Math.max(2, Math.round(n * 0.85));
 
 const ms = (t: Time) => (typeof t === "number" ? t : t.getTime());
 const conceptsOf = (c: BiteCard) => c.conceptIds ?? [c.conceptId];
 
+// Per deck object, so one build (and each simulated bite) works these out once.
+const blanks = new WeakMap<Deck, MemoryState>();
+const dues = new WeakMap<Deck, Map<string, number>>();
+
+/** The card's memory; a card never graded is new, due now. */
 function stateOf(deck: Deck, id: string): MemoryState {
-  return deck.states[id] ?? newCard(new Date(ms(deck.now)));
+  const stored = deck.states[id];
+  if (stored) return stored;
+  let blank = blanks.get(deck);
+  if (!blank) blanks.set(deck, (blank = newCard(new Date(ms(deck.now)))));
+  return blank;
 }
 
-/** When the card is due: exam-aimed, or the stored date once the exam has started. */
+/**
+ * When the card is due, if that is now or earlier (exam-aimed, or the stored
+ * date once the exam has started); a card that is not due yet gives
+ * `Infinity`. `dueNow` is `aimedDue` for exactly those cases, without the
+ * search for a date that lies ahead: a bite only asks what is due.
+ */
 function dueOf(deck: Deck, id: string): number {
-  const s = stateOf(deck, id);
-  return aimedDue(s, deck.examAt, deck.now) ?? s.dueAt;
+  let known = dues.get(deck);
+  if (!known) dues.set(deck, (known = new Map()));
+  let due = known.get(id);
+  if (due === undefined) known.set(id, (due = dueNow(stateOf(deck, id), deck.examAt, deck.now) ?? Infinity));
+  return due;
+}
+
+/** The deck's cards by `conceptId`, in deck order. */
+function byConcept(cards: readonly BiteCard[]): Map<string, BiteCard[]> {
+  const out = new Map<string, BiteCard[]>();
+  for (const c of cards) {
+    const list = out.get(c.conceptId);
+    if (list) list.push(c);
+    else out.set(c.conceptId, [c]);
+  }
+  return out;
 }
 
 const isDue = (deck: Deck, id: string) => dueOf(deck, id) <= ms(deck.now);
 
-function session(sections: Section[]): Bite | null {
-  const kept = sections.filter(([, ids]) => ids.length > 0);
-  const n = kept.reduce((sum, [, ids]) => sum + ids.length, 0);
-  if (n === 0) return null;
-  return { sections: kept, minutes: biteMinutes(n), gainEstimate: biteGain(n) };
+const kept = (sections: Section[]): Section[] | null => {
+  const some = sections.filter(([, ids]) => ids.length > 0);
+  return some.length > 0 ? some : null;
+};
+
+function session(deck: Deck, sections: Section[] | null): Bite | null {
+  if (!sections) return null;
+  const ids = sections.flatMap(([, list]) => list);
+  return { sections, minutes: biteMinutes(ids.length), gain: gainOf(deck, ids) };
 }
 
 /** A seeded deck: some card says it is core or opens its concept. */
@@ -194,14 +228,14 @@ const isGraded = (deck: Deck, id: string) => (deck.states[id]?.lastReviewAt ?? n
  */
 function conceptsInFocusOrder(deck: Deck, studyOrder: boolean) {
   const examAt = new Date(ms(deck.examAt));
+  const own = byConcept(deck.cards);
   const left = [...deck.concepts]
     .sort((a, b) => a.order - b.order)
     .map((c) => {
-      const cards = deck.cards
-        .filter((k) => k.conceptId === c.id)
-        .map((k) => ({ state: stateOf(deck, k.id), active: k.active }));
+      const mine = own.get(c.id) ?? [];
+      const cards = mine.map((k) => ({ state: stateOf(deck, k.id), active: k.active }));
       const mastery = conceptMastery(cards, examAt);
-      const started = deck.cards.some((k) => k.conceptId === c.id && k.active && isGraded(deck, k.id));
+      const started = mine.some((k) => k.active && isGraded(deck, k.id));
       return { ...c, mastery, started, target: Math.min(5, rungOf(mastery) + 1) };
     });
   const out: typeof left = [];
@@ -223,19 +257,15 @@ function endOfDay(t: Time): number {
 }
 
 /** A bite for a paced deck: due reviews and the plan's next new cards (see the header). */
-function pacedBite(deck: Deck): Bite | null {
+function pacedSections(deck: Deck): Section[] | null {
   const pace = paceOf(deck)!;
   const index = new Map(deck.cards.map((c, i) => [c.id, i]));
   // On a reviews-only day everything due by the end of the day is due now, so a bite is a
   // full one instead of the two or three cards that happen to have come due this minute.
   const by = pace.open ? ms(deck.now) : Math.min(endOfDay(deck.now), ms(deck.examAt));
-  const dueBy = (id: string) => {
-    const s = stateOf(deck, id);
-    return aimedDue(s, deck.examAt, by) ?? s.dueAt;
-  };
   const due = deck.cards
     .filter((c) => c.active && isGraded(deck, c.id))
-    .map((c) => ({ c, due: pace.open ? dueOf(deck, c.id) : dueBy(c.id) }))
+    .map((c) => ({ c, due: pace.open ? dueOf(deck, c.id) : (dueNow(stateOf(deck, c.id), deck.examAt, by) ?? Infinity) }))
     .filter((x) => x.due <= by)
     .sort((a, b) => a.due - b.due || index.get(a.c.id)! - index.get(b.c.id)!)
     .map((x) => x.c);
@@ -248,7 +278,7 @@ function pacedBite(deck: Deck): Bite | null {
   // (so the last boss reviews of a day are one bite, not one bite each).
   const room = Math.max(1, BITE_MIN - warm.length - learn.length);
   const boss = freshBoss.length > 0 ? freshBoss : due.filter((c) => c.boss).slice(0, room);
-  return session([
+  return kept([
     ["warm", warm.map((c) => c.id)],
     ["learn", learn.map((c) => c.id)],
     ["boss", boss.map((c) => c.id)],
@@ -259,7 +289,15 @@ function pacedBite(deck: Deck): Bite | null {
 const practiceDeck = (deck: Deck): Deck => (isPaced(deck) && !paceOf(deck)!.open ? reviewsOnly(deck) : deck);
 
 export function buildBite(input: BiteInput): Bite | null {
-  if (isPaced(input)) return pacedBite(input);
+  return session(input, biteSections(input));
+}
+
+/**
+ * The cards of the bite `buildBite` gives, without its minutes and gain: what
+ * the plan simulation (`./plan`) plays, bite after bite.
+ */
+export function biteSections(input: BiteInput): Section[] | null {
+  if (isPaced(input)) return pacedSections(input);
   if (input.bitesDoneToday >= BITES_PER_DAY[input.kind]) return null;
   const deck: Deck = input;
   const now = ms(deck.now);
@@ -286,11 +324,12 @@ export function buildBite(input: BiteInput): Bite | null {
     index.get(a.id)! - index.get(b.id)!;
   const order = conceptsInFocusOrder(deck, usesStudyOrder(deck));
   const learn: BiteCard[] = [];
+  const studyableOf = byConcept(studyable);
   const take = (pick: (c: BiteCard, target: number) => boolean) => {
     for (const concept of order) {
       if (learn.length >= LEARN_MAX) return;
-      const cards = studyable
-        .filter((c) => c.conceptId === concept.id && !used.has(c.id))
+      const cards = (studyableOf.get(concept.id) ?? [])
+        .filter((c) => !used.has(c.id))
         .filter((c) => pick(c, concept.target))
         .sort(byRungThenNow);
       for (const c of cards.slice(0, LEARN_MAX - learn.length)) {
@@ -321,7 +360,7 @@ export function buildBite(input: BiteInput): Bite | null {
     LEARN_MAX,
     Math.max(LEARN_MIN, BITE_MIN - warm.length - (boss ? 1 : 0)),
   );
-  return session([
+  return kept([
     ["warm", warm.map((c) => c.id)],
     ["learn", learn.slice(0, learnN).map((c) => c.id)],
     ["boss", boss ? [boss.id] : []],
@@ -338,7 +377,7 @@ export function tileSession(whole: Deck, type: CardType): Bite | null {
     .filter((c) => c.active && !c.boss && c.type === type)
     .slice(0, 3)
     .map((c) => c.id);
-  return session([["learn", ids]]);
+  return session(whole, kept([["learn", ids]]));
 }
 
 /**
@@ -350,10 +389,13 @@ export function conceptSession(whole: Deck, conceptId: string): Bite | null {
   const cards = deck.cards
     .filter((c) => c.active && conceptsOf(c).includes(conceptId))
     .slice(0, 4);
-  return session([
-    ["learn", cards.filter((c) => !c.boss).map((c) => c.id)],
-    ["boss", cards.filter((c) => c.boss).map((c) => c.id)],
-  ]);
+  return session(
+    whole,
+    kept([
+      ["learn", cards.filter((c) => !c.boss).map((c) => c.id)],
+      ["boss", cards.filter((c) => c.boss).map((c) => c.id)],
+    ]),
+  );
 }
 
 /**
@@ -368,10 +410,13 @@ export function extraSession(whole: Deck): Bite | null {
   if (isPaced(whole) && paceOf(whole)!.open) {
     const next = newQueue(whole).slice(0, 5);
     if (next.length > 0) {
-      return session([
-        ["warm", next.filter((c) => !c.boss).map((c) => c.id)],
-        ["boss", next.filter((c) => c.boss).map((c) => c.id)],
-      ]);
+      return session(
+        whole,
+        kept([
+          ["warm", next.filter((c) => !c.boss).map((c) => c.id)],
+          ["boss", next.filter((c) => c.boss).map((c) => c.id)],
+        ]),
+      );
     }
   }
   const deck = practiceDeck(whole);
@@ -381,5 +426,5 @@ export function extraSession(whole: Deck): Bite | null {
     .slice(0, 5)
     .map((c) => c.id);
   if (ids.length === 0) ids = pool.slice(0, 4).map((c) => c.id);
-  return session([["warm", ids]]);
+  return session(whole, kept([["warm", ids]]));
 }

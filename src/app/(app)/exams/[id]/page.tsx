@@ -29,11 +29,17 @@
  * - "mostly <concept>" is the concept most of the bite's cards belong to (a
  *   card's first linked concept, as in `examView`).
  * - "Then: bite 2 of 2, N min" uses this bite's minutes: the next bite is
- *   built by the same rule only once this one is done. A paced exam (core
+ *   built by the same rule only once this one is done. It is said only when
+ *   the plan's pace is two bites a day; with a bite a day the second bite is
+ *   still offered afterwards ("One more bite"), it is just not announced. A paced exam (core
  *   marks, `ExamView.pace`) says its pace there instead: "3 bites today keeps
  *   you on track for Monday.", or once, when the days left cannot hold the
  *   core cards, "There are more cards than days: core cards first, about 60 a
  *   day." Neither is said before the study start.
+ * - One pace, one number (`ExamView.plan`, src/lib/study/plan.ts): the header's verdict, the
+ *   Today line above, the Progress sentence and the chart's plan line all come from it.
+ * - Before the study start the Progress tab is that one "Starts ..." line and nothing else.
+ * - A concept's percent (Where you gain most, the sheet) is its level today, labelled "now".
  * - Tiles count the active, non-boss cards of each type (what a tile session
  *   draws from). "Practise this" minutes are for the first four cards that
  *   touch the concept (`conceptSession`).
@@ -58,7 +64,7 @@ import type { PracticeType } from "@/components/study/practice-tiles";
 import type { ProgressConcept } from "@/components/study/progress-sheet";
 import { byDay, startsLine, TIME_ZONE } from "@/lib/dates";
 import { biteMinutes } from "@/lib/study/bite";
-import { impossibleLine, onTrackLine } from "@/lib/study/pace";
+import { paceWords, planSentence, todayLine } from "@/lib/study/plan";
 import { gradeFor } from "@/lib/study/forecast";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { shortNameOf } from "@/server/data/courses";
@@ -255,21 +261,23 @@ async function todayOf(
   const today = dayKey(now);
   if (view.bite) {
     const following = view.bitesDoneToday + 2;
+    // "Then: bite 2 of 2" only when the plan's pace is that many bites a day (never more than the app serves).
+    const planned = view.plan.pace.kind === "bites" ? Math.min(view.plan.pace.perDay, view.bitesPerDay) : null;
     const pace =
       view.pace && !quiet
-        ? (impossibleLine(view.pace) ?? onTrackLine(view.pace, byDay(view.exam.at, now), view.bitesDoneToday > 0))
+        ? todayLine(view.pace, view.plan, byDay(view.exam.at, now), { more: view.bitesDoneToday > 0, sayImpossible: true })
         : null;
     return {
       state: "bite",
       more: view.bitesDoneToday > 0,
       minutes: view.bite.minutes,
       cards: view.bite.cards,
-      gain: view.bite.gainEstimate,
+      gain: view.bite.gain,
       focus: biteFocus(view, deck),
       ...(pace
         ? { pace: `${pace}.` }
-        : !view.pace && following <= view.bitesPerDay
-          ? { next: { number: following, of: view.bitesPerDay, minutes: view.bite.minutes } }
+        : planned !== null && following <= planned
+          ? { next: { number: following, of: planned, minutes: view.bite.minutes } }
           : {}),
     };
   }
@@ -338,9 +346,11 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
       notes={tabs.notes}
       progress={{
         grade: gradeFor(view.forecastShown),
-        planEnd: view.planEnd,
+        planEnd: view.plan.endShown,
         dayName: byDay(exam.at, now),
+        planLine: planSentence(view.plan, byDay(exam.at, now)),
         ...(quiet ? { note: quiet } : {}),
+        ...(starts && !over ? { starts: startsLine(starts) } : {}),
         chart: {
           history: view.history,
           forecast: view.forecast,
@@ -348,6 +358,9 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
           target: exam.targetPct,
           targetGrade: targetGradeOf(stored?.gradeTarget),
           examDay: `${at.month} ${at.day}`.toUpperCase(),
+          plan: view.plan.curve,
+          planEndShown: view.plan.endShown,
+          planName: paceWords(view.plan.pace),
         },
         concepts: progressConcepts(view, deck),
         focusId: view.focusConcept?.id ?? null,

@@ -151,6 +151,7 @@ export function ExamTabCard({
               history={spark.history}
               forecast={spark.forecast}
               daysLeft={spark.daysLeft}
+              plan={spark.plan}
               target={target}
             />
           </span>

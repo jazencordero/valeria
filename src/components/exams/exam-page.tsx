@@ -97,8 +97,8 @@ export type ExamPageToday =
       more: boolean;
       minutes: number;
       cards: number;
-      /** Forecast gain in percentage points. */
-      gain: number;
+      /** Forecast points the bite is worth, not rounded; under half a point the chip is left out. */
+      gain: number | null;
       /** Name of the concept most of the cards are about. */
       focus: string;
       next?: BiteCardNext;
@@ -139,10 +139,17 @@ export type ExamPageProps = {
   progress: {
     /** Today's grade, 0..5. */
     grade: number;
-    /** Where a bite a day ends on exam day, in percent. */
+    /** Where the exam's pace ends on exam day, in percent. */
     planEnd: number;
     /** The day the plan ends by: "Friday" within six days, else "Mon 23 Nov". */
     dayName: string;
+    /** The plan sentence, from the same plan as the verdict: "A bite a day gets you to about 47% by Mon 23 Nov." */
+    planLine?: string;
+    /**
+     * Before the study start: the one line the tab says ("Starts Tue 24 Nov. Nothing to do here
+     * until then."), and nothing else: no percent, no chart, no concepts, no sheet.
+     */
+    starts?: string;
     chart: ForecastChartData;
     /** Every concept, in the exam's order. */
     concepts: readonly ProgressConcept[];
@@ -508,13 +515,18 @@ export function ExamPage({
     icon: c.icon,
   }));
 
-  const progressPanel = (
+  const progressPanel = progress.starts ? (
+    <p className="py-3 text-[15px] text-ink-2" data-testid="progress-starts">
+      {progress.starts}
+    </p>
+  ) : (
     <>
       <ProgressHead
         forecast={forecast}
         grade={progress.grade}
         planEnd={progress.planEnd}
         dayName={progress.dayName}
+        planLine={progress.planLine}
         chart={progress.chart}
         shown={progressShown && !held}
         rollFrom={rollFrom}

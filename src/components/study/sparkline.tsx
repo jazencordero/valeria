@@ -1,6 +1,7 @@
 /**
  * Sparkline: the small forecast line on exam cards. 132 by 40: history as a
- * solid ink line, the "a bite a day" plan as a dashed accent line, the target
+ * solid ink line, the plan (the exam's projection, `plan`; without one the
+ * previews' rule of thumb) as a dashed accent line, the target
  * as a faint dotted line, and a now dot. Static (no draw-in).
  * Source: prototype merged.html sparkSVG and CSS .spark / .sp-*.
  */
@@ -19,6 +20,8 @@ export type SparklineProps = Omit<SVGAttributes<SVGSVGElement>, "children" | "ta
   daysLeft: number;
   /** Target percent, 0..100. */
   target: number;
+  /** The plan's projection, one value per day from today to exam day (`Plan.curve`). */
+  plan?: readonly number[];
 };
 
 const clamp = (p: number) => Math.min(100, Math.max(0, p));
@@ -28,6 +31,7 @@ export function Sparkline({
   forecast,
   daysLeft,
   target,
+  plan,
   className = "",
   ...rest
 }: SparklineProps) {
@@ -42,7 +46,8 @@ export function Sparkline({
   const pt = (x: number, y: number) => `${x.toFixed(1)} ${y.toFixed(1)}`;
 
   const histD = "M" + hist.map((p, i) => pt(X(i - nh), Y(p))).join(" L");
-  const planD = "M" + planCurve(clamp(forecast), D).map((p, i) => pt(X(i), Y(p))).join(" L");
+  const points = plan && plan.length === D + 1 ? plan.map(clamp) : planCurve(clamp(forecast), D);
+  const planD = "M" + points.map((p, i) => pt(X(i), Y(p))).join(" L");
   const ty = Y(target);
 
   return (

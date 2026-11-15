@@ -348,7 +348,7 @@ describe("biteCards", () => {
       { id: "n", conceptId: "c2", rung: 2, type: "match", boss: false, active: true },
       { id: "z", conceptId: "c1", conceptIds: ["c1", "c2"], rung: 5, type: "explain", boss: true, active: true },
     ];
-    const bite: Bite = { sections: [["warm", ["w"]], ["learn", ["n", "gone"]], ["boss", ["z"]]], minutes: 2, gainEstimate: 2 };
+    const bite: Bite = { sections: [["warm", ["w"]], ["learn", ["n", "gone"]], ["boss", ["z"]]], minutes: 2, gain: 2 };
     expect(biteCards(bite, deck, { n: { pairs: 4 } })).toEqual([
       { id: "w", type: "basic", boss: false, section: "warm", conceptIds: ["c1"] },
       { id: "n", type: "match", boss: false, section: "learn", conceptIds: ["c2"], pairs: 4 },

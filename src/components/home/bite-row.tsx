@@ -7,7 +7,8 @@
  * is the accent wash, .p-mint the mint.
  *
  * - "bite": the bite doodle, "Or a 5-minute bite for Friday's exam",
- *   "8 CARDS · +4% FORECAST" and "Start". The whole row links to the session.
+ *   "8 CARDS · +0.6% FORECAST" and "Start" (the gain is measured; under half
+ *   a point it is left out: "8 CARDS"). The whole row links to the session.
  *   `first` (nothing is open, so the bite is the DO FIRST card) drops the
  *   "Or": "A 5-minute bite for Friday's exam". A paced exam adds one line
  *   under it: "3 bites today keeps you on track for Monday".
@@ -25,14 +26,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Doodle } from "@/components/doodle";
 import { ExamCard, type ExamCardProps } from "@/components/exams/exam-card";
+import { gainLabel } from "@/lib/study/forecast";
 
 export type BiteRowProps =
   | {
       state: "bite";
       minutes: number;
       cards: number;
-      /** Forecast gain in percentage points. */
-      gain: number;
+      /** Forecast points the bite is worth, not rounded; under half a point it is not shown. */
+      gain: number | null;
       /** "Friday's exam", "tomorrow's quiz", "the exam on 4 Dec". */
       forWhat: string;
       /** The session: `/study/new?exam=<id>&kind=bite`. */
@@ -79,9 +81,10 @@ export function biteTitle(minutes: number, forWhat: string, first = false): stri
 export function BiteRow(props: BiteRowProps) {
   const done = props.state === "done";
   const title = done ? "Today’s bites are done" : biteTitle(props.minutes, props.forWhat, props.first);
+  const gain = done ? null : gainLabel(props.gain);
   const meta = done
     ? `FORECAST ${props.forecast}% · ${props.day}`
-    : `${props.cards} CARDS · +${props.gain}% FORECAST`;
+    : `${props.cards} CARDS${gain ? ` · ${gain} FORECAST` : ""}`;
 
   return (
     <Link href={props.href} className={props.className ? `${ROW} ${props.className}` : ROW} data-state={props.state}>

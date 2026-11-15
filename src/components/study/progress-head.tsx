@@ -3,7 +3,8 @@
 /**
  * Top of the exam page's Progress tab: the big line "64% right if it were
  * today", the sentence "That is a 3 today. A bite a day gets you to about 88%
- * by Friday.", then the forecast chart under a hairline.
+ * by Friday." (the plan part is the page's own sentence, `planLine`, when it
+ * gives one), then the forecast chart under a hairline.
  *
  * The tab panels stay mounted while hidden, so the chart waits for `shown`:
  * it mounts (and draws) the first time the Progress tab is shown, and stays
@@ -24,6 +25,8 @@ export type ProgressHeadProps = {
   planEnd: number;
   /** Exam day as the sentence says it: "Friday" within six days, else "Mon 23 Nov". */
   dayName: string;
+  /** The plan sentence, from the exam's plan (`planSentence`); it replaces the "A bite a day ..." built from `planEnd`. */
+  planLine?: string;
   /** Data for the chart under the headline. */
   chart: ForecastChartData;
   /** True while the Progress tab is shown. The chart mounts the first time. */
@@ -40,6 +43,7 @@ export function ProgressHead({
   grade,
   planEnd,
   dayName,
+  planLine,
   chart,
   shown = true,
   rollFrom,
@@ -68,7 +72,8 @@ export function ProgressHead({
           right if it were today
         </p>
         <p className="mt-0.5 text-[13px] text-ink-2">
-          {note ?? `That is a ${grade} today. A bite a day gets you to about ${Math.round(planEnd)}% by ${dayName}.`}
+          {note ??
+            `That is a ${grade} today. ${planLine ?? `A bite a day gets you to about ${Math.round(planEnd)}% by ${dayName}.`}`}
         </p>
       </div>
       {/* With a note there is no plan, so no chart of where a plan would end either. */}

@@ -34,7 +34,7 @@ export type PathConcept = {
   lecture: number;
   /** Share of the exam, 0..1. */
   weight: number;
-  /** Mastery on exam day, 0..1. The rung comes from it. */
+  /** Mastery as it stands today, 0..1 (labelled "now"). The rung comes from it. */
   mastery: number;
   /** Defaults to iconFor(name). */
   icon?: ConceptIconName;
@@ -241,7 +241,7 @@ export function ConceptPath({
                 tabIndex={i === tabIdx ? 0 : -1}
                 data-concept={c.id}
                 data-tone={tone}
-                aria-label={`${c.name}, ${RUNG_NAMES[r]}, ${pct}% on exam day`}
+                aria-label={`${c.name}, ${RUNG_NAMES[r]}, ${pct}% now`}
                 aria-expanded={detailsId ? isSel : undefined}
                 aria-controls={detailsId}
                 onFocus={() => setActive(i)}

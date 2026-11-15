@@ -33,7 +33,9 @@
  *   cards, so a fresh exam shows no row instead of a done one.
  *   A paced exam (its deck has core marks, `ExamView.pace`) is never done by
  *   the number of bites: its row says how many bites today keeps her on plan
- *   ("3 bites today keeps you on track for Monday"), and it is done when
+ *   ("3 bites today keeps you on track for Monday"; when the plan ends below
+ *   her target, "3 bites today. The plan gets you to about 62% by Monday":
+ *   `todayLine`, from the same plan as the verdict), and it is done when
  *   `pace.done` says so (today's new cards are used and nothing is due).
  * - `biteFirst`: nothing is open, so the bite is the DO FIRST card.
  *
@@ -88,7 +90,7 @@
 import { and, eq, gte, inArray, lt } from "drizzle-orm";
 import { byDay, TIME_ZONE } from "@/lib/dates";
 import { greeting, type GreetingAssignment, type JustHandedIn, type JustStudied, type NextExam } from "@/lib/home/greeting";
-import { onTrackLine } from "@/lib/study/pace";
+import { todayLine } from "@/lib/study/plan";
 import { WEEK_DAYS, weekModel, type WeekItem, type WeekModel } from "@/lib/home/week";
 import { DONE_WINDOW_MS, type Queue } from "@/lib/queue";
 import { FEED_PROVIDERS, itemsForUser, type FeedProvider } from "@/server/calendar/feed";
@@ -136,7 +138,7 @@ export type HomeBite =
       examId: string;
       minutes: number;
       cards: number;
-      /** Forecast gain in percentage points (M3-08's `gainEstimate`). */
+      /** Forecast points the bite is worth if every card is recalled, not rounded (`Bite.gain`). */
       gain: number;
       /** "Friday's exam", "tomorrow's quiz", "the exam on 4 Dec". */
       forWhat: string;
@@ -276,13 +278,13 @@ function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>, now: Date)
   for (const card of list) {
     const v = views.get(card.id);
     if (!v?.bite) continue;
-    const pace = v.pace ? onTrackLine(v.pace, byDay(v.exam.at, now), v.bitesDoneToday > 0) : null;
+    const pace = v.pace ? todayLine(v.pace, v.plan, byDay(v.exam.at, now), { more: v.bitesDoneToday > 0 }) : null;
     return {
       state: "bite",
       examId: card.id,
       minutes: v.bite.minutes,
       cards: v.bite.cards,
-      gain: v.bite.gainEstimate,
+      gain: v.bite.gain,
       forWhat: biteFor(card.kind, v.exam.at, v.daysLeft),
       href: biteHref(card.id),
       ...(pace ? { pace } : {}),

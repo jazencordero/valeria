@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aimedDue,
+  dueNow,
   FINAL_MARGIN_MS,
   FINAL_WINDOW_MS,
   finalPass,
@@ -112,6 +113,32 @@ describe("aimedDue", () => {
     const { state, at } = history([3, 3, 4]);
     const examAt = at + 5 * DAY;
     expect(aimedDue(state, new Date(examAt), new Date(at))).toBe(aimedDue(state, examAt, at));
+  });
+});
+
+describe("dueNow", () => {
+  it("is aimedDue's answer whenever that is now or earlier, and null otherwise", () => {
+    const T0 = NOW;
+    const exam = T0 + 10 * DAY;
+    const states: MemoryState[] = [newCard(new Date(T0))];
+    for (const g of [1, 2, 3, 4] as const) {
+      let s = grade(newCard(new Date(T0)), g, new Date(T0));
+      states.push(s);
+      for (let i = 1; i <= 3; i++) {
+        s = grade(s, 3, new Date(T0 + i * DAY));
+        states.push(s);
+      }
+    }
+    let due = 0;
+    for (const s of states) {
+      for (const now of [T0, T0 + 5 * 60 * 1000, T0 + DAY, T0 + 4 * DAY, T0 + 8 * DAY, exam - 60 * 1000, exam, exam + DAY]) {
+        const aimed = aimedDue(s, exam, now) ?? s.dueAt;
+        const expected = aimed <= now ? aimed : null;
+        expect(dueNow(s, exam, now)).toBe(expected);
+        if (expected !== null) due++;
+      }
+    }
+    expect(due).toBeGreaterThan(20);
   });
 });
 

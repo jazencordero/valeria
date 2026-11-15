@@ -154,9 +154,22 @@ describe("a day of bites", () => {
     expect(start.gradeMode).toBe("two");
     expect(start.counts.new).toBe(13);
 
+    // The plan: one value a day from today to exam day, ending where the verdict and the plan line say.
+    expect(start.plan.curve).toHaveLength(21);
+    expect(start.plan.curve[0]).toBe(0);
+    expect(start.planEnd).toBe(start.plan.curve[20]);
+    expect(start.plan.pace).toEqual({ kind: "bites", perDay: 1 });
+    expect(start.plan.reaches).toBe(Math.round(start.planEnd) >= start.exam.targetPct);
+    expect(start.plan.endShown).toBe(Math.round(start.planEnd));
+    // 13 cards, a bite a day for 20 days: the target is reached, and the status says so.
+    expect(start.verdict).toMatchObject({ key: "on_track", text: "On track with a bite a day" });
+
     const first = await beginSession(examId, "bite");
     expect(first).not.toBeNull();
     expect(first!.cards.length).toBe(start.bite!.cards);
+    // The gain shown is the forecast if every card is recalled, minus the forecast now.
+    expect(first!.gain).toBe(start.bite!.gain);
+    expect(first!.gain).toBeGreaterThan(0);
     expect(first!.cards[0].body).toMatchObject({ back: "A" });
     // A new card: Missed comes back in a minute, Got it in ten.
     expect(first!.cards[0].intervals[1].ms).toBe(MIN);
@@ -168,6 +181,11 @@ describe("a day of bites", () => {
     expect(flashes).toEqual([["studied", { examId, forecast: done1.forecastAfterShown }]]);
     expect(done1.forecastAfter).toBeGreaterThan(done1.forecastBefore);
     expect(done1.forecastBefore).toBe(0);
+    // She recalled every card: the forecast moved by the gain the bite showed.
+    expect(done1.forecastAfter - done1.forecastBefore).toBeCloseTo(first!.gain, 1);
+    // The done screen's sentence is the plan after this session.
+    expect(done1.planLead).toBe("Keep a bite a day");
+    expect(done1.planEnd).toBe(Math.round((await examView(examId)).planEnd));
     expect(done1.stats).toMatchObject({ cards: first!.cards.length, missed: 0, perfect: true, best: first!.cards.length });
     expect(done1.moved.length).toBeGreaterThan(0);
     expect(done1.week.days.find((d) => d.isToday)?.state).toBe("done");
@@ -370,6 +388,13 @@ describe("a paced exam (core marks)", () => {
     const start = await examView(paced.examId);
     // 60 core cards over 5 days: 12 a day, in 3 bites of up to 5 new cards.
     expect(start.pace).toMatchObject({ open: true, budget: 12, left: 12, bites: 3, impossible: false, done: false });
+    // One plan for every screen: the core-first pace, its projection, and a verdict that agrees with it.
+    expect(start.plan.pace).toEqual({ kind: "core", open: true, perDay: 3, bitesToday: 3 });
+    expect(start.plan.curve).toHaveLength(8);
+    expect(start.planEnd).toBe(start.plan.curve[7]);
+    // Readiness is measured on the 60 core cards, and the plan shows them all by the cut-off.
+    expect(start.plan.endShown).toBeGreaterThan(80);
+    expect(start.verdict).toMatchObject({ key: "on_track", text: "On track with 3 bites a day", ok: true });
 
     const served: string[] = [];
     for (const [i, left] of [7, 2, 0].entries()) {
@@ -418,7 +443,10 @@ describe("a paced exam (core marks)", () => {
       setNow(NOW.getTime() + daysOn * D - 3 * 60 * MIN);
       const view = await examView(paced.examId);
       expect(view.daysLeft).toBe(7 - daysOn);
-      expect(view.pace).toMatchObject({ open: false, budget: 0, bites: 0 });
+      // Reviews only: what is asked is the bites that clear what is due (one here: five cards).
+      expect(view.pace).toMatchObject({ open: false, budget: 0, left: 0 });
+      expect(view.pace!.bites).toBeLessThanOrEqual(1);
+      expect(view.plan.pace).toMatchObject({ kind: "core", open: false });
       for (const kind of ["bite", "extra", "tile", "concept"] as const) {
         const arg = kind === "tile" ? "basic" : kind === "concept" ? view.concepts[0].id : undefined;
         const s = await beginSession(paced.examId, kind, arg);
@@ -463,6 +491,9 @@ describe("an exam with a study start (M3-53)", () => {
     const early = await examView(held.examId);
     expect(early.bite).toBeNull();
     expect(early.concepts).toHaveLength(1); // the deck is still shown
+    // The status is "before start", and no pace or projection is promised.
+    expect(early.verdict).toEqual({ key: "before_start", text: "Starts Tue 24 Nov", ok: false });
+    expect(early.plan.curve).toEqual([early.forecast]);
     expect(await beginSession(held.examId, "bite")).toBeNull();
     expect(await beginSession(held.examId, "extra")).toBeNull();
     expect(await beginSession(held.examId, "tile", "basic")).toBeNull();

@@ -63,7 +63,8 @@ export type ExamsTabExam = {
   daysLeft: number;
   /** Forecast today, a whole percent. */
   forecast: number;
-  spark: { history: number[]; forecast: number; daysLeft: number };
+  /** `plan` is the exam's projection (`ExamView.plan.curve`), today to exam day. */
+  spark: { history: number[]; forecast: number; daysLeft: number; plan: number[] };
   /** The percent her target grade needs. */
   target: number;
   /** The grade she aims for, as her bundle gave it (`exams.grade_target`); null when it gave none. */
@@ -220,7 +221,7 @@ export async function getExamsView(
         wholeDay: row.wholeDay,
         daysLeft: v.daysLeft,
         forecast: v.forecastShown,
-        spark: { history: v.history, forecast: v.forecast, daysLeft: v.daysLeft },
+        spark: { history: v.history, forecast: v.forecast, daysLeft: v.daysLeft, plan: v.plan.curve },
         target: row.targetPct,
         grade: targetGradeOf(row.gradeTarget),
         concepts: v.concepts.map((c) => ({ id: c.id, name: c.name, rung: c.rung })),

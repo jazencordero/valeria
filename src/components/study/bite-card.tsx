@@ -8,7 +8,8 @@
  *
  * One number, one sentence, one action:
  *  - "bite": "Today's bite" (or "One more bite" once one is done), the
- *    minutes / cards / focus line, the "+N% forecast" gain chip, "Start bite",
+ *    minutes / cards / focus line, the "+0.6% forecast" gain chip (measured;
+ *    left out under half a point), "Start bite",
  *    and a mono "Then: bite 2 of 2, 4 min" line when another bite follows.
  *    A paced exam says its pace there instead: "3 bites today keeps you on
  *    track for Monday."
@@ -20,6 +21,7 @@
 import { useId } from "react";
 import { Doodle } from "@/components/doodle";
 import { Button } from "@/components/ui/button";
+import { gainLabel } from "@/lib/study/forecast";
 
 export type BiteCardNext = {
   /** 1-based number of the bite that follows. */
@@ -39,8 +41,8 @@ export type BiteCardProps =
       minutes: number;
       /** Cards in this bite. */
       cards: number;
-      /** Forecast gain in percentage points, shown as "+N%". */
-      gain: number;
+      /** Forecast points the bite is worth, not rounded: "+0.6%". Under half a point (or null) the chip is left out. */
+      gain: number | null;
       /** Name of the concept most of the cards are about. */
       focus: string;
       /** The bite after this one, if any. */
@@ -93,6 +95,7 @@ export function BiteCard(props: BiteCardProps) {
   }
 
   const { more = false, minutes, cards, gain, focus, next, pace, onStart } = props;
+  const gainText = gainLabel(gain);
   return (
     <section className={cls} aria-labelledby={labelId}>
       <div className="flex items-start justify-between gap-3">
@@ -104,12 +107,14 @@ export function BiteCard(props: BiteCardProps) {
             {minutes} min · {cards} cards · mostly {focus}
           </p>
         </div>
-        <span className="grid flex-none justify-items-center rounded-2xl bg-mint px-3 py-2">
-          <b className="font-display text-[22px] font-semibold leading-none [font-variation-settings:'SOFT'_100]">
-            +{gain}%
-          </b>
-          <span className="text-[11px] text-ink-2">forecast</span>
-        </span>
+        {gainText ? (
+          <span className="grid flex-none justify-items-center rounded-2xl bg-mint px-3 py-2" data-testid="gain-chip">
+            <b className="font-display text-[22px] font-semibold leading-none [font-variation-settings:'SOFT'_100]">
+              {gainText}
+            </b>
+            <span className="text-[11px] text-ink-2">forecast</span>
+          </span>
+        ) : null}
       </div>
       <Button size="lg" block className="mt-[18px]" onClick={onStart}>
         Start bite

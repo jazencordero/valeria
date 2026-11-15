@@ -37,9 +37,19 @@
  *   card's first due date to that day (M3-51), which is left as it is.
  * - Days left are whole Helsinki calendar days to the exam (`daysBetween`),
  *   as the chart and the phase bar use them.
- * - Forecast: `forecastNow` (raw) and `forecastShown` (rounded). Plan end and
- *   verdict use the shown value, as the prototype does
- *   (`verdict(shown, target, planEnd(shown, daysLeft))`).
+ * - Forecast: `deckForecast` (raw) and `forecastShown` (rounded).
+ * - Plan (`src/lib/study/plan.ts`). `ExamView.plan` is the exam's one pace
+ *   and its projection, a simulation of the bites the app will serve with the
+ *   same model as the forecast, made from the whole deck. `planEnd` is its
+ *   last point and `verdict` is `verdictOf` over it (before start, ready, on
+ *   track, reachable, not reachable), so the chip, the plan sentence, the
+ *   chart and Home say the same pace and the same number. An exam that is
+ *   over, or whose study start is still ahead, promises no pace: its plan is
+ *   flat (`flatPlan`) and the screens say one line instead.
+ * - Readiness model: `deckMasteries` in `src/lib/study/forecast.ts` (core
+ *   cards first for a deck with core marks).
+ * - A bite's `gain` is measured on the whole deck (`gainOf`): the forecast if
+ *   each of its cards is recalled, minus the forecast now.
  * - History (the chart's days before today). There is no table of daily
  *   snapshots, so they are rebuilt: her reviews of the exam's active cards
  *   are replayed in time order with `memory.grade` (the same deterministic
@@ -104,7 +114,7 @@ import { setFlash } from "@/server/data/flash";
 import { db, type Db } from "@/server/db/client";
 import { cards, cardStates, CARD_TYPES, exams, reviews, SESSION_MODES, studySessions } from "@/server/db/schema/study";
 import { users } from "@/server/db/schema/users";
-import { daysBetween, startOfDay, startOfWeek } from "@/lib/dates";
+import { byDay, dayMonth, daysBetween, startOfDay, startOfWeek } from "@/lib/dates";
 import {
   BITES_PER_DAY,
   buildBite,
@@ -119,15 +129,14 @@ import {
 } from "@/lib/study/bite";
 import { aimedDue } from "@/lib/study/exam-aim";
 import {
-  forecastNow,
+  deckForecast,
+  deckMasteries,
+  gainOf,
   history,
-  planEnd,
-  verdict,
   type DailySnapshot,
   type Verdict,
 } from "@/lib/study/forecast";
 import {
-  conceptMastery,
   focusConcept,
   phaseOf,
   phasePosition,
@@ -137,6 +146,7 @@ import {
   type RungLevel,
 } from "@/lib/study/ladder";
 import { isPaced, paceOf } from "@/lib/study/pace";
+import { flatPlan, keepWords, planOf, verdictOf, type Plan } from "@/lib/study/plan";
 import { GRADES, grade as gradeMemory, intervalLabel, newCard, type Grade, type MemoryState } from "@/lib/study/memory";
 import type { SessionMode } from "@/lib/study/session";
 import { DEFAULT_GOAL, freeSkipsLeft, streakLine, weekOf, weeksInARow, type Week } from "@/lib/study/week";
@@ -190,7 +200,7 @@ export type PaceView = {
   budget: number;
   /** New cards the plan still serves today. */
   left: number;
-  /** Bites that keep her on plan today, still to do. */
+  /** Bites the plan still asks of today (`askedToday`): new-card bites, or past the cut-off the review bites. */
   bites: number;
   /** The days left cannot hold the core cards: said plainly instead of "on track". */
   impossible: boolean;
@@ -207,8 +217,11 @@ export type ExamView = {
   forecastShown: number;
   /** Forecast on each day before today with data, oldest first, at most 13. */
   history: number[];
-  /** Where a bite a day lands on exam day, in percent. */
+  /** The exam's one pace and its projection, day by day to exam day (`planOf`). */
+  plan: Plan;
+  /** Where that pace lands on exam day, in percent, not rounded: the last point of `plan.curve`. */
   planEnd: number;
+  /** From the same plan (`verdictOf`): it never says on track when the plan ends below the target. */
   verdict: Verdict;
   phase: Phase;
   /** 0..100, the "you are here" marker on the phase bar. */
@@ -250,7 +263,8 @@ export type BegunSession = {
   sessionId: string;
   mode: SessionMode;
   minutes: number;
-  gainEstimate: number;
+  /** Forecast points the session is worth if every card is recalled, not rounded. */
+  gain: number;
   cards: SessionCardView[];
   gradeMode: GradeMode;
 };
@@ -291,6 +305,10 @@ export type DoneScreen = {
   forecastAfter: number;
   forecastBeforeShown: number;
   forecastAfterShown: number;
+  /** Where the exam's pace lands on exam day after this session, a whole percent (`planOf`). */
+  planEnd: number;
+  /** The pace as the done screen starts its sentence: "Keep a bite a day", "Keep to the plan". */
+  planLead: string;
   moved: ConceptMove[];
   week: StudyWeek;
   bitesDoneToday: number;
@@ -451,22 +469,6 @@ function studyDeckOf(exam: Exam, deck: Deck, biteDeck: BiteDeck, now: Date): Bit
   return { ...biteDeck, cards: biteDeck.cards.filter((c) => fromNote.has(c.id) || graded(c.id)) };
 }
 
-/** Each concept's mastery for the given card memories (missing = never graded). */
-function masteries(deck: BiteDeck, states: Readonly<Record<string, MemoryState>>, examAt: Date): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const concept of deck.concepts) {
-    const own = deck.cards
-      .filter((c) => c.conceptId === concept.id)
-      .map((c) => ({ state: states[c.id] ?? newCard(examAt), active: c.active }));
-    out[concept.id] = conceptMastery(own, examAt);
-  }
-  return out;
-}
-
-function forecastOf(deck: Deck, mastery: Readonly<Record<string, number>>): number {
-  return forecastNow(deck.concepts.map((c) => ({ weight: c.weight, mastery: mastery[c.id] ?? 0 })));
-}
-
 async function examState(userId: string, examId: string, now: Date, database: Db): Promise<ExamState> {
   const exam = await loadExam(userId, examId, database);
   const deck = await loadDeck(userId, examId, database);
@@ -476,13 +478,13 @@ async function examState(userId: string, examId: string, now: Date, database: Db
   if (isPaced(biteDeck)) {
     biteDeck = { ...biteDeck, coreMarked: true, newToday: await newTodayIds(userId, biteDeck, now, database) };
   }
-  const mastery = masteries(biteDeck, biteDeck.states, exam.at);
+  const mastery = deckMasteries(biteDeck);
   const concepts = deck.concepts.map((c): ConceptView => {
     const m = mastery[c.id] ?? 0;
     const rung = rungOf(m);
     return { id: c.id, name: c.name, lecture: c.lecture, icon: c.icon, weight: c.weight, mastery: m, rung, rungName: rungName(rung) };
   });
-  return { exam, deck, biteDeck, studyDeck: studyDeckOf(exam, deck, biteDeck, now), concepts, forecast: forecastOf(deck, mastery) };
+  return { exam, deck, biteDeck, studyDeck: studyDeckOf(exam, deck, biteDeck, now), concepts, forecast: deckForecast(biteDeck) };
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -502,19 +504,18 @@ async function snapshots(userId: string, state: ExamState, now: Date, database: 
     .orderBy(asc(reviews.at), asc(reviews.id));
 
   const today = dayKey(now);
-  const examAt = state.exam.at;
   const memory: Record<string, MemoryState> = {};
   const out: DailySnapshot[] = [];
   let day: string | null = null;
   for (const r of rows) {
     const key = dayKey(r.at);
     if (key >= today) break;
-    if (day !== null && key !== day) out.push({ day, mastery: masteries(state.biteDeck, memory, examAt) });
+    if (day !== null && key !== day) out.push({ day, mastery: deckMasteries(state.biteDeck, memory) });
     day = key;
     memory[r.cardId] = gradeMemory(memory[r.cardId] ?? newCard(r.at), r.grade as Grade, r.at);
   }
   if (day !== null) {
-    const last = { day, mastery: masteries(state.biteDeck, memory, examAt) };
+    const last = { day, mastery: deckMasteries(state.biteDeck, memory) };
     out.push(last);
     const yesterday = previousDay(today);
     if (day < yesterday) out.push({ day: yesterday, mastery: last.mastery });
@@ -531,8 +532,20 @@ async function studyWeek(userId: string, now: Date, database: Db): Promise<Study
   return { ...week, weeksInARow: weeks, freeSkipsLeft: skips, streakLine: streakLine(weeks, skips) };
 }
 
+/** The session's gain measured on the whole deck (the study-start cut may have hidden part of it). */
+function measured(state: ExamState, bite: Bite | null): Bite | null {
+  return bite ? { ...bite, gain: gainOf(state.biteDeck, bite.sections.flatMap(([, ids]) => ids)) } : null;
+}
+
 function todayBite(state: ExamState, done: number): Bite | null {
-  return buildBite({ ...state.studyDeck, kind: state.exam.kind, bitesDoneToday: done });
+  return measured(state, buildBite({ ...state.studyDeck, kind: state.exam.kind, bitesDoneToday: done }));
+}
+
+/** The exam's plan now; flat when no pace is promised (over, or before the study start). */
+function planFor(state: ExamState, now: Date, done: number): Plan {
+  const { exam, biteDeck } = state;
+  if (daysBetween(now, exam.at) < 0 || !newCardsAllowed(exam, now)) return flatPlan(biteDeck, exam.targetPct);
+  return planOf(biteDeck, exam.targetPct, done);
 }
 
 const sizeOf = (b: Bite) => b.sections.reduce((n, [, ids]) => n + ids.length, 0);
@@ -554,7 +567,7 @@ async function buildExamView(userId: string, examId: string, now: Date, database
   ]);
   const daysLeft = daysBetween(now, exam.at);
   const shown = Math.round(state.forecast);
-  const end = planEnd(shown, daysLeft);
+  const plan = planFor(state, now, done);
   // Past its day (whole-day or not): the exam is over, so no bite is offered.
   const bite = daysLeft < 0 ? null : todayBite(state, done);
   const pace = paceOf(state.studyDeck);
@@ -564,8 +577,16 @@ async function buildExamView(userId: string, examId: string, now: Date, database
     forecast: state.forecast,
     forecastShown: shown,
     history: history(snaps, state.deck.concepts.map((c) => ({ id: c.id, weight: c.weight }))),
-    planEnd: end,
-    verdict: verdict(shown, exam.targetPct, end),
+    plan,
+    planEnd: plan.end,
+    verdict: verdictOf(shown, exam.targetPct, plan, {
+      day: byDay(exam.at, now),
+      // Before the study start (not for an exam that is over): the day it opens, "Tue 24 Nov".
+      starts:
+        daysLeft >= 0 && exam.startNewOn && !newCardsAllowed(exam, now)
+          ? dayMonth(`${exam.startNewOn.slice(0, 10)}T12:00:00Z`)
+          : null,
+    }),
     phase: phaseOf(daysLeft),
     phasePosition: phasePosition(daysLeft),
     concepts: state.concepts,
@@ -579,7 +600,7 @@ async function buildExamView(userId: string, examId: string, now: Date, database
             open: pace.open,
             budget: pace.budget,
             left: pace.left,
-            bites: pace.bites,
+            bites: plan.pace.kind === "core" ? plan.pace.bitesToday : pace.bites,
             impossible: pace.impossible,
             done: bite === null && daysLeft >= 0 && newCardsAllowed(exam, now) && state.biteDeck.cards.length > 0,
           },
@@ -633,6 +654,7 @@ async function begin(
   } else {
     bite = extraSession(biteDeck);
   }
+  bite = measured(state, bite);
   if (!bite) return null;
 
   const ids = bite.sections.flatMap(([, list]) => list);
@@ -667,7 +689,7 @@ async function begin(
     sessionId: session.id,
     mode: kind,
     minutes: bite.minutes,
-    gainEstimate: bite.gainEstimate,
+    gain: bite.gain,
     cards: cardsOut,
     gradeMode: await gradeModeOf(userId, database),
   };
@@ -782,11 +804,14 @@ async function end(userId: string, sessionId: string, now: Date, database: Db): 
     studyWeek(userId, now, database),
   ]);
 
+  const plan = planFor(state, now, done);
   return {
     sessionId,
     examId: session.examId,
     mode: session.mode,
     stats,
+    planEnd: plan.endShown,
+    planLead: keepWords(plan.pace),
     forecastBefore: before,
     forecastAfter: state.forecast,
     forecastBeforeShown: Math.round(before),

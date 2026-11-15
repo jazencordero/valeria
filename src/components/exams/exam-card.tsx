@@ -51,6 +51,8 @@ export type ExamCardSpark = {
   /** Forecast today, not rounded. */
   forecast: number;
   daysLeft: number;
+  /** The plan's projection, one value per day from today to exam day; left out, a rule of thumb is drawn. */
+  plan?: readonly number[];
 };
 
 export type ExamCardVerdict = {
@@ -225,6 +227,7 @@ export function ExamCard({
               history={spark.history}
               forecast={spark.forecast}
               daysLeft={spark.daysLeft}
+              plan={spark.plan}
               target={target}
             />
           </div>
