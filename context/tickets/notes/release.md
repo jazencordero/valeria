@@ -23,7 +23,7 @@ Vercel's rule: the command exiting 1 means build, exiting 0 means skip. A deploy
 ## Before merging to `main`
 
 - CI is green on the pull request (lint, typecheck, unit tests, build).
-- Every migration in `drizzle/` that the release needs has been applied to Neon (Jazen runs it; agents never do).
+- Migrations: every Vercel build (`main` and `preview/*`) runs `drizzle-kit migrate` against Neon before `next build` (vercel.json `buildCommand`, unpooled address). Previews and production share the one database, so a preview push already migrates it: keep every migration additive (new tables, new nullable columns), and look at the build log's migrate step before merging.
 - Every new environment value the release reads is present in Vercel for Production (`vercel env ls production`).
 - The whole-flow checks pass (`npm run test:e2e`, and the whole-flow tickets M1-39, M2-23 once they exist) against the preview of the exact commit being merged.
 - The preview of that commit was opened on a phone once.
@@ -31,4 +31,4 @@ Vercel's rule: the command exiting 1 means build, exiting 0 means skip. A deploy
 ## Undo a bad release
 
 - **Code:** in Vercel, open the project's Deployments, pick the previous production deployment and use Instant Rollback (or `vercel rollback`). This is instant and needs no build. Then revert the bad commit on `main` so the next deploy does not bring it back.
-- **A migration that already ran:** rolling back code does not roll back the database. Prefer migrations that only add (new tables, new nullable columns) so the old code still works against the new schema. If a migration removed or changed something the old code needs, do not roll back the code: write a new forward migration that fixes it, and Jazen applies it. Never reset the production database.
+- **A migration that already ran:** rolling back code does not roll back the database. Prefer migrations that only add (new tables, new nullable columns) so the old code still works against the new schema. If a migration removed or changed something the old code needs, do not roll back the code: write a new forward migration that fixes it; the next build applies it. Never reset the production database.

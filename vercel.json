@@ -3,5 +3,6 @@
   "ignoreCommand": "case \"$VERCEL_GIT_COMMIT_REF\" in main|preview/*) exit 1 ;; *) exit 0 ;; esac",
   "regions": [
     "fra1"
-  ]
+  ],
+  "buildCommand": "if [ -n \"$DATABASE_URL\" ]; then DATABASE_URL=\"${DATABASE_URL_UNPOOLED:-$DATABASE_URL}\" npx drizzle-kit migrate || exit 1; fi; npm run build"
 }
