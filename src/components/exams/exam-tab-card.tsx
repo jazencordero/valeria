@@ -13,9 +13,16 @@
  * lectures. Usually ready within a day." while the cards are still being made.
  *
  * Plain props: the page works out the phase, forecast, rungs and counts.
+ *
+ * M4-14: the card is the box the exam page opens out of and closes back
+ * into. It carries `workSource(href)` and its click goes through
+ * `openCardLink` (both in `@/lib/motion/shared`, which describes the whole
+ * transition). A client component for that click only.
  */
 import Link from "next/link";
 import type { ComponentProps } from "react";
+import { WORK_TRANSITION_CSS, openCardLink, workSource } from "@/lib/motion/shared";
+import { useMotionMode } from "@/lib/motion/use-calm";
 import { RungDot } from "@/components/study/pips";
 import { Sparkline } from "@/components/study/sparkline";
 import { Ring } from "@/components/ui/ring";
@@ -95,11 +102,21 @@ export function ExamTabCard({
   ...rest
 }: ExamTabCardProps) {
   const f = Math.round(forecast);
+  const mode = useMotionMode();
+  const { href, onClick } = rest;
   return (
     <Link
+      {...(typeof href === "string" ? workSource(href) : {})}
       {...rest}
+      onClick={(e) => {
+        onClick?.(e);
+        openCardLink(e, mode);
+      }}
       className={`block w-full text-left no-underline ${CARD} ${className}`}
     >
+      <style href="ready-work-transition" precedence="default">
+        {WORK_TRANSITION_CSS}
+      </style>
       <span className="flex items-start justify-between gap-3">
         <span className="min-w-0">
           <span className="mono mb-1.5 inline-block rounded-full bg-accent-wash px-2 py-0.5 text-[10px] text-ink">

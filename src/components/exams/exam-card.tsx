@@ -16,9 +16,16 @@
  * Usually ready within a day." while the cards are still being made.
  *
  * Plain props: the page works out the forecast, verdict, rungs and minutes.
- * The card-to-page open transition is M4-15.
+ *
+ * M4-14: the card is the box the exam page opens out of and closes back
+ * into. It carries `workSource` (a name for this card, since it does not know
+ * the exam's path) and the two buttons that open the exam go through
+ * `openCardPage` (both in `@/lib/motion/shared`, which describes the whole
+ * transition). Today's bite starts a session and is a plain button.
  */
-import { useId, useState, type HTMLAttributes, type ReactNode } from "react";
+import { useId, useState, type HTMLAttributes, type MouseEvent, type ReactNode } from "react";
+import { WORK_SOURCE_ATTR, WORK_TRANSITION_CSS, openCardPage, workSource } from "@/lib/motion/shared";
+import { useMotionMode } from "@/lib/motion/use-calm";
 import { Ring } from "@/components/ui/ring";
 import { Button } from "@/components/ui/button";
 import { Pips, RUNG_NAMES } from "@/components/study/pips";
@@ -159,14 +166,26 @@ export function ExamCard({
   };
   const f = Math.round(forecast);
   const conceptsId = `${id}-concepts`;
+  const mode = useMotionMode();
+  /** Opens the exam page out of this card. */
+  const openOut = (e: MouseEvent<HTMLElement>, go: (() => void) | undefined) => {
+    if (!go) return;
+    const card = e.currentTarget.closest<HTMLElement>(`[${WORK_SOURCE_ATTR}]`);
+    if (card) openCardPage(card, mode, go);
+    else go();
+  };
+  const opensExam = biteMinutes == null;
 
   return (
-    <article {...rest} className={`${CARD} ${className}`}>
+    <article {...workSource(`exam-card|${kind}|${course}|${title}`)} {...rest} className={`${CARD} ${className}`}>
+      <style href="ready-work-transition" precedence="default">
+        {WORK_TRANSITION_CSS}
+      </style>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <button
             type="button"
-            onClick={onOpenExam}
+            onClick={(e) => openOut(e, onOpenExam)}
             className={
               "inline-flex min-h-11 cursor-pointer items-center border-0 bg-transparent p-0 text-left text-ink " +
               "underline decoration-transparent underline-offset-4 transition-[text-decoration-color] " +
@@ -256,10 +275,12 @@ export function ExamCard({
       )}
 
       {kind === "exam" && !making && (
-        <Button variant="secondary" className="mt-3" onClick={onSession}>
-          {biteMinutes != null
-            ? `Today’s bite · ${biteMinutes} min`
-            : "Open the exam"}
+        <Button
+          variant="secondary"
+          className="mt-3"
+          onClick={opensExam ? (e) => openOut(e, onSession) : onSession}
+        >
+          {opensExam ? "Open the exam" : `Today’s bite · ${biteMinutes} min`}
         </Button>
       )}
     </article>

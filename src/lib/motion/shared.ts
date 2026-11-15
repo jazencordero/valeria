@@ -40,6 +40,13 @@
  * While a workspace is on screen `<html data-work>` is set: the tab bar is
  * taken away (on phones the workspace covers everything) and the sidebar is
  * inert (`holdShell`).
+ *
+ * M4-14 adds the same thing for a page that opens out of a card and keeps
+ * the shell, the exam page: see "A page that opens out of its card" below
+ * (`openCardPage`, `openCardLink`, `cardArrival`, `closeCardPage`). Same
+ * page area, same clip, its own types (`open-exam`, `close-exam`) and
+ * timings (360 ms open, 320 ms close). It also remembers where the card was
+ * (page and scroll position) so Back returns there.
  */
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { calmDurationMs, durationMs, ease } from "./tokens";
@@ -60,6 +67,13 @@ export const WORK_SOURCE_ATTR = "data-work-source";
 export const WORK_VT_ATTR = "data-work-vt";
 /** On <html> while a workspace is opening ("opening") or on screen ("open"). */
 export const WORK_ATTR = "data-work";
+
+/** The exam page's types (M4-14). */
+export const OPEN_EXAM = "open-exam";
+export const CLOSE_EXAM = "close-exam";
+export const CLOSE_EXAM_SLIDE = "close-exam-slide";
+export const EXAM_OPEN_MS = 360;
+export const EXAM_CLOSE_MS = 320;
 
 export const OPEN_MS = durationMs.slow;
 export const CLOSE_MS = 420;
@@ -151,6 +165,22 @@ html[${WORK_VT_ATTR}="${CLOSE_WORK_SLIDE}"]::view-transition-old(${WORK_NAME}) {
   to { clip-path: var(--work-clip, ${FULL_CLIP}); opacity: 0; }
 }
 @keyframes ready-work-slide-out { to { transform: translateX(100%); } }
+html[${WORK_VT_ATTR}="${OPEN_EXAM}"]::view-transition-new(${WORK_NAME}) {
+  animation: ${EXAM_OPEN_MS}ms ${E_INOUT} both ready-work-open;
+}
+html[${WORK_VT_ATTR}="${CLOSE_EXAM}"]::view-transition-old(${WORK_NAME}) {
+  z-index: 1;
+  animation: ${EXAM_CLOSE_MS}ms ${E_INOUT} both ready-exam-close;
+}
+html[${WORK_VT_ATTR}="${CLOSE_EXAM_SLIDE}"]::view-transition-old(${WORK_NAME}) {
+  z-index: 1;
+  animation: ${SLIDE_MS}ms ${E_INOUT} both ready-work-slide-out;
+}
+@keyframes ready-exam-close {
+  from { clip-path: ${FULL_CLIP}; opacity: 1; }
+  70% { opacity: 1; }
+  to { clip-path: var(--work-clip, ${FULL_CLIP}); opacity: 0; }
+}
 `;
 
 /* ---------- Browser helpers ---------- */
@@ -170,11 +200,11 @@ export function hasViewTransitions(): boolean {
   return viewTransitionStarter() !== null;
 }
 
-/** A plain primary click on a link that opens in this tab. */
-function plainClick(e: ReactMouseEvent<HTMLAnchorElement>): boolean {
+/** A plain primary click on a link that opens in this tab. `link` is the link when the handler sits on something else. */
+function plainClick(e: ReactMouseEvent<Element>, link: Element = e.currentTarget): boolean {
   if (e.defaultPrevented || e.button !== 0) return false;
   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return false;
-  const target = e.currentTarget.getAttribute("target");
+  const target = link.getAttribute("target");
   return !target || target === "_self";
 }
 
@@ -450,4 +480,292 @@ export function holdShell(): () => void {
     html.removeAttribute(WORK_ATTR);
     if (side && !wasInert) side.removeAttribute("inert");
   };
+}
+
+/* ---------- A page that opens out of its card and keeps the shell: exams (M4-14) ---------- */
+/*
+ * Source: prototype main-flow.html JS 2957-3054 (openExam, closeExamPage).
+ * The card carries `workSource(key)`: the page's path when the card knows it
+ * (the Exams tab's card is a link), any text that names the card when it does
+ * not (Home's exam card). Opening notes where the card was; the page that
+ * mounts calls `cardArrival`; its back link calls `closeCardPage`, which goes
+ * back to the page the card is on, puts the scroll where it was and shrinks
+ * into the card. Opened some other way (a link, a reload, browser back): Back
+ * goes to the fallback page and shrinks into the card there that carries the
+ * page's path, if there is one.
+ */
+
+/** One kind of page that opens out of a card: its `<html data-work-vt>` values and how long it grows. */
+export type CardPage = { open: string; close: string; closeSlide: string; openMs: number };
+
+export const EXAM_PAGE: CardPage = {
+  open: OPEN_EXAM,
+  close: CLOSE_EXAM,
+  closeSlide: CLOSE_EXAM_SLIDE,
+  openMs: EXAM_OPEN_MS,
+};
+
+/** How long the content takes to fade in when it lands inside the growing page. */
+const CARD_CONTENT_MS = durationMs.quick;
+
+type CardOrigin = {
+  /** The page the card is on. */
+  path: string;
+  /** How far that page was scrolled. */
+  scroll: number;
+  /** The card's `workSource` value. */
+  key: string | null;
+  at: number;
+  /** The page that opened; null until it mounts. */
+  to: string | null;
+};
+
+type CardOpening = {
+  how: Exclude<WorkMotion, "none">;
+  at: number;
+  grewAt: number | null;
+  ms: number;
+};
+
+let cardOrigin: CardOrigin | null = null;
+let cardOpening: CardOpening | null = null;
+/** The page that last arrived and when its growth ends, so asking twice gives one answer. */
+let cardArrived: { root: HTMLElement; endsAt: number } | null = null;
+const cardPaths = new WeakMap<HTMLElement, string>();
+
+/**
+ * Opens a page out of `source` (the card, marked with `workSource`).
+ * `navigate` starts the navigation; it is always called, once.
+ */
+export function openCardPage(
+  source: HTMLElement,
+  mode: MotionMode,
+  navigate: () => void,
+  page: CardPage = EXAM_PAGE,
+): void {
+  const main = document.getElementById("main");
+  const start = viewTransitionStarter();
+  const how = workMotion(mode, start !== null);
+  const at = performance.now();
+  cardOrigin = {
+    path: window.location.pathname,
+    scroll: main?.scrollTop ?? 0,
+    key: source.getAttribute(WORK_SOURCE_ATTR),
+    at,
+    to: null,
+  };
+  cardOpening = null;
+  if (how === "none" || !main) {
+    navigate();
+    return;
+  }
+  const mine: CardOpening = { how, at, grewAt: null, ms: page.openMs };
+  if (how !== "clip" || start === null) {
+    cardOpening = mine;
+    navigate();
+    return;
+  }
+  const card = source.getBoundingClientRect();
+  if (busy || card.width <= 0) {
+    navigate();
+    return;
+  }
+  busy = true;
+  cardOpening = mine;
+
+  const html = document.documentElement;
+  html.setAttribute(WORK_VT_ATTR, page.open);
+  let left = false;
+  const transition = start(async () => {
+    navigate();
+    left = (await waitFor(main, OPEN_WAIT_MS, () => (isShown(source) ? null : true))) === true;
+    if (left) html.style.setProperty("--work-clip", insetFor(card, main.getBoundingClientRect()));
+  });
+  transition.ready.then(
+    () => {
+      if (left) {
+        mine.grewAt = performance.now();
+        return;
+      }
+      if (cardOpening === mine) cardOpening = null;
+      transition.skipTransition();
+    },
+    () => {},
+  );
+  transition.finished.then(endTransition, endTransition);
+}
+
+/** `openCardPage` as the `onClick` of a link that is the card, or sits inside it. */
+export function openCardLink(
+  e: ReactMouseEvent<HTMLAnchorElement>,
+  mode: MotionMode,
+  page: CardPage = EXAM_PAGE,
+): void {
+  if (replaying || !plainClick(e)) return;
+  const link = e.currentTarget;
+  const source = link.closest<HTMLElement>(`[${WORK_SOURCE_ATTR}]`);
+  if (!source) return;
+  e.preventDefault();
+  openCardPage(source, mode, () => replayClick(link), page);
+}
+
+/** True while a page is growing out of a card and has not mounted yet. Safe to read while rendering. */
+export function cardRevealPending(): boolean {
+  const mine = cardOpening;
+  return mine !== null && mine.how === "clip" && performance.now() - mine.at <= OPENING_FRESH_MS;
+}
+
+/**
+ * Called by the page when it mounts or is shown again (a layout effect).
+ * Plays its side of the open if a card led here a moment ago, and returns how
+ * many ms are left until the page has grown to full size: start first-show
+ * animations after that. 0 when there is nothing to wait for.
+ */
+export function cardArrival(root: HTMLElement): number {
+  const now = performance.now();
+  const here = window.location.pathname;
+  cardPaths.set(root, here);
+  if (cardOrigin && cardOrigin.to === null) {
+    if (now - cardOrigin.at <= OPENING_FRESH_MS) cardOrigin.to = here;
+    else cardOrigin = null;
+  }
+  const mine = cardOpening;
+  cardOpening = null;
+  if (!mine) return cardArrived?.root === root ? Math.max(0, cardArrived.endsAt - now) : 0;
+  if (now - mine.at > OPENING_FRESH_MS || typeof root.animate !== "function") return 0;
+
+  let wait = 0;
+  if (mine.how === "fade") {
+    root.animate([{ opacity: 0 }, { opacity: 1 }], { duration: calmDurationMs, easing: "linear" });
+  } else if (mine.how === "slide") {
+    root.animate([{ transform: "translateX(100%)" }, { transform: "none" }], {
+      duration: SLIDE_MS,
+      easing: E_OUT,
+    });
+  } else {
+    wait = mine.grewAt === null ? mine.ms : Math.max(0, mine.ms - (now - mine.grewAt));
+    root.animate([{ opacity: 0 }, { opacity: 1 }], { duration: CARD_CONTENT_MS, easing: E_OUT });
+  }
+  cardArrived = { root, endsAt: now + wait };
+  return wait;
+}
+
+/**
+ * Called by the page when it is taken away (the layout effect's cleanup).
+ * Forgets where it was opened from, so a later visit by some other way does
+ * not go "back" to a card it did not come from.
+ */
+export function leaveCardPage(root: HTMLElement): void {
+  const path = cardPaths.get(root);
+  // Later: an effect that runs twice leaves a page that is still there.
+  window.setTimeout(() => {
+    if (isShown(root)) return;
+    if (cardOrigin && cardOrigin.to !== null && cardOrigin.to === path) cardOrigin = null;
+    if (cardArrived?.root === root) cardArrived = null;
+  }, 0);
+}
+
+/**
+ * A click on the page's back link (`link`; the handler may sit on something
+ * around it). `root` is the page. Goes back with `navigate(path)` to where
+ * the card is, or to `fallbackPath`, restores the scroll position there, and
+ * shrinks the page into the card (clip), or lets it leave first (slide,
+ * fade). A click that opens a new tab is left alone.
+ */
+export function closeCardPage(
+  e: ReactMouseEvent<Element>,
+  link: Element,
+  mode: MotionMode,
+  root: HTMLElement | null,
+  navigate: (path: string) => void,
+  fallbackPath: string,
+  page: CardPage = EXAM_PAGE,
+): void {
+  if (!plainClick(e, link)) return;
+  const main = document.getElementById("main");
+  if (!main || !root) return;
+  e.preventDefault();
+  e.stopPropagation();
+
+  const here = window.location.pathname;
+  const from: Pick<CardOrigin, "path" | "scroll" | "key"> =
+    cardOrigin && cardOrigin.to === here ? cardOrigin : { path: fallbackPath, scroll: 0, key: here };
+  const selector = from.key === null ? null : `[${WORK_SOURCE_ATTR}="${CSS.escape(from.key)}"]`;
+  const findCard = (): HTMLElement | null => {
+    if (selector === null) return null;
+    for (const el of main.querySelectorAll<HTMLElement>(selector)) if (isShown(el)) return el;
+    return null;
+  };
+  /** The card's page is back: put the scroll where it was. Resolves with the card, if it is there. */
+  const land = async (): Promise<HTMLElement | null> => {
+    const card = await waitFor(main, CLOSE_WAIT_MS, findCard);
+    main.scrollTop = from.scroll;
+    return card;
+  };
+
+  const start = viewTransitionStarter();
+  const how = workMotion(mode, start !== null);
+  if (how === "none") {
+    navigate(from.path);
+    void land();
+    return;
+  }
+  if (busy) return;
+  busy = true;
+
+  if (how !== "clip" || start === null) {
+    if (typeof root.animate !== "function") {
+      busy = false;
+      navigate(from.path);
+      void land();
+      return;
+    }
+    const leave =
+      how === "fade"
+        ? root.animate([{ opacity: 1 }, { opacity: 0 }], {
+            duration: calmDurationMs,
+            easing: "linear",
+            fill: "forwards",
+          })
+        : root.animate([{ transform: "translateX(0%)" }, { transform: "translateX(100%)" }], {
+            duration: SLIDE_MS,
+            easing: E_INOUT,
+            fill: "forwards",
+          });
+    const go = () => {
+      busy = false;
+      navigate(from.path);
+      // The page may be kept, hidden, for browser back: do not leave it faded out.
+      void land().then(() => leave.cancel());
+    };
+    leave.finished.then(go, go);
+    return;
+  }
+
+  const html = document.documentElement;
+  const before = main.getBoundingClientRect();
+  let card: HTMLElement | null = null;
+  html.setAttribute(WORK_VT_ATTR, page.close);
+  const transition = start(async () => {
+    navigate(from.path);
+    card = await land();
+    const box = card?.getBoundingClientRect();
+    if (box && box.width > 0) {
+      const to = main.getBoundingClientRect();
+      // The old picture keeps its own size, pinned to the page area's top left corner.
+      html.style.setProperty(
+        "--work-clip",
+        insetFor(box, { left: to.left, top: to.top, width: before.width, height: before.height }),
+      );
+    } else {
+      html.setAttribute(WORK_VT_ATTR, page.closeSlide);
+    }
+  });
+  const after = () => {
+    endTransition();
+    // As in the prototype: focus goes back to what opened the page.
+    const opener = card?.matches("a[href], button") ? card : card?.querySelector<HTMLElement>("button, a[href]");
+    opener?.focus({ preventScroll: true });
+  };
+  transition.finished.then(after, after);
 }

@@ -29,10 +29,27 @@
  * demo line sits above it for a demo user; `--exam-top` is measured), so the
  * page area has nothing to scroll and the open tab panel takes the height
  * that is left.
- * Cut: the Anki row (M8-14), open and close transitions (M4-14).
+ *
+ * M4-14: the page opens out of the exam card that was tapped and "Back to
+ * exams" shrinks it back into that card, on Home or on the Exams tab,
+ * wherever it was opened, with the scroll position it had (`cardArrival`,
+ * `closeCardPage` in `@/lib/motion/shared`, which describes the whole
+ * transition). The header's ring and the Progress chart play their first-show
+ * animations once the page has grown to full size, not while it grows. The
+ * header is the shared `StickyHeader`; on phones the tab track sticks right
+ * under it.
+ * Cut: the Anki row (M8-14).
  */
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { DoodleDefs } from "@/components/doodle";
 import { makingLine } from "@/components/exams/exam-card";
 import { ExamDocuments, type ExamDocumentRow } from "@/components/exams/exam-documents";
@@ -47,7 +64,16 @@ import { PracticeTiles, type PracticeType } from "@/components/study/practice-ti
 import { ProgressHead } from "@/components/study/progress-head";
 import { ProgressSheet, type ProgressConcept } from "@/components/study/progress-sheet";
 import { Button } from "@/components/ui/button";
+import { StickyHeader } from "@/components/ui/sticky-header";
 import { Tabs } from "@/components/ui/tabs";
+import {
+  WORK_TRANSITION_CSS,
+  cardArrival,
+  cardRevealPending,
+  closeCardPage,
+  leaveCardPage,
+} from "@/lib/motion/shared";
+import { useMotionMode } from "@/lib/motion/use-calm";
 import type { Week } from "@/lib/study/week";
 
 /** `courses.ai_study`. */
@@ -286,6 +312,9 @@ function Making({ lectures }: { lectures: number }) {
 
 const NO_DOCUMENTS: readonly ExamDocumentRow[] = [];
 
+/** Where "Back to exams" goes when the page was not opened from a card. */
+const BACK_HREF = "/exams";
+
 export function ExamPage({
   examId,
   course,
@@ -320,23 +349,86 @@ export function ExamPage({
   }, [rollFrom, pathname]);
 
   // Where the page starts inside the page area (0, or the demo line's height).
+  // The header sticks there, and on phones the tab track sticks right under
+  // the header, however tall that is (`tabsTop`).
   const rootRef = useRef<HTMLDivElement>(null);
+  const [tabsTop, setTabsTop] = useState(0);
   useLayoutEffect(() => {
     const el = rootRef.current;
     const area = el?.parentElement;
     if (!el || !area) return;
+    const head = el.querySelector<HTMLElement>(":scope > header");
     const measure = () => el.style.setProperty("--exam-top", `${el.offsetTop}px`);
     measure();
+    const changed = () => {
+      measure();
+      setTabsTop(el.offsetTop + (head?.offsetHeight ?? 0));
+    };
     // The demo line streams in on its own, and wraps at some widths.
-    const added = new MutationObserver(measure);
+    const added = new MutationObserver(changed);
     added.observe(area, { childList: true });
-    const resized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    const resized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(changed);
     resized?.observe(area);
+    if (head) resized?.observe(head);
     return () => {
       added.disconnect();
       resized?.disconnect();
     };
   }, []);
+
+  // Opened from a card: the page grows out of it (M4-14). Until it has grown,
+  // first-show animations wait: `held` keeps the Progress chart from mounting,
+  // and `data-held` on the page hides the header ring's arc, which is drawn
+  // again from empty (the header is remounted) when the growth ends.
+  const mode = useMotionMode();
+  const [held, setHeld] = useState(() => cardRevealPending());
+  const [headerRun, setHeaderRun] = useState(0);
+  const refocus = useRef<"h1" | "a" | null>(null);
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const wait = cardArrival(el);
+    if (wait > 0) el.setAttribute("data-held", "");
+    const timer = window.setTimeout(() => {
+      el.removeAttribute("data-held");
+      setHeld(false);
+      if (wait <= 0) return;
+      // Remounting the header would drop the focus the tab change put on its heading.
+      const active = document.activeElement;
+      const head = el.querySelector(":scope > header");
+      refocus.current =
+        active && head?.contains(active) ? (active.tagName === "A" ? "a" : "h1") : null;
+      setHeaderRun((n) => n + 1);
+    }, wait);
+    return () => {
+      window.clearTimeout(timer);
+      el.removeAttribute("data-held");
+      leaveCardPage(el);
+    };
+  }, []);
+  useLayoutEffect(() => {
+    const what = refocus.current;
+    refocus.current = null;
+    if (what) {
+      rootRef.current
+        ?.querySelector<HTMLElement>(`:scope > header ${what}`)
+        ?.focus({ preventScroll: true });
+    }
+  }, [headerRun]);
+
+  /** "Back to exams": back into the card the page was opened from. */
+  const back = (e: MouseEvent<HTMLElement>) => {
+    const link = (e.target as Element).closest("a");
+    if (!link || link.getAttribute("href") !== BACK_HREF) return;
+    closeCardPage(
+      e,
+      link,
+      mode,
+      rootRef.current,
+      (path) => router.push(path, { scroll: false }),
+      BACK_HREF,
+    );
+  };
 
   // The Progress chart draws the first time its tab is shown.
   const [progressShown, setProgressShown] = useState(false);
@@ -394,7 +486,7 @@ export function ExamPage({
         planEnd={progress.planEnd}
         dayName={progress.dayName}
         chart={progress.chart}
-        shown={progressShown}
+        shown={progressShown && !held}
         rollFrom={rollFrom}
         className={
           "min-[1000px]:grid min-[1000px]:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] min-[1000px]:items-center " +
@@ -431,24 +523,36 @@ export function ExamPage({
       ref={rootRef}
       data-testid="exam-page"
       className={
-        "mx-auto max-w-[760px] px-[var(--pad)] pt-[max(20px,env(safe-area-inset-top,0px))] pb-10 " +
-        "min-[1000px]:flex min-[1000px]:h-[calc(100%-var(--exam-top,0px))] min-[1000px]:flex-col min-[1000px]:pb-6"
+        "mx-auto max-w-[760px] px-[var(--pad)] pb-10 " +
+        "min-[1000px]:flex min-[1000px]:h-[calc(100%-var(--exam-top,0px))] min-[1000px]:flex-col min-[1000px]:pb-6 " +
+        "[&[data-held]_circle.stroke-accent]:opacity-0"
       }
     >
+      <style href="ready-work-transition" precedence="default">
+        {WORK_TRANSITION_CSS}
+      </style>
       <DoodleDefs />
-      <ExamHeader
-        course={course}
-        sub={sub}
-        forecast={forecast}
-        verdict={verdict}
-        rollFrom={rollFrom}
-        backHref="/exams"
-        className="min-[1000px]:flex-none"
-      />
+      <StickyHeader
+        padTop="20px"
+        style={{ top: "var(--exam-top, 0px)" }}
+        onClickCapture={back}
+        className="-mx-[var(--pad)] px-[var(--pad)] pb-2 min-[1000px]:flex-none"
+      >
+        <ExamHeader
+          key={headerRun}
+          course={course}
+          sub={sub}
+          forecast={forecast}
+          verdict={verdict}
+          rollFrom={rollFrom}
+          backHref={BACK_HREF}
+        />
+      </StickyHeader>
       <Tabs
         label="Exam"
         memoryKey={`exam.${examId}`}
         defaultTab={defaultTab}
+        stickyTop={tabsTop}
         onShown={(id) => {
           if (id === "progress") setProgressShown(true);
         }}
