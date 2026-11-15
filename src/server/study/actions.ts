@@ -151,7 +151,7 @@ import { flatPlan, keepWords, planOf, verdictOf, type Plan } from "@/lib/study/p
 import { GRADES, grade as gradeMemory, intervalLabel, newCard, type Grade, type MemoryState } from "@/lib/study/memory";
 import type { SessionMode } from "@/lib/study/session";
 import { DEFAULT_GOAL, freeSkipsLeft, goalFor, streakLine, weekOf, weeksInARow, type Week } from "@/lib/study/week";
-import { newCardsAllowed } from "./start-date";
+import { ExamOver, examOver, newCardsAllowed } from "./start-date";
 import {
   bitesDoneToday,
   countsToday,
@@ -331,7 +331,8 @@ export async function examView(examId: string): Promise<ExamView> {
  * Starts a session: `kind` is `bite` (today's bite; `arg` unused), `tile`
  * (`arg` is a card type), `concept` (`arg` is a concept id) or `extra`.
  * Returns null when there is nothing to study (today's bites are done, or no
- * card fits); no session row is written then.
+ * card fits); no session row is written then. An exam whose day is over
+ * starts nothing either: it throws `ExamOver` (from `./start-date`).
  */
 export async function beginSession(examId: string, kind: SessionMode, arg?: string): Promise<BegunSession | null> {
   const user = await currentUser();
@@ -546,7 +547,7 @@ function todayBite(state: ExamState, done: number): Bite | null {
 /** The exam's plan now; flat when no pace is promised (over, or before the study start). */
 function planFor(state: ExamState, now: Date, done: number): Plan {
   const { exam, biteDeck } = state;
-  if (daysBetween(now, exam.at) < 0 || !newCardsAllowed(exam, now)) return flatPlan(biteDeck, exam.targetPct);
+  if (examOver(exam, now) || !newCardsAllowed(exam, now)) return flatPlan(biteDeck, exam.targetPct);
   return planOf(biteDeck, exam.targetPct, done);
 }
 
@@ -642,6 +643,8 @@ async function begin(
 ): Promise<BegunSession | null> {
   if (!(SESSION_MODES as readonly string[]).includes(kind)) throw new Error(`beginSession: unknown kind ${String(kind)}`);
   const state = await examState(userId, examId, now, database);
+  // A past exam has no sessions of any kind: its page says "This exam is over."
+  if (examOver(state.exam, now)) throw new ExamOver(state.exam.id);
   const biteDeck = state.studyDeck;
 
   let bite: Bite | null;

@@ -577,6 +577,26 @@ describe("exam day and the day after", () => {
     expect(EXAM).toBeLessThan(clock);
   });
 
+  it("a past exam starts no session of any kind", async () => {
+    const { ExamOver } = await import("./start-date");
+    const { studySessions } = await import("@/server/db/schema/study");
+    const view = await examView(examId);
+    // The last minute of exam day: still allowed.
+    setNow(new Date("2026-12-04T23:59:00+02:00").getTime());
+    expect(await beginSession(examId, "extra")).not.toBeNull();
+    const before = (await t.db.select().from(studySessions)).length;
+
+    setNow(new Date("2026-12-05T00:00:00+02:00").getTime());
+    for (const [kind, arg] of [["bite"], ["extra"], ["tile", "basic"], ["concept", view.concepts[0].id]] as const) {
+      const err = await caught(beginSession(examId, kind, arg));
+      expect(err).toBeInstanceOf(ExamOver);
+      expect((err as InstanceType<typeof ExamOver>).examId).toBe(examId);
+    }
+    expect((await t.db.select().from(studySessions)).length).toBe(before);
+    // Someone else's past exam is still "not found", not "over".
+    expect(await caught(beginSession(theirExamId, "bite"))).toBeInstanceOf(StudyNotFound);
+  });
+
   it("from 00:00 the day after the exam is over: days left are negative and no bite is built", async () => {
     setNow(new Date("2026-12-05T00:00:00+02:00").getTime());
     const over = await examView(examId);

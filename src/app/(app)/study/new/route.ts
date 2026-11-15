@@ -18,6 +18,9 @@
  *   session row is made.
  * - A kind that is not one of the four, or a tile / concept session without
  *   its `arg`: back to the exam page as well; nothing is written.
+ * - An exam whose day is over (`ExamOver`, whatever the kind): to its page,
+ *   `/exams/<id>`, which says "This exam is over."; `return` is not used and
+ *   no session row is made.
  * - No exam id, a malformed one, or an exam that does not exist or is
  *   someone else's: to the Exams tab, `/exams`.
  * - Not signed in: to `/`.
@@ -31,6 +34,7 @@ import { currentUser, NotSignedIn } from "@/server/auth/session";
 import { SESSION_MODES } from "@/server/db/schema/study";
 import { beginSession } from "@/server/study/actions";
 import { beginLectureSession, safeReturn } from "@/server/study/lecture-session";
+import { ExamOver } from "@/server/study/start-date";
 import { StudyNotFound } from "@/server/study/store";
 import type { SessionMode } from "@/lib/study/session";
 
@@ -76,12 +80,14 @@ export async function GET(request: NextRequest) {
     const begun = await beginSession(exam, kind as SessionMode, arg);
     sessionId = begun?.sessionId ?? null;
   } catch (err) {
-    if (err instanceof StudyNotFound) sessionId = "not-found";
+    if (err instanceof ExamOver) sessionId = "over";
+    else if (err instanceof StudyNotFound) sessionId = "not-found";
     else if (err instanceof NotSignedIn) sessionId = "signed-out";
     // An unknown card type or a concept outside this exam: nothing to start.
     else if (err instanceof Error && err.message.startsWith("beginSession:")) sessionId = null;
     else throw err;
   }
+  if (sessionId === "over") redirect(`/exams/${exam}`);
   if (sessionId === "not-found") redirect("/exams");
   if (sessionId === "signed-out") redirect("/");
   if (!sessionId) redirect(back);
