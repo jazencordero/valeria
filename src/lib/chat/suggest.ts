@@ -4,15 +4,12 @@
  * A fixed ladder, no AI-chosen suggestions. Pure: same input, same label.
  * The prototype's "Run both forecasts" step is left out because the chat
  * cannot run calculations.
+ *
+ * The course's AI rule is read through `assignmentHelp` (M2-27), so only a
+ * course marked "allowed" is offered "Draft it with me"; "explain", "off" and
+ * "unknown" (not answered yet) never are.
  */
-
-/**
- * A course's AI rule, matching the `ai_policy` column planned for courses
- * (`'unknown' | 'allowed' | 'not_allowed'`, default `'unknown'`, see M1-05
- * and M2-21). Only `allowed` unlocks drafting; `unknown` behaves like
- * `not_allowed` (explain-only), as M2-21 requires.
- */
-export type AiPolicy = "unknown" | "allowed" | "not_allowed";
+import { assignmentHelp, type AiAssignments } from "@/lib/ai-policy";
 
 /** The only thing this function needs from a chat message. */
 export type SuggestMessage = { readonly role: "user" | "assistant" };
@@ -24,7 +21,8 @@ export type SuggestInput = {
   readonly hasDraft: boolean;
   /** The assignment has been handed in. */
   readonly handedIn: boolean;
-  readonly aiPolicy: AiPolicy;
+  /** The course's `ai_assignments`, as stored. */
+  readonly aiAssignments: AiAssignments;
   /** The school's LMS name from `src/lib/schools.ts`, e.g. "MyCourses". */
   readonly lmsName: string;
 };
@@ -41,12 +39,12 @@ export function nextSuggestion({
   messages,
   hasDraft,
   handedIn,
-  aiPolicy,
+  aiAssignments,
   lmsName,
 }: SuggestInput): string {
   if (handedIn) return "Back to home";
   if (hasDraft) return `Hand in to ${lmsName}`;
   const asked = messages.some((m) => m.role === "user");
   if (!asked) return "What exactly is asked?";
-  return aiPolicy === "allowed" ? "Draft it with me" : "Quiz me on this";
+  return assignmentHelp({ aiAssignments }) === "allowed" ? "Draft it with me" : "Quiz me on this";
 }

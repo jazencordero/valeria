@@ -1,20 +1,21 @@
 /**
- * One assignment, thin (M1-34): header with the due line, the brief, its
- * files, the file picker and the hand-in. The client part is
- * `WorkspaceThin`; this page reads her data and sets `seen_at` on the first
- * open. Another user's assignment, an unknown id or a malformed one is a 404.
+ * One assignment: the chat workspace (M2-22). The client part is `Workspace`
+ * (header, sources, chat, AI-policy card, draft card, hand-in); this page
+ * reads her data (the assignment, the course's AI rule, the stored chat and
+ * her draft) and sets `seen_at` on the first open. Another user's
+ * assignment, an unknown id or a malformed one is a 404.
  *
  * Everything here depends on the cookie and the id, so it streams inside
- * Suspense (cacheComponents). Cut: no chat (M2-20), no open-from-card
- * transition (M4-14).
+ * Suspense (cacheComponents). Cut: no open-from-card transition (M4-14).
  */
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { lmsNameOf } from "@/lib/schools";
-import { WorkspaceThin } from "@/components/work/workspace-thin";
+import { Workspace as WorkspaceView } from "@/components/work/workspace";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { getAssignmentPage, markSeen } from "@/server/data/assignment";
+import { setCourseAiPolicy } from "./policy-actions";
 
 type Params = Promise<{ id: string }>;
 
@@ -38,9 +39,10 @@ async function Workspace({ params }: { params: Params }) {
   await markSeen(user.id, page.id, now);
 
   return (
-    <WorkspaceThin
+    <WorkspaceView
       id={page.id}
       title={page.title}
+      courseName={page.course}
       dueAt={page.dueAt}
       handedInAt={page.handedInAt}
       brief={page.brief}
@@ -50,6 +52,10 @@ async function Workspace({ params }: { params: Params }) {
       maxFiles={page.maxFiles}
       lms={lmsNameOf(user)}
       lmsUrl={page.lmsUrl}
+      aiAssignments={page.aiAssignments}
+      setPolicy={setCourseAiPolicy.bind(null, page.courseId)}
+      messages={page.messages}
+      draft={page.draft}
       now={now}
       homeHref="/home"
     />

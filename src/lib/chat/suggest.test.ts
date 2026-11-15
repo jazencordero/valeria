@@ -9,7 +9,7 @@ function input(over: Partial<SuggestInput> = {}): SuggestInput {
     messages: [],
     hasDraft: false,
     handedIn: false,
-    aiPolicy: "allowed",
+    aiAssignments: "allowed",
     lmsName: "MyCourses",
     ...over,
   };
@@ -26,9 +26,9 @@ describe("nextSuggestion: the five states", () => {
     );
   });
 
-  it("asked, drafting not allowed", () => {
+  it("asked, explain-only course", () => {
     expect(
-      nextSuggestion(input({ messages: [user], aiPolicy: "not_allowed" })),
+      nextSuggestion(input({ messages: [user], aiAssignments: "explain" })),
     ).toBe("Quiz me on this");
   });
 
@@ -52,14 +52,26 @@ describe("nextSuggestion: edge cases and precedence", () => {
     );
   });
 
-  it("unknown policy is explain-only", () => {
+  it("only an allowed course is offered a draft", () => {
+    for (const aiAssignments of ["unknown", "off", "explain"] as const) {
+      expect(nextSuggestion(input({ messages: [user], aiAssignments }))).toBe(
+        "Quiz me on this",
+      );
+    }
     expect(
-      nextSuggestion(input({ messages: [user], aiPolicy: "unknown" })),
-    ).toBe("Quiz me on this");
+      nextSuggestion(input({ messages: [user], aiAssignments: "allowed" })),
+    ).toBe("Draft it with me");
+  });
+
+  it("a value we do not know is never read as allowed", () => {
+    const odd = "maybe" as unknown as SuggestInput["aiAssignments"];
+    expect(nextSuggestion(input({ messages: [user], aiAssignments: odd }))).toBe(
+      "Quiz me on this",
+    );
   });
 
   it("nothing asked wins over policy", () => {
-    expect(nextSuggestion(input({ aiPolicy: "not_allowed" }))).toBe(
+    expect(nextSuggestion(input({ aiAssignments: "off" }))).toBe(
       "What exactly is asked?",
     );
   });
@@ -73,7 +85,7 @@ describe("nextSuggestion: edge cases and precedence", () => {
   it("a draft with drafting not allowed still suggests handing in", () => {
     expect(
       nextSuggestion(
-        input({ messages: [user], hasDraft: true, aiPolicy: "not_allowed" }),
+        input({ messages: [user], hasDraft: true, aiAssignments: "off" }),
       ),
     ).toBe("Hand in to MyCourses");
   });
@@ -85,12 +97,12 @@ describe("nextSuggestion: edge cases and precedence", () => {
   });
 
   it("handed in wins over everything", () => {
-    for (const aiPolicy of ["unknown", "allowed", "not_allowed"] as const) {
+    for (const aiAssignments of ["unknown", "off", "explain", "allowed"] as const) {
       for (const hasDraft of [true, false]) {
         for (const messages of [[], [user]]) {
           expect(
             nextSuggestion(
-              input({ handedIn: true, hasDraft, aiPolicy, messages }),
+              input({ handedIn: true, hasDraft, aiAssignments, messages }),
             ),
           ).toBe("Back to home");
         }
