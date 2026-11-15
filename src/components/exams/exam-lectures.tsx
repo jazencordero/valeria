@@ -13,12 +13,19 @@
  * this page; the tab itself is remembered per exam (`Tabs`' memory), so it
  * is the Lectures tab that shows again.
  *
- * Plain data in, no fetching.
- * Cut: the grow-from-the-circle transition (M9-18 is not done); a plain
- * page change.
+ * The lecture grows out of the row's numbered circle (420 ms) and its Back
+ * shrinks it into that circle again (380 ms), with this page's scroll put
+ * back (M9-18: the number carries `workSource(href)` and the row's click goes
+ * through `openCardLink` with `LECTURE_PAGE`, `@/lib/motion/shared`; calm: a
+ * fade, a page not fetched yet: a slide).
+ *
+ * Plain data in, no fetching. Rendered inside the exam page's client tree
+ * (no "use client" of its own: the server reads its types).
  */
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { LECTURE_PAGE, openCardLink, workSource } from "@/lib/motion/shared";
+import { useMotionMode } from "@/lib/motion/use-calm";
 
 export type ExamLectureState = "done" | "cur" | "up" | "soon";
 
@@ -75,6 +82,7 @@ const NUM: Record<ExamLectureState, string> = {
 function Num({ row }: { row: ExamLectureRow }) {
   return (
     <span
+      {...workSource(row.href)}
       aria-hidden="true"
       data-state={row.state}
       className={
@@ -95,6 +103,7 @@ function Num({ row }: { row: ExamLectureRow }) {
 
 export function ExamLecturesTab({ examId, lectures }: { examId: string; lectures: ExamLectures }) {
   const { current, rows, courseId } = lectures;
+  const mode = useMotionMode();
   return (
     <div className="grid gap-4" data-testid="exam-lectures">
       <div className="flex flex-wrap items-center gap-x-[18px] gap-y-2">
@@ -119,6 +128,7 @@ export function ExamLecturesTab({ examId, lectures }: { examId: string; lectures
             <li key={row.n}>
               <Link
                 href={fromExam(row.href, examId)}
+                onClick={(e) => openCardLink(e, mode, LECTURE_PAGE)}
                 data-lec={row.n}
                 className={
                   "grid min-h-[72px] w-full grid-cols-[44px_minmax(0,1fr)_20px] items-center gap-x-3.5 " +

@@ -19,6 +19,12 @@
  * on mount (pass the data as it is after the read: `from` done, `to` cur).
  * Calm (reduced motion) and the instant test switch: nothing moves, the page
  * only scrolls the current stop into view.
+ *
+ * A lecture with an `href` marks its stop with `workSource(href)`, and a
+ * click on the stop or its label hands the stop over, so the lecture page
+ * can grow out of it as a circle and shrink back into it (M9-18,
+ * `LECTURE_PAGE` in `@/lib/motion/shared`). `onStopPress` is called when a
+ * stop or label is hovered or pressed, to prefetch its page.
  */
 import "./course-path.css";
 import {
@@ -37,6 +43,7 @@ import { Vitonen } from "@/components/vitonen";
 import type { LectureStatus } from "@/lib/courses/lectures";
 import { curveLength, curvePath, pathGeom, type PathLecture } from "@/lib/courses/path";
 import { isFast } from "@/lib/motion/fast";
+import { workSource } from "@/lib/motion/shared";
 import { durationMs, ease } from "@/lib/motion/tokens";
 import { useMotionMode } from "@/lib/motion/use-calm";
 
@@ -54,6 +61,8 @@ export type CoursePathLecture = {
   cards?: { seen: number; total: number } | null;
   /** When a not-posted lecture opens, already formatted: "Mon 16 Nov". */
   opens?: string | null;
+  /** The lecture page. When given, the stop is the card that page opens out of (`workSource`). */
+  href?: string;
 };
 
 export type CoursePathFlag = {
@@ -99,9 +108,12 @@ export type CoursePathProps = {
   intro?: boolean;
   /** Play the advance on mount. Ignored when `intro` is set. */
   advance?: CoursePathAdvance | null;
-  onStopClick?: (lecture: CoursePathLecture) => void;
+  /** `stop` is the stop's button (for a label click too), for the page to grow out of. */
+  onStopClick?: (lecture: CoursePathLecture, stop: HTMLElement) => void;
   /** Defaults to onStopClick. */
-  onLabelClick?: (lecture: CoursePathLecture) => void;
+  onLabelClick?: (lecture: CoursePathLecture, stop: HTMLElement) => void;
+  /** A stop or its label is hovered or pressed: a moment to prefetch its page. */
+  onStopPress?: (lecture: CoursePathLecture) => void;
   /** When given, deadline flags are buttons. */
   onFlagClick?: (flag: CoursePathFlag) => void;
   /** Only for a finish with an exam. */
@@ -205,6 +217,7 @@ export function CoursePath({
   advance = null,
   onStopClick,
   onLabelClick,
+  onStopPress,
   onFlagClick,
   onFinishClick,
   className = "",
@@ -460,12 +473,15 @@ export function CoursePath({
           <Fragment key={lec.n}>
             <button
               type="button"
+              {...(lec.href ? workSource(lec.href) : {})}
               className={`cp-stop ${lec.state}`}
               data-cp-stop=""
               style={{ left: x, top: y }}
               aria-label={ariaOf(lec)}
               aria-current={lec.state === "cur" ? "step" : undefined}
-              onClick={() => onStopClick?.(lec)}
+              onClick={(e) => onStopClick?.(lec, e.currentTarget)}
+              onPointerEnter={onStopPress ? () => onStopPress(lec) : undefined}
+              onPointerDown={onStopPress ? () => onStopPress(lec) : undefined}
             >
               {lec.state === "done" ? <CheckIcon /> : lec.n}
             </button>
@@ -475,7 +491,13 @@ export function CoursePath({
               data-cp-lbl=""
               aria-hidden="true"
               style={{ left: geom.lx, top: y }}
-              onClick={() => labelClick?.(lec)}
+              onClick={(e) => {
+                // The page grows out of the stop, which is the button just before the label.
+                const stop = e.currentTarget.previousElementSibling;
+                if (stop instanceof HTMLElement) labelClick?.(lec, stop);
+              }}
+              onPointerEnter={onStopPress ? () => onStopPress(lec) : undefined}
+              onPointerDown={onStopPress ? () => onStopPress(lec) : undefined}
             >
               {lec.state === "cur" && <span className="cp-here">You are here</span>}
               <p className="mono">LECTURE {lec.n}</p>

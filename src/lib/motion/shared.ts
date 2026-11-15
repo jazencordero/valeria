@@ -61,6 +61,12 @@
  * page area, same clip, its own types (`open-exam`, `close-exam`) and
  * timings (360 ms open, 320 ms close). It also remembers where the card was
  * (page and scroll position) so Back returns there.
+ *
+ * M9-18 adds the lecture page (`LECTURE_PAGE`): the same open and close, but
+ * the clip is a circle that grows out of the round stop it was tapped on
+ * (420 ms) and shrinks back into it (380 ms) (`circleFor`; prototype
+ * merged.html JS 5593-5656), and the page the stop is on can play something
+ * once the close is over (`cardClosed`: the course path's advance).
  */
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { calmDurationMs, durationMs, ease } from "./tokens";
@@ -88,6 +94,13 @@ export const CLOSE_EXAM = "close-exam";
 export const CLOSE_EXAM_SLIDE = "close-exam-slide";
 export const EXAM_OPEN_MS = 360;
 export const EXAM_CLOSE_MS = 320;
+
+/** The lecture page's types (M9-18): a circle out of the stop it was opened from. */
+export const OPEN_LECTURE = "open-lecture";
+export const CLOSE_LECTURE = "close-lecture";
+export const CLOSE_LECTURE_SLIDE = "close-lecture-slide";
+export const LECTURE_OPEN_MS = 420;
+export const LECTURE_CLOSE_MS = 380;
 
 export const OPEN_MS = durationMs.slow;
 export const CLOSE_MS = 420;
@@ -232,6 +245,22 @@ export function insetFor(card: Box, frame: Box, radius: number = CARD_RADIUS_PX)
   return `inset(${px(top)} ${px(right)} ${px(bottom)} ${px(left)} round ${radius}px)`;
 }
 
+/**
+ * The circle clips for a page that grows out of a round source (the
+ * prototype's openLecture and closeLecture): `from` shows only the source's
+ * circle inside `frame`, `to` is a circle about the same centre that just
+ * covers the whole frame. Coordinates are the frame's own.
+ */
+export function circleFor(source: Box, frame: Box): { from: string; to: string } {
+  const px = (n: number) => `${Math.round(n * 100) / 100}px`;
+  const cx = source.left + source.width / 2 - frame.left;
+  const cy = source.top + source.height / 2 - frame.top;
+  const r = Math.max(0, source.width / 2);
+  const full = Math.ceil(Math.hypot(Math.max(cx, frame.width - cx), Math.max(cy, frame.height - cy)));
+  const at = `at ${px(cx)} ${px(cy)}`;
+  return { from: `circle(${px(r)} ${at})`, to: `circle(${full}px ${at})` };
+}
+
 export type WorkMotion = "clip" | "slide" | "fade" | "none";
 
 /** Which version plays: the clip, the slide (no View Transitions), the fade (calm) or nothing (test switch). */
@@ -294,6 +323,25 @@ html[${WORK_VT_ATTR}="${CLOSE_EXAM_SLIDE}"]::view-transition-old(${WORK_NAME}) {
   from { clip-path: ${FULL_CLIP}; opacity: 1; }
   70% { opacity: 1; }
   to { clip-path: var(--work-clip, ${FULL_CLIP}); opacity: 0; }
+}
+html[${WORK_VT_ATTR}="${OPEN_LECTURE}"]::view-transition-new(${WORK_NAME}) {
+  animation: ${LECTURE_OPEN_MS}ms ${E_INOUT} both ready-circle-open;
+}
+html[${WORK_VT_ATTR}="${CLOSE_LECTURE}"]::view-transition-old(${WORK_NAME}) {
+  z-index: 1;
+  animation: ${LECTURE_CLOSE_MS}ms ${E_INOUT} both ready-circle-close;
+}
+html[${WORK_VT_ATTR}="${CLOSE_LECTURE_SLIDE}"]::view-transition-old(${WORK_NAME}) {
+  z-index: 1;
+  animation: ${SLIDE_MS}ms ${E_INOUT} both ready-work-slide-out;
+}
+@keyframes ready-circle-open {
+  from { clip-path: var(--work-clip, ${FULL_CLIP}); }
+  to { clip-path: var(--work-clip-full, ${FULL_CLIP}); }
+}
+@keyframes ready-circle-close {
+  from { clip-path: var(--work-clip-full, ${FULL_CLIP}); }
+  to { clip-path: var(--work-clip, ${FULL_CLIP}); }
 }
 `;
 
@@ -377,6 +425,7 @@ function endTransition(): void {
   const html = document.documentElement;
   html.removeAttribute(WORK_VT_ATTR);
   html.style.removeProperty("--work-clip");
+  html.style.removeProperty("--work-clip-full");
   busy = false;
 }
 
@@ -640,6 +689,8 @@ export function closeWork(
       html.setAttribute(WORK_VT_ATTR, CLOSE_WORK_SLIDE);
     }
   });
+  // Skipped (Home was late): `ready` rejects, which is expected.
+  transition.ready.catch(() => {});
   const after = () => {
     endTransition();
     // As in the prototype: focus goes back to Start.
@@ -679,8 +730,18 @@ export function holdShell(): () => void {
  * page's path, if there is one.
  */
 
-/** One kind of page that opens out of a card: its `<html data-work-vt>` values and how long it grows. */
-export type CardPage = { open: string; close: string; closeSlide: string; openMs: number };
+/**
+ * One kind of page that opens out of a card: its `<html data-work-vt>` values
+ * and how long it grows. `shape` is the clip: the card's box (the default) or
+ * a circle out of the card's centre, as wide as the card (`circleFor`).
+ */
+export type CardPage = {
+  open: string;
+  close: string;
+  closeSlide: string;
+  openMs: number;
+  shape?: "box" | "circle";
+};
 
 export const EXAM_PAGE: CardPage = {
   open: OPEN_EXAM,
@@ -688,6 +749,43 @@ export const EXAM_PAGE: CardPage = {
   closeSlide: CLOSE_EXAM_SLIDE,
   openMs: EXAM_OPEN_MS,
 };
+
+/** The lecture page (M9-18): a circle out of its stop on the course path, or out of a row's number on the exam page. */
+export const LECTURE_PAGE: CardPage = {
+  open: OPEN_LECTURE,
+  close: CLOSE_LECTURE,
+  closeSlide: CLOSE_LECTURE_SLIDE,
+  openMs: LECTURE_OPEN_MS,
+  shape: "circle",
+};
+
+/** Sets the clip the page grows from or shrinks to (`--work-clip`), and for a circle the full one too. */
+function setCardClip(html: HTMLElement, page: CardPage, card: Box, frame: Box): void {
+  if (page.shape === "circle") {
+    const c = circleFor(card, frame);
+    html.style.setProperty("--work-clip", c.from);
+    html.style.setProperty("--work-clip-full", c.to);
+    return;
+  }
+  html.style.setProperty("--work-clip", insetFor(card, frame));
+}
+
+/** What a close left for the page it went back to (`cardClosed`). */
+export type CardClosed = {
+  /** The card's `workSource` value. */
+  key: string | null;
+  /** The card it shrank into or went back to; null when it never showed. */
+  card: HTMLElement | null;
+  /** What the closing page passed to `closeCardPage`. */
+  detail: unknown;
+};
+
+type Closing = { path: string; at: number; done: Promise<CardClosed> };
+
+/** The last close, until a moment after it is over. */
+let closing: Closing | null = null;
+/** How long after a close is over the page it went back to can still ask for it. */
+const CLOSED_KEEP_MS = 1000;
 
 /** How long the content takes to fade in when it lands inside the growing page. */
 const CARD_CONTENT_MS = durationMs.quick;
@@ -768,7 +866,7 @@ export function openCardPage(
     navigate();
     const left = (await waitFor(main, PAGE_WAIT_MS, () => (isShown(source) ? null : true))) === true;
     if (left) {
-      html.style.setProperty("--work-clip", insetFor(card, main.getBoundingClientRect()));
+      setCardClip(html, page, card, main.getBoundingClientRect());
       return;
     }
     // Late: no clip. The page slides in when it mounts (`cardArrival`).
@@ -792,7 +890,9 @@ export function openCardLink(
 ): void {
   if (replaying || !plainClick(e)) return;
   const link = e.currentTarget;
-  const source = link.closest<HTMLElement>(`[${WORK_SOURCE_ATTR}]`);
+  // The card around the link, or (a row whose number the page grows out of) one inside it.
+  const source =
+    link.closest<HTMLElement>(`[${WORK_SOURCE_ATTR}]`) ?? link.querySelector<HTMLElement>(`[${WORK_SOURCE_ATTR}]`);
   if (!source) return;
   e.preventDefault();
   openCardPage(source, mode, () => replayClick(link), page, link.href);
@@ -860,6 +960,8 @@ export function leaveCardPage(root: HTMLElement): void {
  * the card is, or to `fallbackPath`, restores the scroll position there, and
  * shrinks the page into the card (clip), or lets it leave first (slide,
  * fade). A click that opens a new tab is left alone.
+ * `detail` is handed to the page it goes back to once the close is over
+ * (`cardClosed`).
  */
 export function closeCardPage(
   e: ReactMouseEvent<Element>,
@@ -869,6 +971,7 @@ export function closeCardPage(
   navigate: (path: string) => void,
   fallbackPath: string,
   page: CardPage = EXAM_PAGE,
+  detail?: unknown,
 ): void {
   if (!plainClick(e, link)) return;
   const main = document.getElementById("main");
@@ -891,22 +994,44 @@ export function closeCardPage(
     main.scrollTop = from.scroll;
     return card;
   };
+  /** Called once, when the close is over: the page it went back to can play its part now (`cardClosed`). */
+  let closed: (card: HTMLElement | null) => void = () => {};
+  const begin = () => {
+    let resolve: (c: CardClosed) => void = () => {};
+    const mine: Closing = {
+      path: from.path,
+      at: performance.now(),
+      done: new Promise<CardClosed>((r) => {
+        resolve = r;
+      }),
+    };
+    closing = mine;
+    closed = (card) => {
+      closed = () => {};
+      resolve({ key: from.key, card, detail });
+      window.setTimeout(() => {
+        if (closing === mine) closing = null;
+      }, CLOSED_KEEP_MS);
+    };
+  };
 
   const start = viewTransitionStarter();
   const how = workMotion(mode, start !== null);
   if (how === "none") {
+    begin();
     navigate(from.path);
-    void land();
+    void land().then((c) => closed(c));
     return;
   }
   if (busy) return;
   busy = true;
+  begin();
 
   if (how !== "clip" || start === null) {
     if (typeof root.animate !== "function") {
       busy = false;
       navigate(from.path);
-      void land();
+      void land().then((c) => closed(c));
       return;
     }
     const leave =
@@ -925,7 +1050,10 @@ export function closeCardPage(
       busy = false;
       navigate(from.path);
       // The page may be kept, hidden, for browser back: do not leave it faded out.
-      void land().then(() => leave.cancel());
+      void land().then((c) => {
+        leave.cancel();
+        closed(c);
+      });
     };
     leave.finished.then(go, go);
     return;
@@ -934,6 +1062,8 @@ export function closeCardPage(
   const html = document.documentElement;
   const before = main.getBoundingClientRect();
   let card: HTMLElement | null = null;
+  /** Set when the card was not there in time: the close is over once the page has left and the card is back. */
+  let late: Promise<HTMLElement | null> | null = null;
   html.setAttribute(WORK_VT_ATTR, page.close);
   const transition = startSkippable(start, async (skip) => {
     navigate(from.path);
@@ -944,28 +1074,45 @@ export function closeCardPage(
     if (box && box.width > 0) {
       const to = main.getBoundingClientRect();
       // The old picture keeps its own size, pinned to the page area's top left corner.
-      html.style.setProperty(
-        "--work-clip",
-        insetFor(box, { left: to.left, top: to.top, width: before.width, height: before.height }),
-      );
+      setCardClip(html, page, box, { left: to.left, top: to.top, width: before.width, height: before.height });
       return;
     }
+    let landed: Promise<HTMLElement | null> = Promise.resolve(card);
     if (!card) {
       // No card in time: keep watching for it, after the transition, to put the scroll and focus back.
-      void land().then((c) => focusLater(openerIn(c)));
+      landed = land();
+      void landed.then((c) => focusLater(openerIn(c)));
     }
     if (isShown(root)) {
       // The card's page is late: no clip. The page slides out on its own, live.
       skip();
-      void slideOut(main, root);
+      const slid = slideOut(main, root);
+      late = Promise.all([landed, slid]).then(([c]) => c);
     } else {
       html.setAttribute(WORK_VT_ATTR, page.closeSlide);
+      late = landed;
     }
   });
+  // Skipped (the card's page was late): `ready` rejects, which is expected.
+  transition.ready.catch(() => {});
   const after = () => {
     endTransition();
     // As in the prototype: focus goes back to what opened the page.
     openerIn(card)?.focus({ preventScroll: true });
+    void (late ?? Promise.resolve(card)).then((c) => closed(c));
   };
   transition.finished.then(after, after);
+}
+
+/**
+ * For the page a card's page closed back into (an effect on mount): resolves
+ * once that close is over (the shrink has played, or the page has left and
+ * the card is back) with what the close left (`detail`), so the page can play
+ * its own part only then: the course path's advance after a lecture (M9-18).
+ * Null when she did not come back here by a close just now.
+ */
+export function cardClosed(path: string = window.location.pathname): Promise<CardClosed | null> {
+  const mine = closing;
+  if (!mine || mine.path !== path || performance.now() - mine.at > OPENING_FRESH_MS) return Promise.resolve(null);
+  return mine.done;
 }

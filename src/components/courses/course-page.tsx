@@ -11,13 +11,24 @@
  * finish flag opens the exam. A course where no lectures were recognised
  * shows its files as a plain list instead of the path.
  *
+ * A lecture grows out of its stop as a circle (420 ms) and its Back shrinks
+ * it into the stop again (380 ms), with the path's scroll put back (M9-18,
+ * `LECTURE_PAGE` in `@/lib/motion/shared`; calm: a fade, no View
+ * Transitions or a page that is not there yet: a slide). Only once that close
+ * is over does the path's advance play, when the lecture was marked read on
+ * that visit (`cardClosed`; the lecture page leaves `{ lectureRead: n }`). A stop's
+ * page is prefetched when it is hovered or pressed, and the current one on
+ * arrival, so the circle has its page in time.
+ *
  * Cut: the grade chip waits for M6-08.
  */
 import { useRouter } from "next/navigation";
-import { useCallback } from "react";
-import { CoursePath, type CoursePathLecture } from "@/components/courses/course-path";
+import { useCallback, useEffect, useRef } from "react";
+import { CoursePath, type CoursePathHandle, type CoursePathLecture } from "@/components/courses/course-path";
 import { Button } from "@/components/ui/button";
 import { StickyHeader } from "@/components/ui/sticky-header";
+import { LECTURE_PAGE, WORK_TRANSITION_CSS, cardClosed, openCardPage } from "@/lib/motion/shared";
+import { useMotionMode } from "@/lib/motion/use-calm";
 import type { CoursePage as CoursePageData } from "@/server/data/courses";
 
 type CourseColor = CoursePageData["color"];
@@ -37,15 +48,60 @@ export type CoursePageProps = {
   lmsName: string;
 };
 
+/** The lecture `n` the close came back from, when it was marked read on that visit (the lecture page's `detail`). */
+export function readOnClose(detail: unknown): number | null {
+  if (typeof detail !== "object" || detail === null) return null;
+  const n = (detail as { lectureRead?: unknown }).lectureRead;
+  return typeof n === "number" && Number.isInteger(n) ? n : null;
+}
+
 export function CoursePage({ course, backHref = "/courses", lmsName }: CoursePageProps) {
   const router = useRouter();
+  const mode = useMotionMode();
   const path = course.path;
+  const pathRef = useRef<CoursePathHandle>(null);
+
+  // Back from a lecture read just now: the advance plays once the lecture has shrunk into its stop.
+  const lectures = path?.lectures;
+  const latest = useRef(lectures);
+  useEffect(() => {
+    latest.current = lectures;
+  }, [lectures]);
+  useEffect(() => {
+    let live = true;
+    void cardClosed().then((c) => {
+      const n = c ? readOnClose(c.detail) : null;
+      const lectures = latest.current;
+      if (!live || n === null || !lectures) return;
+      // Only when this page already shows it read (it is fetched again after the read).
+      if (lectures.find((l) => l.n === n)?.state !== "done") return;
+      pathRef.current?.playAdvance({ from: n, to: lectures.find((l) => l.state === "cur")?.n ?? null });
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // The stop she is most likely to tap: its page is fetched ahead.
+  useEffect(() => {
+    const cur = lectures?.find((l) => l.state === "cur");
+    if (cur) router.prefetch(cur.href);
+  }, [lectures, router]);
 
   const openLecture = useCallback(
+    (l: CoursePathLecture, stop: HTMLElement) => {
+      if (l.state === "soon") return;
+      const target = path?.lectures.find((x) => x.n === l.n);
+      if (!target) return;
+      openCardPage(stop, mode, () => router.push(target.href), LECTURE_PAGE, target.href);
+    },
+    [mode, path, router],
+  );
+  const prefetchLecture = useCallback(
     (l: CoursePathLecture) => {
       if (l.state === "soon") return;
       const target = path?.lectures.find((x) => x.n === l.n);
-      if (target) router.push(target.href);
+      if (target) router.prefetch(target.href);
     },
     [path, router],
   );
@@ -55,6 +111,9 @@ export function CoursePage({ course, backHref = "/courses", lmsName }: CoursePag
 
   return (
     <div className="mx-auto max-w-[720px] px-[var(--pad)] pb-10">
+      <style href="ready-work-transition" precedence="default">
+        {WORK_TRANSITION_CSS}
+      </style>
       <StickyHeader
         padTop="4px"
         className="-mx-[var(--pad)] flex min-h-[52px] items-center gap-1 pr-[var(--pad)] pb-1 pl-[calc(var(--pad)-12px)] min-[700px]:pl-[var(--pad)]"
@@ -90,11 +149,13 @@ export function CoursePage({ course, backHref = "/courses", lmsName }: CoursePag
 
       {path ? (
         <CoursePath
+          ref={pathRef}
           className="mt-6"
           lectures={path.lectures}
           flags={path.flags}
           finish={path.finish}
           onStopClick={openLecture}
+          onStopPress={prefetchLecture}
           onFinishClick={path.finish.href ? openExam : undefined}
         />
       ) : course.files.length > 0 ? (

@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CLOSE_EXAM,
+  CLOSE_LECTURE,
+  LECTURE_CLOSE_MS,
+  LECTURE_OPEN_MS,
+  LECTURE_PAGE,
+  OPEN_LECTURE,
+  cardClosed,
+  circleFor,
   CLOSE_MS,
   CLOSE_WORK,
   EXAM_CLOSE_MS,
@@ -42,6 +49,59 @@ describe("insetFor", () => {
   it("clamps a card that reaches outside the frame", () => {
     const card = { left: 200, top: -40, width: 1200, height: 900 };
     expect(insetFor(card, frame, 0)).toBe("inset(0px 0px 0px 0px round 0px)");
+  });
+});
+
+describe("circleFor", () => {
+  const frame = { left: 240, top: 0, width: 1040, height: 800 };
+
+  it("starts as the stop's own circle, about its centre in the frame", () => {
+    const stop = { left: 300, top: 180, width: 56, height: 56 };
+    // Centre (328, 208) less the frame's corner (240, 0); the farthest corner is (1040, 800) away by (952, 592).
+    expect(circleFor(stop, frame)).toEqual({
+      from: "circle(28px at 88px 208px)",
+      to: `circle(${Math.ceil(Math.hypot(952, 592))}px at 88px 208px)`,
+    });
+  });
+
+  it("covers the whole frame from a stop near its bottom right corner too", () => {
+    const stop = { left: 1200, top: 700, width: 40, height: 40 };
+    const c = circleFor(stop, frame);
+    expect(c.from).toBe("circle(20px at 980px 720px)");
+    expect(c.to).toBe(`circle(${Math.ceil(Math.hypot(980, 720))}px at 980px 720px)`);
+  });
+});
+
+describe("the lecture page (M9-18)", () => {
+  it("grows as a circle for 420 ms and shrinks back for 380 ms, under its own types", () => {
+    expect(LECTURE_OPEN_MS).toBe(420);
+    expect(LECTURE_CLOSE_MS).toBe(380);
+    expect(LECTURE_PAGE).toEqual({
+      open: OPEN_LECTURE,
+      close: CLOSE_LECTURE,
+      closeSlide: "close-lecture-slide",
+      openMs: 420,
+      shape: "circle",
+    });
+    expect(WORK_TRANSITION_CSS).toMatch(
+      new RegExp(`\\[${WORK_VT_ATTR}="${OPEN_LECTURE}"\\]::view-transition-new\\(${WORK_NAME}\\) \\{\\s*animation: 420ms[^;]*ready-circle-open`),
+    );
+    expect(WORK_TRANSITION_CSS).toMatch(
+      new RegExp(
+        `\\[${WORK_VT_ATTR}="${CLOSE_LECTURE}"\\]::view-transition-old\\(${WORK_NAME}\\) \\{\\s*z-index: 1;\\s*animation: 380ms[^;]*ready-circle-close`,
+      ),
+    );
+    expect(WORK_TRANSITION_CSS).toContain("var(--work-clip-full");
+  });
+
+  it("leaves the exam page's types and timings as they were", () => {
+    expect(EXAM_PAGE.shape).toBeUndefined();
+    expect(WORK_TRANSITION_CSS).toContain(`[${WORK_VT_ATTR}="${OPEN_EXAM}"]::view-transition-new(${WORK_NAME}) {\n  animation: 360ms`);
+  });
+
+  it("has nothing to hand a page that was not reached by a close", async () => {
+    window.history.replaceState(null, "", "/courses/nowhere");
+    expect(await cardClosed()).toBeNull();
   });
 });
 
@@ -473,6 +533,131 @@ describe("the wait for the new page is capped (M8-71)", () => {
     expect(runs[0].skipped).toBe(false);
     expect(document.documentElement.style.getPropertyValue("--work-clip")).toContain("inset(");
     expect(played).toEqual([]);
+  });
+
+  /** A course path with one stop, its box measurable; the lecture page opens from it. */
+  function path(key: string) {
+    document.body.innerHTML = `<main id="main"><div class="cpath"><button ${WORK_SOURCE_ATTR}="${key}">3</button></div></main>`;
+    const main = document.getElementById("main")!;
+    main.getBoundingClientRect = () => ({ left: 240, top: 0, width: 1040, height: 800 }) as DOMRect;
+    const stop = main.querySelector("button")! as HTMLElement;
+    stop.getBoundingClientRect = () => ({ left: 300, top: 180, width: 56, height: 56 }) as DOMRect;
+    return { main, stop };
+  }
+
+  it("grows the lecture page out of its stop as a circle when it arrives in time", async () => {
+    const { main, stop } = path("/courses/c1/lectures/3");
+    const html = document.documentElement;
+    openCardPage(stop, "full", () => {}, LECTURE_PAGE);
+    expect(html.getAttribute(WORK_VT_ATTR)).toBe(OPEN_LECTURE);
+    page(main, "lecture");
+    await tick(0);
+    expect(runs[0].skipped).toBe(false);
+    expect(html.style.getPropertyValue("--work-clip")).toBe("circle(28px at 88px 208px)");
+    expect(html.style.getPropertyValue("--work-clip-full")).toMatch(/^circle\(\d+px at 88px 208px\)$/);
+    await tick(500);
+    // Over: nothing is left on <html>.
+    expect(html.hasAttribute(WORK_VT_ATTR)).toBe(false);
+    expect(html.style.getPropertyValue("--work-clip-full")).toBe("");
+  });
+
+  it("opens a row's lecture out of the numbered circle inside the row's link", async () => {
+    document.body.innerHTML = `<main id="main"><a href="/courses/c1/lectures/4?from=exam:e1"><span ${WORK_SOURCE_ATTR}="/courses/c1/lectures/4">4</span> Lecture 4</a></main>`;
+    const main = document.getElementById("main")!;
+    const link = main.querySelector("a")!;
+    const num = main.querySelector("span")! as HTMLElement;
+    num.getBoundingClientRect = () => ({ left: 20, top: 100, width: 44, height: 44 }) as DOMRect;
+    fetched("/courses/c1/lectures/4");
+    let followed = 0;
+    link.addEventListener("click", () => followed++);
+    const e = click(link) as unknown as Parameters<typeof openCardLink>[0] & { defaultPrevented: boolean };
+    openCardLink(e, "full", LECTURE_PAGE);
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.documentElement.getAttribute(WORK_VT_ATTR)).toBe(OPEN_LECTURE);
+    await tick(0);
+    // The link is followed inside the transition.
+    expect(followed).toBe(1);
+  });
+
+  it("shrinks the lecture into its stop, and only then hands the course page what the lecture left", async () => {
+    const { main, stop } = path("/courses/c1/lectures/3");
+    window.history.replaceState(null, "", "/courses/c1");
+    openCardPage(stop, "full", () => window.history.replaceState(null, "", "/courses/c1/lectures/3"), LECTURE_PAGE);
+    const { root } = page(main, "lecture");
+    await tick(0);
+    cardArrival(root);
+    await vi.runAllTimersAsync();
+
+    const back = root.querySelector("a")!;
+    let over: unknown = "not yet";
+    closeCardPage(
+      click(back),
+      back,
+      "full",
+      root,
+      (to) => {
+        window.history.replaceState(null, "", to);
+        main.innerHTML = `<div class="cpath"><button ${WORK_SOURCE_ATTR}="/courses/c1/lectures/3">3</button></div>`;
+        main.querySelector("button")!.getBoundingClientRect = () => ({ left: 300, top: 180, width: 56, height: 56 }) as DOMRect;
+        // The course page mounts and asks.
+        void cardClosed().then((c) => (over = c?.detail));
+      },
+      "/courses/c1",
+      LECTURE_PAGE,
+      { lectureRead: 3 },
+    );
+    const html = document.documentElement;
+    expect(html.getAttribute(WORK_VT_ATTR)).toBe(CLOSE_LECTURE);
+    await tick(0);
+    expect(runs[1].skipped).toBe(false);
+    expect(html.style.getPropertyValue("--work-clip")).toBe("circle(28px at 88px 208px)");
+    expect(html.style.getPropertyValue("--work-clip-full")).toMatch(/^circle\(\d+px at 88px 208px\)$/);
+    // Still shrinking: the course page waits.
+    await tick(LECTURE_CLOSE_MS - 100);
+    expect(over).toBe("not yet");
+    await tick(200);
+    expect(over).toEqual({ lectureRead: 3 });
+    expect(document.activeElement).toBe(document.querySelector("button"));
+  });
+
+  it("after a late close, hands it over once the page has slid out and the stop is back", async () => {
+    document.body.innerHTML = `<main id="main"></main>`;
+    const main = document.getElementById("main")!;
+    window.history.replaceState(null, "", "/courses/c2/lectures/1");
+    const { root } = page(main, "lecture");
+    const back = root.querySelector("a")!;
+    closeCardPage(click(back), back, "full", root, (to) => window.history.replaceState(null, "", to), "/courses/c2", LECTURE_PAGE, {
+      lectureRead: 1,
+    });
+    let over: unknown = "not yet";
+    void cardClosed("/courses/c2").then((c) => (over = c?.detail));
+    await tick(PAGE_WAIT_MS);
+    expect(runs[0].skippedInUpdate).toBe(true);
+    await tick(400);
+    expect(over).toBe("not yet");
+    main.innerHTML = `<button ${WORK_SOURCE_ATTR}="/courses/c2/lectures/1">1</button>`;
+    await tick(0);
+    expect(over).toEqual({ lectureRead: 1 });
+  });
+
+  it("hands it over under the test switch and when calm too, once the stop's page is there", async () => {
+    for (const mode of ["instant", "calm"] as const) {
+      document.body.innerHTML = `<main id="main"></main>`;
+      const main = document.getElementById("main")!;
+      window.history.replaceState(null, "", "/courses/c3/lectures/2");
+      const { root } = page(main, "lecture");
+      const back = root.querySelector("a")!;
+      closeCardPage(click(back), back, mode, root, () => {}, "/courses/c3", LECTURE_PAGE, { lectureRead: 2 });
+      let over: unknown = "not yet";
+      void cardClosed("/courses/c3").then((c) => (over = c?.detail));
+      await tick(50);
+      main.innerHTML = `<button ${WORK_SOURCE_ATTR}="/courses/c3/lectures/2">2</button>`;
+      await tick(0);
+      expect(over).toEqual({ lectureRead: 2 });
+      // A moment later it is used up: a visit by some other way gets nothing.
+      await tick(1500);
+      expect(await cardClosed("/courses/c3")).toBeNull();
+    }
   });
 });
 

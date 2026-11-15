@@ -52,12 +52,31 @@
  * Plain data in. `markRead`, `remove`, `saveHl` and `loadHl` default to the
  * real actions; a preview can pass stand-ins.
  *
- * Cut: the grow-out-of-the-stop transition (M9-18), the path's advance on
- * Back (the course page does not take it yet) and "Ask about this lecture"
- * (M9-22).
+ * - Opened from a stop on the course path, or from a row's number on an
+ *   exam's Lectures tab, the page grows out of that circle (420 ms) and Back
+ *   shrinks it into the circle again (380 ms), on the page and at the scroll
+ *   it was opened from (M9-18, `LECTURE_PAGE`, `cardArrival` and
+ *   `closeCardPage` in `@/lib/motion/shared`; calm: a fade, no View
+ *   Transitions or a late page: a slide). A lecture marked read on this visit
+ *   leaves `{ lectureRead: n }` for the course page, which plays the path's
+ *   advance once the shrink is over. Opened any other way, Back goes to the
+ *   course (or the exam) and shrinks into the stop there that carries this
+ *   page's path, if there is one.
+ *
+ * Cut: "Ask about this lecture" (M9-22).
  */
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type MouseEvent,
+  type RefObject,
+} from "react";
 import { markLectureRead, type MarkReadResult } from "@/app/(app)/courses/[id]/lectures/[n]/actions";
 import {
   lectureHighlights,
@@ -75,6 +94,7 @@ import { NoteCard, type NoteCardData } from "@/components/notes/note-card";
 import { NOTE_SAVED_EVENT, openNotepad, type NoteSavedDetail } from "@/components/notes/notepad";
 import { Button } from "@/components/ui/button";
 import { StickyHeader } from "@/components/ui/sticky-header";
+import { LECTURE_PAGE, WORK_TRANSITION_CSS, cardArrival, closeCardPage, leaveCardPage } from "@/lib/motion/shared";
 import { useMotionMode } from "@/lib/motion/use-calm";
 import type { LecturePageData } from "@/server/data/lecture";
 
@@ -201,10 +221,14 @@ export function LecturePage({
   loadHl = lectureHighlights,
 }: LecturePageProps) {
   const router = useRouter();
+  const mode = useMotionMode();
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const main = useRef<HTMLElement | null>(null);
   const readerRef = useRef<HTMLDivElement | null>(null);
   const [view, setView] = useState<LectureView>("read");
   const [read, setRead] = useState(lecture.read);
+  // Marked read on this visit (the page's own `lecture.read` turns true too once the action has revalidated).
+  const [justRead, setJustRead] = useState(false);
   // Goes up each time a piece of help opens, so its stored highlights are put back.
   const [helpOpened, setHelpOpened] = useState(0);
 
@@ -235,7 +259,10 @@ export function LecturePage({
   const onRead = useCallback(() => {
     void markRead(lecture.lectureId).then(
       (r) => {
-        if (r.ok) setRead(true);
+        if (r.ok) {
+          setRead(true);
+          setJustRead(true);
+        }
       },
       () => {},
     );
@@ -263,8 +290,36 @@ export function LecturePage({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `helpOpened` is the reason to make a new list
   const highlightList = useMemo(() => [...highlights.list], [highlights.list, helpOpened]);
 
+  // Opened out of a stop or a row's number: its side of the open (M9-18).
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    cardArrival(el);
+    return () => leaveCardPage(el);
+  }, []);
+
+  const backHref = examBack ?? lecture.backHref;
+  /** Back: shrinks into the circle the page was opened from, then the course path's advance can play. */
+  const onBack = (e: MouseEvent<HTMLDivElement>) => {
+    const link = (e.target as Element | null)?.closest?.("a");
+    if (!link || link.getAttribute("href") !== backHref) return;
+    closeCardPage(
+      e,
+      link,
+      mode,
+      rootRef.current,
+      (path) => router.push(path, { scroll: false }),
+      backHref,
+      LECTURE_PAGE,
+      justRead ? { lectureRead: lecture.n } : undefined,
+    );
+  };
+
   return (
-    <div className="mx-auto max-w-[720px] px-[var(--pad)] pb-10">
+    <div ref={rootRef} className="mx-auto max-w-[720px] px-[var(--pad)] pb-10" onClickCapture={onBack}>
+      <style href="ready-work-transition" precedence="default">
+        {WORK_TRANSITION_CSS}
+      </style>
       <DoodleDefs />
       <StickyHeader
         padTop="4px"
@@ -272,7 +327,7 @@ export function LecturePage({
       >
         <Button
           variant="icon"
-          href={examBack ?? lecture.backHref}
+          href={backHref}
           aria-label={examBack ? "Back to exam" : `Back to ${lecture.course}`}
         >
           <svg className="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
