@@ -146,7 +146,7 @@ export function ExamTabCard({
               target={target}
             />
           </span>
-          <span className="mt-3 flex items-center gap-1" aria-hidden="true">
+          <span className="mt-3 flex flex-wrap items-center gap-1" aria-hidden="true" data-testid="concept-dots">
             {concepts.map((c) => (
               <RungDot key={c.id} rung={c.rung} title={c.name} />
             ))}
