@@ -178,7 +178,17 @@ const SPLIT_DEFAULT = 45;
 const SPLIT_STEP = 5;
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
-const widthMax = (viewport: number) => Math.max(WIDTH_MIN, Math.floor(viewport * WIDTH_MAX_SHARE));
+/** The page keeps at least this much width for reading beside the open panel (px). */
+export const READ_MIN = 440;
+/** Without the tutor the panel is this wide (notepad.css). */
+const PANEL_PLAIN = 380;
+/**
+ * The widest the panel may be dragged: 70% of the window, and never so wide that the page
+ * beside it (after the side nav) has less than READ_MIN to read in.
+ */
+export const widthMax = (viewport: number, side = 0) =>
+  Math.max(WIDTH_MIN, Math.min(Math.floor(viewport * WIDTH_MAX_SHARE), viewport - side - READ_MIN));
+const sideWidth = () => document.querySelector("#side")?.getBoundingClientRect().width ?? 0;
 
 function storedWidth(): number {
   try {
@@ -761,8 +771,20 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
     setSplit(clamp(next, SPLIT_MIN, SPLIT_MAX));
   };
 
+  // On wide screens the panel sits beside the page, not on it: the app's main area keeps
+  // `--np-w` free on its right while the panel is open (src/app/(app)/layout.tsx).
+  const besideWidth = open && wide ? (tutor ? clamp(width, WIDTH_MIN, widthMax(viewport, typeof document === "undefined" ? 0 : sideWidth())) : PANEL_PLAIN) : 0;
+  useEffect(() => {
+    if (!besideWidth) return;
+    const root = document.documentElement;
+    root.style.setProperty("--np-w", `${besideWidth}px`);
+    return () => {
+      root.style.removeProperty("--np-w");
+    };
+  }, [besideWidth]);
+
   // The panel's edge (wide screens): drag it, or arrow keys; remembered on this device.
-  const maxWidth = widthMax(viewport);
+  const maxWidth = widthMax(viewport, typeof document === "undefined" ? 0 : sideWidth());
   const panelWidth = clamp(width, WIDTH_MIN, maxWidth);
   const onEdgeDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -771,7 +793,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
     el.setPointerCapture?.(e.pointerId);
     let last = panelWidth;
     const move = (ev: PointerEvent) => {
-      last = Math.round(clamp(window.innerWidth - ev.clientX, WIDTH_MIN, widthMax(window.innerWidth)));
+      last = Math.round(clamp(window.innerWidth - ev.clientX, WIDTH_MIN, widthMax(window.innerWidth, sideWidth())));
       setWidth(last);
     };
     const up = () => {

@@ -16,7 +16,7 @@ const toast = vi.hoisted(() => ({ show: vi.fn() }));
 vi.mock("@/components/ui/toast", () => ({ showToast: toast.show }));
 
 import { COURSE_NO_EXAM, NOTHING_WRITTEN } from "./draft-cards";
-import { FAB_RETURN_MS, NotepadView, openNotepad, SAVE_PAUSE_MS, type NotepadActions } from "./notepad";
+import { FAB_RETURN_MS, NotepadView, openNotepad, READ_MIN, SAVE_PAUSE_MS, widthMax, type NotepadActions } from "./notepad";
 
 const NOTE_ID = "11111111-1111-4111-8111-111111111111";
 const ASSIGNMENT = "/assignments/22222222-2222-4222-8222-222222222222";
@@ -410,7 +410,7 @@ describe("Notepad with the tutor (M2-28)", () => {
     expect(screen.queryByTestId("notepad-edge")).toBeNull();
   });
 
-  it("wide: the panel's edge sets the width, 360 px to 70% of the window, remembered", async () => {
+  it("wide: the panel's edge sets the width, 360 px up to 70% of the window or what leaves 440 px to read, remembered", async () => {
     wide = true;
     vi.stubGlobal("innerWidth", 1200);
     const { api } = tutorApi();
@@ -419,12 +419,13 @@ describe("Notepad with the tutor (M2-28)", () => {
     expect(pad.hasAttribute("aria-modal")).toBe(false);
     const edge = screen.getByRole("separator", { name: "Resize the notes panel" });
     expect(edge.getAttribute("aria-valuenow")).toBe("420");
-    expect(edge.getAttribute("aria-valuemax")).toBe("840");
+    // 70% of 1200 is 840, but the page must keep 440 px to read: 760.
+    expect(edge.getAttribute("aria-valuemax")).toBe("760");
     fireEvent.keyDown(edge, { key: "ArrowLeft" });
     expect(edge.getAttribute("aria-valuenow")).toBe("444");
     expect(pad.style.width).toBe("444px");
     fireEvent.keyDown(edge, { key: "End" });
-    expect(edge.getAttribute("aria-valuenow")).toBe("840");
+    expect(edge.getAttribute("aria-valuenow")).toBe("760");
     fireEvent.keyDown(edge, { key: "Home" });
     fireEvent.keyDown(edge, { key: "ArrowRight" });
     expect(edge.getAttribute("aria-valuenow")).toBe("360");
@@ -551,6 +552,26 @@ describe("Notepad button on a phone while she scrolls", () => {
     expect(screen.getByTestId("notepad-button").className).toContain("away");
     await flush(FAB_RETURN_MS);
     expect(screen.getByTestId("notepad-button").className).not.toContain("away");
+  });
+});
+
+describe("Notepad beside the page on wide screens", () => {
+  it("never lets the panel take the page's reading room", () => {
+    expect(widthMax(1200, 240)).toBe(1200 - 240 - READ_MIN);
+    expect(widthMax(1440, 240)).toBe(760);
+    // A narrow window still gets the panel's smallest width.
+    expect(widthMax(800, 72)).toBe(360);
+  });
+
+  it("asks the page to keep the panel's width free while it is open", async () => {
+    wide = true;
+    vi.stubGlobal("innerWidth", 1200);
+    render(<NotepadView pathname="/home" actions={fakeActions()} />);
+    await openPad();
+    expect(document.documentElement.style.getPropertyValue("--np-w")).toBe("380px");
+    fireEvent.click(screen.getByRole("button", { name: "Close notepad" }));
+    await flush(400);
+    expect(document.documentElement.style.getPropertyValue("--np-w")).toBe("");
   });
 });
 

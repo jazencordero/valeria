@@ -202,7 +202,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </Suspense>
         <main
           id="main"
-          className="relative min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain bg-surface [container-type:inline-size]"
+          className="relative min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain bg-surface [container-type:inline-size] min-[700px]:pr-[var(--np-w,0px)]"
         >
           <Suspense fallback={null}>
             <DemoBanner />
