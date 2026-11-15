@@ -248,3 +248,85 @@ describe("extraSession", () => {
     expect(section(s, "warm")).toEqual(["k0", "k1", "k2", "k3"]);
   });
 });
+
+describe("buildBite study order: core and first (M3-52)", () => {
+  const card = (
+    id: string,
+    conceptId: string,
+    rung: BiteCard["rung"],
+    extra: Partial<BiteCard> = {},
+  ): BiteCard => ({ id, conceptId, rung, type: "basic", boss: false, active: true, ...extra });
+  const bite = (cards: BiteCard[], concepts: BiteConcept[], states: Record<string, MemoryState> = {}) =>
+    buildBite({ cards, states, concepts, examAt: EXAM, now: NOW, kind: "exam", bitesDoneToday: 0 })!;
+  // The heavier concept comes later in the course: plain focus order would open it first.
+  const concepts: BiteConcept[] = [
+    { id: "intro", weight: 1, order: 0 },
+    { id: "heavy", weight: 5, order: 1 },
+    { id: "later", weight: 3, order: 2 },
+  ];
+
+  it("a fresh seeded deck opens concepts in study order, not by weight", () => {
+    const cards = [
+      card("h1", "heavy", 1, { core: true }),
+      card("l1", "later", 1),
+      card("i1", "intro", 1),
+      card("i2", "intro", 2),
+      card("h2", "heavy", 2),
+    ];
+    expect(section(bite(cards, concepts), "learn")).toEqual(["i1", "i2", "h1", "h2", "l1"]);
+  });
+
+  it("a never-graded first card opens its concept, then core before non-core, then rung", () => {
+    const cards = [
+      card("i1", "intro", 1),
+      card("i2", "intro", 1, { core: true }),
+      card("i5", "intro", 5, { first: true }),
+      card("i3", "intro", 3, { core: true }),
+      card("i4", "intro", 2),
+    ];
+    expect(section(bite(cards, concepts), "learn")).toEqual(["i5", "i2", "i3", "i1", "i4"]);
+  });
+
+  it("a first card she has graded no longer leads", () => {
+    const cards = [card("i1", "intro", 1), card("i2", "intro", 2, { first: true }), card("h1", "heavy", 1)];
+    const t = new Date(NOW.getTime() - 60 * 1000);
+    // Graded Easy a minute ago: not due, so it sorts as a scheduled card at its rung.
+    const states = { i2: grade(newCard(t), 4, t) };
+    const learn = section(bite(cards, concepts, states), "learn");
+    expect(learn.indexOf("i1")).toBeLessThan(learn.indexOf("i2"));
+  });
+
+  it("once a concept is started, the next new one competes by focus score", () => {
+    const cards = [
+      card("i1", "intro", 1, { first: true }),
+      card("i2", "intro", 1),
+      card("h1", "heavy", 1),
+      card("h2", "heavy", 1),
+      card("l1", "later", 1),
+      card("l2", "later", 1),
+    ];
+    // Intro is started (one card graded, not due). Heavy, the next in study order,
+    // scores 5 and beats intro; later opens only after heavy, then also beats intro.
+    const t = new Date(NOW.getTime() - 60 * 1000);
+    const states = { i1: grade(newCard(t), 4, t) };
+    expect(section(bite(cards, concepts, states), "learn")).toEqual(["h1", "h2", "l1", "l2", "i2"]);
+    // With later ahead of heavy in the course, later opens first despite its lower weight.
+    const swapped = concepts.map((c) => (c.id === "later" ? { ...c, order: 1 } : c.id === "heavy" ? { ...c, order: 2 } : c));
+    expect(section(bite(cards, swapped, states), "learn").slice(0, 2)).toEqual(["l1", "l2"]);
+  });
+
+  it("a deck without core or first is built exactly as before (focus by weight)", () => {
+    const cards = [card("i1", "intro", 1), card("h1", "heavy", 1), card("l1", "later", 1), card("i2", "intro", 2)];
+    expect(section(bite(cards, concepts), "learn")).toEqual(["h1", "l1", "i1", "i2"]);
+    // core: false / first: false everywhere is the same as leaving them out.
+    const unmarked = cards.map((c) => ({ ...c, core: false, first: false }));
+    expect(bite(unmarked, concepts)).toEqual(bite(cards, concepts));
+    for (const [n, k, due] of [[13, 3, 5], [60, 5, 12], [200, 8, 40]]) {
+      const deck = makeDeck(n, k, due);
+      const marked = { ...deck, cards: deck.cards.map((c) => ({ ...c, core: false, first: false })) };
+      expect(buildBite({ ...marked, kind: "exam", bitesDoneToday: 0 })).toEqual(
+        buildBite({ ...deck, kind: "exam", bitesDoneToday: 0 }),
+      );
+    }
+  });
+});

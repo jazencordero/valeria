@@ -5,7 +5,8 @@
  * (context/tickets/prototype/main-flow.html, lines 2513 to 2571):
  *
  *   basic    { q, a }
- *   cloze    { q }                     q holds one or more {{...}} blanks
+ *   cloze    { q, accept? }            q holds one or more {{...}} blanks; accept: other
+ *                                      answers per blank, { [blankAnswer]: string[] }
  *   mcq      { q, opts }               opts: [text, correct][], 2 to 4, exactly one correct
  *   match    { q, pairs, order }       pairs: [term, meaning][], 3 to 5;
  *                                      order: the order the meanings are shown in, as
@@ -20,9 +21,22 @@
  *             normalised to `concepts` (primary first, no duplicates). At least one.
  *   rung      optional ladder rung 1..5 (the prototype has none, so it is optional)
  *   boss      optional; normalised to a boolean, default false
+ *   core      optional; the card is essential (studied before the concept's other
+ *             cards, M3-52). Normalised to a boolean, default false
+ *   first     optional; the card opens its concept (shown first when the concept is
+ *             introduced, M3-52). Normalised to a boolean, default false
  *   why       optional explanation shown after answering
  *   source    required, where the card comes from ("Lecture 5, slide 11").
  *             The prototype calls it `src`; both names are accepted, `source` wins.
+ *
+ * Cloze `accept` (M3-52): each key must be one of the card's blank answers, compared
+ * after trimming (a key that matches no blank is a problem, so a typo cannot silently
+ * accept nothing). Keys are stored trimmed; two keys for the same blank are merged.
+ * Each variant must be non-empty text. A blank with an empty list is allowed and
+ * dropped, and `accept` is left out when nothing is left. `accept` on another card
+ * type is dropped like any unknown field. Matching answers is `./cloze-match`.
+ *
+ * core, first and accept are not content: they never change `contentHash`.
  *
  * Anything else (the prototype's `st` scheduler state, for example) is dropped: memory
  * state lives with the learner, not in the card. Pure module: no Node or browser APIs,
@@ -49,12 +63,18 @@ export type CardBase = {
   concepts: string[];
   rung?: CardRung;
   boss: boolean;
+  /** Essential card; default false. */
+  core: boolean;
+  /** Opens its concept; default false. */
+  first: boolean;
   why?: string;
   source: string;
 };
 
 export type BasicCard = CardBase & { type: "basic"; q: string; a: string };
-export type ClozeCard = CardBase & { type: "cloze"; q: string };
+/** Other accepted answers per blank, keyed by the blank's answer (trimmed). */
+export type ClozeAccept = Record<string, string[]>;
+export type ClozeCard = CardBase & { type: "cloze"; q: string; accept?: ClozeAccept };
 export type McqOption = [text: string, correct: boolean];
 export type McqCard = CardBase & { type: "mcq"; q: string; opts: McqOption[] };
 export type MatchPair = [term: string, meaning: string];
@@ -118,6 +138,8 @@ export const SharedFieldsSchema = z.object({
     .max(5, { error: "The rung must be a whole number from 1 to 5." })
     .optional(),
   boss: z.boolean({ error: "Boss must be true or false." }).optional(),
+  core: z.boolean({ error: "Core must be true or false." }).optional(),
+  first: z.boolean({ error: "First must be true or false." }).optional(),
   why: text("The explanation (why)").optional(),
   source: text("The source").optional(),
   src: text("The source").optional(),
@@ -146,7 +168,29 @@ export const ClozeBodySchema = z.object({
       ctx.addIssue("The text has a {{ or }} that is not part of a complete {{answer}} blank.");
     }
   }),
+  accept: z
+    .record(
+      z.string(),
+      z.array(text("Each accepted answer"), { error: "Each blank's accepted answers must be a list of text." }),
+      { error: "The accepted answers must be an object: { blank answer: [other answers] }." },
+    )
+    .optional(),
 });
+
+/** Every `accept` key must name one of the card's blanks (both trimmed). */
+function checkClozeAccept(card: { q?: unknown; accept?: unknown }, ctx: z.RefinementCtx): void {
+  if (typeof card.q !== "string" || !isRecord(card.accept)) return;
+  const blanks = new Set(clozeBlanks(card.q).map((b) => b.trim()));
+  for (const key of Object.keys(card.accept)) {
+    if (!blanks.has(key.trim())) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["accept"],
+        message: `The accepted answers name a blank "${key.trim()}" that is not in the text; each key must be the answer inside one of its {{...}} blanks.`,
+      });
+    }
+  }
+}
 
 const mcqOption = z.tuple([text("Each option's text"), z.boolean({ error: "Each option must say true or false for correct." })], {
   error: "Each option must be a pair: [text, true or false].",
@@ -223,7 +267,7 @@ export const ExplainBodySchema = z.object({
 /** Full input schema per card type: shared fields plus that type's body. */
 export const CARD_SCHEMAS = {
   basic: SharedFieldsSchema.extend(BasicBodySchema.shape),
-  cloze: SharedFieldsSchema.extend(ClozeBodySchema.shape),
+  cloze: SharedFieldsSchema.extend(ClozeBodySchema.shape).superRefine(checkClozeAccept),
   mcq: SharedFieldsSchema.extend(McqBodySchema.shape),
   match: SharedFieldsSchema.extend(MatchBodySchema.shape).superRefine(checkMatchOrder),
   explain: SharedFieldsSchema.extend(ExplainBodySchema.shape),
@@ -293,6 +337,8 @@ function normalise(input: ParsedInput): Card {
   const base: CardBase = {
     concepts,
     boss: input.boss ?? false,
+    core: input.core ?? false,
+    first: input.first ?? false,
     source: (input.source ?? input.src) as string,
   };
   if (input.rung !== undefined) base.rung = input.rung as CardRung;
@@ -301,8 +347,10 @@ function normalise(input: ParsedInput): Card {
   switch (input.type) {
     case "basic":
       return { ...base, type: "basic", q: input.q as string, a: input.a as string };
-    case "cloze":
-      return { ...base, type: "cloze", q: input.q as string };
+    case "cloze": {
+      const accept = normaliseAccept(input.accept as ClozeAccept | undefined);
+      return accept ? { ...base, type: "cloze", q: input.q as string, accept } : { ...base, type: "cloze", q: input.q as string };
+    }
     case "mcq":
       return { ...base, type: "mcq", q: input.q as string, opts: input.opts as McqOption[] };
     case "match":
@@ -324,6 +372,18 @@ function normalise(input: ParsedInput): Card {
   }
 }
 
+/** Keys trimmed and merged, variants trimmed and de-duplicated, empty lists dropped. */
+function normaliseAccept(accept: ClozeAccept | undefined): ClozeAccept | undefined {
+  if (!accept) return undefined;
+  const out: ClozeAccept = {};
+  for (const [key, variants] of Object.entries(accept)) {
+    const k = key.trim();
+    const merged = Array.from(new Set([...(out[k] ?? []), ...variants.map((v) => v.trim())]));
+    if (merged.length > 0) out[k] = merged;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // contentHash
 // ---------------------------------------------------------------------------
@@ -331,7 +391,8 @@ function normalise(input: ParsedInput): Card {
 /**
  * What a card says, for de-duplication. Hashed: `type` and the body
  *   basic: q, a   cloze: q   mcq: q, opts   match: q, pairs   explain: q, rubric, model
- * Not hashed: concepts, rung, boss, why, source, and match `order` (only the display
+ * Not hashed: concepts, rung, boss, core, first, why, source, cloze `accept`, and
+ * match `order` (only the display
  * shuffle), so the same card from two sources or tagged differently counts as one.
  * List order inside opts, pairs and rubric does count.
  */

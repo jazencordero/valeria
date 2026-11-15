@@ -225,3 +225,51 @@ describe("contentHash", () => {
     expect(contentHash(ok({ ...mcq, opts: flipped }))).not.toBe(contentHash(base));
   });
 });
+
+describe("core, first and accept (M3-52)", () => {
+  const blanks = { type: "cloze", concept: "stats", src: "Lecture 2, slide 4", q: "With a {{ large }} sample the error goes to {{zero}}." };
+
+  it("core and first default to false and are kept when set", () => {
+    const plain = ok(mcq);
+    expect(plain.core).toBe(false);
+    expect(plain.first).toBe(false);
+    const marked = ok({ ...mcq, core: true, first: true });
+    expect(marked.core).toBe(true);
+    expect(marked.first).toBe(true);
+    expect(ok({ ...CARD_DATA.s1 as object, core: true }).core).toBe(true);
+    expect(problems({ ...mcq, core: "yes" })).toContain("Core must be true or false.");
+    expect(problems({ ...mcq, first: 1 })).toContain("First must be true or false.");
+  });
+
+  it("keeps cloze accept, keys trimmed to the blank answers", () => {
+    const card = ok({ ...blanks, accept: { large: ["big"], " zero ": [" 0 "] } });
+    expect(card.type === "cloze" && card.accept).toEqual({ large: ["big"], zero: ["0"] });
+  });
+
+  it("drops empty accept lists, and accept when nothing is left", () => {
+    const some = ok({ ...blanks, accept: { large: [], zero: ["0"] } });
+    expect(some.type === "cloze" && some.accept).toEqual({ zero: ["0"] });
+    const none = ok({ ...blanks, accept: { large: [] } });
+    expect(none).not.toHaveProperty("accept");
+    expect(ok(blanks)).not.toHaveProperty("accept");
+  });
+
+  it("rejects an accept key that is not a blank, and bad shapes, in plain words", () => {
+    expect(problems({ ...blanks, accept: { huge: ["big"] } })).toEqual([
+      'The accepted answers name a blank "huge" that is not in the text; each key must be the answer inside one of its {{...}} blanks.',
+    ]);
+    expect(problems({ ...blanks, accept: ["big"] })).toEqual([
+      "The accepted answers must be an object: { blank answer: [other answers] }.",
+    ]);
+    expect(problems({ ...blanks, accept: { large: "big" } })).toEqual([
+      "Each blank's accepted answers must be a list of text.",
+    ]);
+    expect(problems({ ...blanks, accept: { large: ["  "] } })).toEqual(["Each accepted answer is empty."]);
+  });
+
+  it("does not change contentHash", () => {
+    const base = contentHash(ok(blanks));
+    expect(contentHash(ok({ ...blanks, core: true, first: true, accept: { large: ["big"] } }))).toBe(base);
+    expect(contentHash(ok({ ...mcq, core: true, first: true }))).toBe(contentHash(ok(mcq)));
+  });
+});
