@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * "Where your grades are heading" on Home's rail (M6-09): a butter card with
  * one row per course. Each row has the course name ("too early" under it
@@ -7,7 +9,10 @@
  * course's grade page; "Open grades" goes to the list.
  *
  * Plain data in: the rows are `getGradesList`'s (src/server/data/grades.ts,
- * via `getHomeView`), no fetching, no client code. Source: prototype
+ * via `getHomeView`), no fetching. Client code only for the open (M9-18): a
+ * row carries `workSource(href)` and opens through `openCardLink`, so the
+ * grade page reveals from the row (360 ms) and its back link returns to Home
+ * and shrinks into the row (320 ms), scroll put back (`@/lib/motion/shared`). Source: prototype
  * merged.html JS 4179-4183 (the rows), CSS 454-470 (.gcard, .g-title, .g-sub)
  * and the row/scale rules beside them (.g-row, .g-name, .g-early, .scale,
  * .scale i.tgt, .g-val).
@@ -20,6 +25,8 @@
  */
 import Link from "next/link";
 import { useId } from "react";
+import { EXAM_PAGE, WORK_TRANSITION_CSS, openCardLink, workSource } from "@/lib/motion/shared";
+import { useMotionMode } from "@/lib/motion/use-calm";
 import type { GradesListRow } from "@/server/data/grades";
 
 export type GradesCardRow = Pick<GradesListRow, "id" | "href" | "name" | "status" | "target" | "trajectory">;
@@ -64,6 +71,7 @@ function Scale({ filled, target }: { filled: number; target: number }) {
 
 export function GradesCard({ courses, lmsName, className = "" }: GradesCardProps) {
   const labelId = useId();
+  const mode = useMotionMode();
   if (courses.length === 0) return null;
   return (
     <section
@@ -71,6 +79,9 @@ export function GradesCard({ courses, lmsName, className = "" }: GradesCardProps
       aria-labelledby={labelId}
       data-testid="grades-card"
     >
+      <style href="ready-work-transition" precedence="default">
+        {WORK_TRANSITION_CSS}
+      </style>
       <h2 id={labelId} className="text-[18px] leading-[1.25]">
         Where your grades are heading
       </h2>
@@ -82,7 +93,10 @@ export function GradesCard({ courses, lmsName, className = "" }: GradesCardProps
           return (
             <li key={c.id}>
               <Link
+                {...workSource(c.href)}
                 href={c.href}
+                // The grade page's timings (360 ms open, 320 ms close) are the exam page's.
+                onClick={(e) => openCardLink(e, mode, EXAM_PAGE)}
                 data-testid={`grades-card-row-${c.id}`}
                 className={
                   "grid min-h-[52px] w-full grid-cols-[minmax(0,1fr)_auto_44px] items-center gap-x-3 py-1.5 " +

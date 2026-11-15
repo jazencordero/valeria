@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * The Grades tab's body (M6-08): "Pulled from <LMS>. Tap a course to plan
  * it.", the overall number in a butter pill with "where you are heading, on
@@ -6,14 +8,20 @@
  * trajectory number (or a muted dash) and a chevron. Each row links to the
  * course's grade page.
  *
- * Plain data in (`getGradesList`, src/server/data/grades.ts), no fetching, no
- * client code. Source: prototype merged.html HTML 1827-1830, JS 6000-6014
+ * Plain data in (`getGradesList`, src/server/data/grades.ts), no fetching.
+ * Client code only for the open (M9-18): a row carries `workSource(href)` and
+ * its click goes through `openCardLink`, so the course's grade page reveals
+ * from the row (360 ms) and its back link shrinks it into the row again
+ * (320 ms), with the list's scroll put back (`@/lib/motion/shared`, the
+ * exam page's timings, which are the prototype's merged.html JS 6021-6074). Source: prototype merged.html HTML 1827-1830, JS 6000-6014
  * (glRowHTML, renderGradeList), CSS 1429-1446 (.g-sum, .gl-*).
  *
  * Decision: a course that is missing a weight says "Needs weights" (muted,
  * like Too early); its page shows the weights card.
  */
 import Link from "next/link";
+import { EXAM_PAGE, WORK_TRANSITION_CSS, openCardLink, workSource } from "@/lib/motion/shared";
+import { useMotionMode } from "@/lib/motion/use-calm";
 import type { CourseColor } from "@/components/shell/side-nav";
 import type { GradesList, GradeStatus } from "@/server/data/grades";
 
@@ -63,9 +71,16 @@ export type GradesListProps = GradesList & {
   lmsName: string;
 };
 
+/** The grade page's types and timings (360 ms open, 320 ms close) are the exam page's. */
+const GRADE_PAGE = EXAM_PAGE;
+
 export function GradesListView({ overall, courses, lmsName }: GradesListProps) {
+  const mode = useMotionMode();
   return (
     <>
+      <style href="ready-work-transition" precedence="default">
+        {WORK_TRANSITION_CSS}
+      </style>
       <p className="mt-1.5 text-[15px] text-ink-2">Pulled from {lmsName}. Tap a course to plan it.</p>
       <p className="mt-[18px] flex flex-wrap items-baseline gap-x-3 gap-y-1" aria-live="polite">
         <span
@@ -81,7 +96,9 @@ export function GradesListView({ overall, courses, lmsName }: GradesListProps) {
         {courses.map((c) => (
           <li key={c.id}>
             <Link
+              {...workSource(c.href)}
               href={c.href}
+              onClick={(e) => openCardLink(e, mode, GRADE_PAGE)}
               data-testid={`grades-row-${c.id}`}
               data-status={c.status}
               className="grid min-h-[76px] w-full grid-cols-[12px_minmax(0,1fr)_auto_20px] items-center gap-x-3.5 border-b border-solid border-line py-3 text-left text-ink no-underline"

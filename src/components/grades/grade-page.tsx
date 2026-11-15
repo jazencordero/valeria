@@ -19,9 +19,25 @@
  * tab is remembered per course in localStorage (a blocked storage just means
  * it is not remembered).
  *
- * Source: prototype merged.html HTML 1834-1840, CSS 1447-1462.
+ * Opened from a row (the Grades list or Home's grades card) the page reveals
+ * out of that row (360 ms), and "Back to grades" goes back to the page the
+ * row is on, puts its scroll back and shrinks into the row (320 ms) (M9-18,
+ * `cardArrival` / `closeCardPage` in `@/lib/motion/shared`; reduced motion:
+ * a fade, no View Transitions: a slide). While it reveals the What if chart
+ * waits, so its line still draws in view.
+ *
+ * Source: prototype merged.html HTML 1834-1840, CSS 1447-1462, JS 6021-6074.
  */
-import { useCallback, useState, useSyncExternalStore, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+  type MouseEvent,
+} from "react";
 import type { CourseColor } from "@/components/shell/side-nav";
 import { GradeHead } from "@/components/grades/grade-head";
 import { GradedList } from "@/components/grades/graded-list";
@@ -40,6 +56,15 @@ import {
   verdict,
   type WhatIfs,
 } from "@/lib/grades/model";
+import {
+  EXAM_PAGE,
+  WORK_TRANSITION_CSS,
+  cardArrival,
+  cardRevealPending,
+  closeCardPage,
+  leaveCardPage,
+} from "@/lib/motion/shared";
+import { useMotionMode } from "@/lib/motion/use-calm";
 import type { GradePageItem } from "@/server/data/grades";
 
 export type SaveTargetAction = (
@@ -97,6 +122,43 @@ export function GradePage({
   const [chartShown, setChartShown] = useState(false);
   const [, startSaving] = useTransition();
 
+  // Opened from a row: the page reveals out of it (M9-18). Until it has, the
+  // chart waits (`held`). The grade page's timings are the exam page's.
+  const router = useRouter();
+  const mode = useMotionMode();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [held, setHeld] = useState(() => cardRevealPending());
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const wait = cardArrival(el);
+    const timer = window.setTimeout(() => setHeld(false), wait);
+    return () => {
+      window.clearTimeout(timer);
+      leaveCardPage(el);
+    };
+  }, []);
+
+  /** "Back to grades": back into the row the page was opened from (the list or Home). */
+  const back = (e: MouseEvent<HTMLElement>) => {
+    const link = (e.target as Element).closest("a");
+    if (!link || link.getAttribute("href") !== backHref) return;
+    closeCardPage(
+      e,
+      link,
+      mode,
+      rootRef.current,
+      (path) => router.push(path, { scroll: false }),
+      backHref,
+      EXAM_PAGE,
+    );
+  };
+  const transitionCss = (
+    <style href="ready-work-transition" precedence="default">
+      {WORK_TRANSITION_CSS}
+    </style>
+  );
+
   // Read on the client only, so the server render stays plain.
   const rememberedTab = useSyncExternalStore(
     noopSubscribe,
@@ -144,7 +206,8 @@ export function GradePage({
 
   if (needsWeights) {
     return (
-      <div>
+      <div ref={rootRef} onClickCapture={back}>
+        {transitionCss}
         {headEl}
         <div className="mt-6">
           <NeedsWeightsCard
@@ -165,7 +228,8 @@ export function GradePage({
   const series = chartSeries(items, whatIfs);
 
   return (
-    <div>
+    <div ref={rootRef} onClickCapture={back}>
+      {transitionCss}
       {headEl}
       <Tabs
         label="Course grade"
@@ -191,7 +255,7 @@ export function GradePage({
             label: "What if",
             content: (
               <>
-                {chartShown && series !== NEEDS_WEIGHTS ? (
+                {chartShown && !held && series !== NEEDS_WEIGHTS ? (
                   <TrajectoryChart
                     items={items.map((it) => ({ id: it.id, short: it.short, name: it.name }))}
                     series={series}
