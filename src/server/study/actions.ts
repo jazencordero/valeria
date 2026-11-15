@@ -22,9 +22,6 @@
  *   card's rung is its stored `rung` clamped to 1..5. A concept's `order` is
  *   its position in the exam. The same mapping feeds `bite.ts`, so the
  *   mastery shown and the mastery a bite is built from are the same numbers.
- *   `core` and `first` come from `cards.body` (true only when stored as true),
- *   so a seeded deck gets the study order in `bite.ts`. Session cards return
- *   the body as stored, so they carry them (and cloze `accept`) too.
  * - Days left are whole Helsinki calendar days to the exam (`daysBetween`),
  *   as the chart and the phase bar use them.
  * - Forecast: `forecastNow` (raw) and `forecastShown` (rounded). Plan end and
@@ -351,10 +348,6 @@ type ExamState = {
 
 const clampRung = (r: number) => Math.min(5, Math.max(1, Math.round(r))) as BiteCard["rung"];
 
-/** A true/false mark the card format keeps in `cards.body` (M3-52); anything but `true` is false. */
-const flagOf = (body: unknown, key: "core" | "first") =>
-  typeof body === "object" && body !== null && (body as Record<string, unknown>)[key] === true;
-
 function toBiteDeck(deck: Deck, examAt: Date, now: Date): BiteDeck {
   const states: Record<string, MemoryState> = {};
   for (const c of deck.cards) if (c.memory) states[c.id] = c.memory.fsrs;
@@ -367,8 +360,6 @@ function toBiteDeck(deck: Deck, examAt: Date, now: Date): BiteDeck {
       type: c.type,
       boss: c.boss,
       active: c.status === "active",
-      core: flagOf(c.body, "core"),
-      first: flagOf(c.body, "first"),
     })),
     states,
     concepts: deck.concepts.map((c, i) => ({ id: c.id, weight: c.weight, order: i })),

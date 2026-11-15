@@ -288,39 +288,3 @@ describe("other users and settings", () => {
     expect(await caught(beginSession(examId, "nope" as never))).toBeInstanceOf(Error);
   }, DB_TIMEOUT);
 });
-
-describe("a seeded deck (M3-52)", () => {
-  it("a card with first: true in its body opens the first bite", async () => {
-    const [course] = await t.db.insert(courses).values({ userId: her, moodleId: 7, name: "Seeded" }).returning();
-    const [exam] = await t.db
-      .insert(exams)
-      .values({ userId: her, courseId: course.id, title: "Seeded final", kind: "exam", at: new Date(NOW.getTime() + 20 * D) })
-      .returning();
-    // The heavier concept is later in the course, and the opening card is at rung 3:
-    // without core/first the bite would start with a rung-1 card of the heavy concept.
-    const [intro, heavy] = await t.db
-      .insert(concepts)
-      .values([
-        { userId: her, examId: exam.id, name: "Intro", position: 1, weight: 1 },
-        { userId: her, examId: exam.id, name: "Heavy", position: 2, weight: 5 },
-      ])
-      .returning();
-    const seeded = [
-      { concept: heavy, rung: 1, body: { q: "Heavy?", a: "A", core: true, first: false } },
-      { concept: intro, rung: 1, body: { q: "Intro 1?", a: "A", core: false, first: false } },
-      { concept: intro, rung: 3, body: { q: "Intro opens?", a: "A", core: true, first: true } },
-      { concept: intro, rung: 2, body: { q: "Intro 2?", a: "A" } },
-    ];
-    for (const [i, s] of seeded.entries()) {
-      const [card] = await t.db
-        .insert(cards)
-        .values({ userId: her, examId: exam.id, type: "basic", rung: s.rung, body: s.body, origin: "manual", contentHash: `seeded-${i}` })
-        .returning();
-      await t.db.insert(cardConcepts).values({ cardId: card.id, conceptId: s.concept.id });
-    }
-
-    const bite = await beginSession(exam.id, "bite");
-    expect(bite!.cards[0].body).toMatchObject({ q: "Intro opens?", first: true, core: true });
-    expect(bite!.cards.map((c) => (c.body as { q: string }).q)).toEqual(["Intro opens?", "Intro 1?", "Intro 2?", "Heavy?"]);
-  }, DB_TIMEOUT);
-});
