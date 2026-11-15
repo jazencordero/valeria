@@ -81,7 +81,8 @@ export function ExamHeader({
           <BackIcon />
         </Button>
       )}
-      <div className="min-w-0 flex-1">
+      {/* At least 240 px for the title: a short chip line must wrap under it, never squeeze it to a word a line. */}
+      <div data-testid="exam-header-title" className="min-w-0 flex-[1_1_240px]">
         <h1 tabIndex={-1} className="text-[24px] leading-[1.15] outline-none">
           {course}
         </h1>
