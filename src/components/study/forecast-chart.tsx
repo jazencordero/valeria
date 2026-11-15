@@ -115,8 +115,11 @@ export function forecastChartLayout(data: ForecastChartData, width: number) {
   const todayW = textW("TODAY", 10, 0.02);
   const examW = textW(data.examDay, 10, 0.02);
   const examX = Math.min(xe, W - examW / 2);
+  // With no history yet, today is the left edge: "2 WEEKS AGO" would label nothing
+  // and push TODAY off its point, so the start label is left out.
+  const showStart = nh > 0;
   let todayX = Math.min(x0, examX - examW / 2 - pad - todayW / 2);
-  todayX = Math.max(todayX, L + startW + pad + todayW / 2);
+  todayX = Math.max(todayX, showStart ? L + startW + pad + todayW / 2 : L + todayW / 2);
   const showToday = todayX + todayW / 2 + pad <= examX - examW / 2 || D === 0;
 
   return {
@@ -140,7 +143,7 @@ export function forecastChartLayout(data: ForecastChartData, width: number) {
     stopD: "M" + stop.map((p, i) => pt(X(i), Y(p))).join(" L"),
     planEnd: { y: Y(planEndPct), label: `${Math.round(planEndPct)}%`, labelY: lpY },
     stopEnd: { y: Y(stopEndPct), label: `${Math.round(stopEndPct)}%`, labelY: lsY },
-    axis: { y: axY, todayX, examX, showToday: showToday && D > 0 },
+    axis: { y: axY, todayX, examX, showToday: showToday && D > 0, showStart },
     planEndPct,
     stopEndPct,
   };
@@ -289,9 +292,11 @@ export function ForecastChart({
             style={{ stroke: "var(--ink)", strokeWidth: 1, opacity: 0.18 }}
           />
 
-          <text x={g.L} y={g.axis.y} style={AX}>
-            2 WEEKS AGO
-          </text>
+          {g.axis.showStart && (
+            <text x={g.L} y={g.axis.y} style={AX}>
+              2 WEEKS AGO
+            </text>
+          )}
           {g.axis.showToday && (
             <text x={g.axis.todayX} y={g.axis.y} textAnchor="middle" style={AX_STRONG}>
               TODAY
