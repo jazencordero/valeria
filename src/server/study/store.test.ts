@@ -133,6 +133,41 @@ describe("loadDeck", () => {
   }, DB_TIMEOUT);
 });
 
+describe("loadDeck on a deck from a hand-made bundle", () => {
+  it("serves cards in the bundle's order whatever order the rows were written in", async () => {
+    const [c2, c1] = await t.db
+      .insert(concepts)
+      .values([
+        { userId: her, examId, name: "Later idea", position: 2 },
+        { userId: her, examId, name: "Earlier idea", position: 1 },
+      ])
+      .returning();
+    // Written out of order, all with one timestamp, as an early import did.
+    const at = new Date("2026-11-01T10:00:00Z");
+    const make = (importId: string | null, body: Record<string, unknown> = {}) =>
+      makeCard(her, examId, { importId, createdAt: at, body: { front: "Q", back: "A", ...body } });
+    const later10 = await make("c10");
+    const later2 = await make("c2");
+    const earlyPlain = await make("a3");
+    const earlyCore = await make("a9", { core: true });
+    const earlyFirst = await make("a7", { first: true });
+    const loose = await make(null);
+    await t.db.insert(cardConcepts).values([
+      { cardId: later10, conceptId: c2.id },
+      { cardId: later2, conceptId: c2.id },
+      { cardId: earlyPlain, conceptId: c1.id },
+      { cardId: earlyCore, conceptId: c1.id },
+      { cardId: earlyFirst, conceptId: c1.id },
+    ]);
+
+    const deck = await loadDeck(her, examId, t.db);
+
+    // Earlier concept first; in it the opening card, then core, then the rest; "c2" before "c10";
+    // a card with no concept last.
+    expect(deck.cards.map((c) => c.id)).toEqual([earlyFirst, earlyCore, earlyPlain, later2, later10, loose]);
+  }, DB_TIMEOUT);
+});
+
 describe("sessions", () => {
   it("starts a session with its cards and finishes it once", async () => {
     const a = await makeCard(her, examId);

@@ -680,7 +680,12 @@ describe("applyImport", () => {
 
       const result = await applyImport(t.db, her, twoPlan, { now: NOW });
       expect(result.counts.cards.created).toBe(24);
-      expect((await loadDeck(her, result.examId, t.db)).cards.map((c) => c.importId)).toEqual(wanted);
+      // The deck is read concept by concept (in the concepts' study order), and inside a concept
+      // in the deck files' order: lecture by lecture, card by card.
+      const positionOf = new Map(twoPlan.concepts.map((c) => [c.slug, c.position]));
+      const slugOf = new Map(twoPlan.cards.map((c) => [c.importId, c.conceptSlugs[0]]));
+      const inOrder = [...wanted].sort((a, b) => positionOf.get(slugOf.get(a)!)! - positionOf.get(slugOf.get(b)!)!);
+      expect((await loadDeck(her, result.examId, t.db)).cards.map((c) => c.importId)).toEqual(inOrder);
 
       // A second run leaves the order (and every stamp) as it is.
       const stamps = () => t.db.select({ id: cards.id, at: sql<string>`${cards.createdAt}::text` }).from(cards).orderBy(cards.id);
@@ -688,7 +693,7 @@ describe("applyImport", () => {
       expect(new Set(before.map((r) => r.at)).size).toBe(24);
       await applyImport(t.db, her, planImport(two), { now: new Date(NOW.getTime() + 60_000) });
       expect(await stamps()).toEqual(before);
-      expect((await loadDeck(her, result.examId, t.db)).cards.map((c) => c.importId)).toEqual(wanted);
+      expect((await loadDeck(her, result.examId, t.db)).cards.map((c) => c.importId)).toEqual(inOrder);
     },
     T,
   );

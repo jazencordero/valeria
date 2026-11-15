@@ -41,7 +41,7 @@
  * - `last14`: review rows (every grade) per day for the 14 days ending
  *   today, oldest first, zeros included.
  */
-import { and, asc, eq, gte, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import {
   cardConcepts,
@@ -172,7 +172,7 @@ export async function loadDeck(userId: string, examId: string, database: Db = de
     .orderBy(asc(concepts.position), asc(concepts.createdAt), asc(concepts.id));
 
   const rows = await database
-    .select({ card: cards, state: cardStates })
+    .select({ card: cards, state: cardStates, stamp: sql<string>`${cards.createdAt}::text` })
     .from(cards)
     .leftJoin(cardStates, eq(cardStates.cardId, cards.id))
     .where(and(eq(cards.examId, examId), eq(cards.userId, userId), eq(cards.status, "active")))
@@ -194,21 +194,54 @@ export async function loadDeck(userId: string, examId: string, database: Db = de
     byCard.set(l.cardId, list);
   }
 
-  return {
-    concepts: conceptRows,
-    cards: rows.map(({ card, state }) => ({
-      ...card,
-      conceptIds: (byCard.get(card.id) ?? []).sort((a, b) => order.get(a)! - order.get(b)!),
-      memory: state
-        ? {
-            fsrs: state.fsrs as MemoryState,
-            dueAt: state.dueAt,
-            lapses: state.lapses,
-            lastReviewAt: state.lastReviewAt,
-          }
-        : null,
-    })),
-  };
+  const deckCards: DeckCard[] = rows.map(({ card, state }) => ({
+    ...card,
+    conceptIds: (byCard.get(card.id) ?? []).sort((a, b) => order.get(a)! - order.get(b)!),
+    memory: state
+      ? {
+          fsrs: state.fsrs as MemoryState,
+          dueAt: state.dueAt,
+          lapses: state.lapses,
+          lastReviewAt: state.lastReviewAt,
+        }
+      : null,
+  }));
+
+  // The stamps as text: an import stamps cards a microsecond apart, finer than a Date holds.
+  const stamps = new Map(rows.map((r) => [r.card.id, r.stamp]));
+  return { concepts: conceptRows, cards: inBundleOrder(deckCards, order, stamps) };
+}
+
+const bodyFlag = (card: DeckCard, key: "first" | "core") =>
+  typeof card.body === "object" && card.body !== null && (card.body as Record<string, unknown>)[key] === true;
+const naturally = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
+/**
+ * A deck that came from a hand-made bundle (its cards carry an import id) is served in the
+ * bundle's order whatever order its rows were written in: by the position of the card's first
+ * concept, then the card that opens the concept (`first`), then core cards, then the card's place
+ * in its deck file (the stamp a newer import gives it), then the import id read naturally ("c2"
+ * before "c10") for cards an earlier import wrote with one shared stamp. Cards without a concept
+ * come last. Any other deck keeps that order throughout, as before.
+ */
+function inBundleOrder(cards: DeckCard[], conceptOrder: Map<string, number>, stamps: Map<string, string>): DeckCard[] {
+  if (!cards.some((c) => c.importId !== null)) return cards;
+  const place = new Map(cards.map((c, i) => [c.id, i]));
+  const positionOf = (c: DeckCard) => (c.conceptIds.length ? conceptOrder.get(c.conceptIds[0])! : Number.MAX_SAFE_INTEGER);
+  return [...cards].sort(
+    (a, b) =>
+      positionOf(a) - positionOf(b) ||
+      Number(bodyFlag(b, "first")) - Number(bodyFlag(a, "first")) ||
+      Number(bodyFlag(b, "core")) - Number(bodyFlag(a, "core")) ||
+      // Their place in the deck file, where the import recorded it (rows arrive in stamp order);
+      // cards an earlier import wrote with one shared stamp are told apart by their ids.
+      (stamps.get(a.id) !== stamps.get(b.id)
+        ? 0
+        : a.importId !== null && b.importId !== null
+          ? naturally.compare(a.importId, b.importId)
+          : Number(a.importId === null) - Number(b.importId === null)) ||
+      place.get(a.id)! - place.get(b.id)!,
+  );
 }
 
 export async function flagCard(
