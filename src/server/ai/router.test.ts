@@ -5,7 +5,7 @@ import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { aiCalls, providerCooldowns } from "@/server/db/schema/system";
 import { BROKEN_JSON, startFakeAi, type FakeAi } from "../../../tests/fake-ai/server";
 import { PROVIDERS, type ProviderEntry, type SizeClass } from "./providers.config";
-import { AiBadOutput, AiBusy, createRouter, NotFree, retryAfterMs, type RouterDeps } from "./router";
+import { AiBadOutput, AiBusy, createRouter, fakeAiUrl, NotFree, retryAfterMs, type RouterDeps } from "./router";
 
 // Real free entries from the config, so the allow-list check passes; their URLs point at the fake.
 const GROQ = PROVIDERS.small.find((e) => e.provider === "groq")!;
@@ -369,6 +369,106 @@ describe("privacy", () => {
     expect(err).toBeInstanceOf(AiBusy);
     expect(JSON.stringify(err, Object.getOwnPropertyNames(err))).not.toContain(PROMPT);
     expect((err as Error).cause).toBeUndefined();
+  });
+});
+
+// M2-23: the test-only switch that points a dev server at the fake AI.
+describe("AI_FAKE_URL", () => {
+  /** A router with no `baseUrlFor`, as the app builds it, and a fetch that records where it was sent. */
+  function appRouter(env: Record<string, string | undefined>, small: readonly ProviderEntry[] = [GROQ]) {
+    const urls: string[] = [];
+    const answer = {
+      id: "x",
+      object: "chat.completion",
+      created: 0,
+      model: "m",
+      choices: [{ index: 0, message: { role: "assistant", content: "from the stub" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    };
+    // Nothing leaves the machine: a call that is not for the fake is answered here.
+    const fetch: typeof globalThis.fetch = async (url, init) => {
+      urls.push(String(url));
+      if (String(url).startsWith(ai.url)) return globalThis.fetch(url, init);
+      return Response.json(answer);
+    };
+    const r = createRouter({ providers: table(small), env: { ...ENV, ...env }, database: t.db, now: () => NOW, fetch });
+    return { r, urls };
+  }
+
+  it("on a local dev server, calls go to the fake under the provider's name", async () => {
+    ai.queue("groq", { text: "from the fake" });
+    const { r, urls } = appRouter({ NODE_ENV: "development", AI_FAKE_URL: ai.url });
+    expect((await r.runText(input)).text).toBe("from the fake");
+    expect(urls).toEqual([`${ai.url}/groq/v1/chat/completions`]);
+    expect(ai.calls).toMatchObject([{ route: "groq", model: GROQ.model, hasKey: true }]);
+  });
+
+  it("is ignored in production", async () => {
+    const { r, urls } = appRouter({ NODE_ENV: "production", AI_FAKE_URL: ai.url });
+    expect((await r.runText(input)).text).toBe("from the stub");
+    expect(urls).toEqual(["https://api.groq.com/openai/v1/chat/completions"]);
+    expect(ai.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ["VERCEL", "1"],
+    ["VERCEL_ENV", "preview"],
+    ["VERCEL_ENV", "development"],
+    ["VERCEL_URL", "ready-preview.vercel.app"],
+    ["VERCEL_OIDC_TOKEN", "made-up"],
+    ["VERCEL_ANYTHING_NEW", "x"],
+  ])("is ignored when %s is set to %j, whatever NODE_ENV says", async (name, value) => {
+    const { r, urls } = appRouter({ NODE_ENV: "development", AI_FAKE_URL: ai.url, [name]: value });
+    expect((await r.runText(input)).text).toBe("from the stub");
+    expect(urls).toEqual(["https://api.groq.com/openai/v1/chat/completions"]);
+    expect(ai.calls).toHaveLength(0);
+  });
+
+  it.each([
+    "https://evil.example/collect",
+    "http://127.0.0.1.evil.example:4000",
+    "http://localhost.evil.example",
+    "http://evil.example#@127.0.0.1",
+    "http://127.0.0.1@evil.example",
+    "http://user:pw@127.0.0.1:4000",
+    "http://0.0.0.0:4000",
+    "http://192.168.1.20:4000",
+    "http://[::1]:4000",
+    "file:///tmp/x",
+    "not a url",
+  ])("is ignored when it does not point at this machine: %s", async (value) => {
+    expect(fakeAiUrl({ NODE_ENV: "development", AI_FAKE_URL: value })).toBeNull();
+    const { r, urls } = appRouter({ NODE_ENV: "development", AI_FAKE_URL: value });
+    expect((await r.runText(input)).text).toBe("from the stub");
+    expect(urls).toEqual(["https://api.groq.com/openai/v1/chat/completions"]);
+  });
+
+  it("a VERCEL* name with an empty value counts as not set", async () => {
+    ai.queue("groq", { text: "from the fake" });
+    const { r } = appRouter({ NODE_ENV: "development", AI_FAKE_URL: ai.url, VERCEL: "", VERCEL_ENV: undefined });
+    expect((await r.runText(input)).text).toBe("from the fake");
+  });
+
+  it("reads localhost and 127.0.0.1, and drops any path", () => {
+    expect(fakeAiUrl({ AI_FAKE_URL: "http://127.0.0.1:4010" })).toBe("http://127.0.0.1:4010");
+    expect(fakeAiUrl({ AI_FAKE_URL: "http://localhost:4010/anything?x=1" })).toBe("http://localhost:4010");
+    expect(fakeAiUrl({})).toBeNull();
+    expect(fakeAiUrl({ AI_FAKE_URL: "" })).toBeNull();
+  });
+
+  it("the allow-list still applies: a paid model throws NotFree and nothing is sent", async () => {
+    const paid: ProviderEntry = { ...GROQ, model: "openai/gpt-paid-1" };
+    const { r, urls } = appRouter({ NODE_ENV: "development", AI_FAKE_URL: ai.url }, [paid]);
+    await expect(r.runText(input)).rejects.toBeInstanceOf(NotFree);
+    expect(urls).toHaveLength(0);
+    expect(ai.calls).toHaveLength(0);
+  });
+
+  it("a provider without its key is still skipped, and nothing is printed", async () => {
+    const { r, urls } = appRouter({ NODE_ENV: "development", AI_FAKE_URL: ai.url, GROQ_API_KEY: undefined });
+    await expect(r.runText(input)).rejects.toBeInstanceOf(AiBusy);
+    expect(urls).toHaveLength(0);
+    expect(logs).toHaveLength(0);
   });
 });
 

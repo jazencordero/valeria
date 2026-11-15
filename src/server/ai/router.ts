@@ -26,6 +26,11 @@
  *
  * `createRouter(deps)` takes the provider table, env, database, clock, fetch and a base URL
  * override, so tests can point it at `tests/fake-ai/server.ts`.
+ *
+ * Test-only switch (M2-23): `AI_FAKE_URL` points a running dev server at the fake AI, so the
+ * whole-flow tests (tests/e2e/chat.spec.ts) can script replies. See `fakeAiUrl` below for when
+ * it is honoured; everywhere else it is ignored without a word. The allow-list still applies,
+ * and a provider still needs its env key to be picked.
  */
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import {
@@ -160,7 +165,8 @@ export function createRouter(deps: RouterDeps = {}) {
     if (!apiKey) return null;
     const resolved = resolveBaseUrl(entry, e);
     if (!resolved) return null;
-    const baseUrl = deps.baseUrlFor ? deps.baseUrlFor(entry) : resolved;
+    const fake = deps.baseUrlFor ? null : fakeAiUrl(e);
+    const baseUrl = deps.baseUrlFor ? deps.baseUrlFor(entry) : fake ? `${fake}/${entry.provider}/v1` : resolved;
     return { entry, provider: entry.provider, model: entry.model, baseUrl, apiKey };
   }
 
@@ -349,6 +355,35 @@ export function createRouter(deps: RouterDeps = {}) {
   }
 
   return { pick, runText, runObject, streamChat };
+}
+
+/**
+ * The fake AI's address from `AI_FAKE_URL`, or null. Honoured only when ALL of these hold:
+ * - its host is exactly `localhost` or `127.0.0.1`, over plain http or https, so a provider key
+ *   can never be sent to another machine through this switch;
+ * - no `VERCEL*` variable has a value: Vercel sets `VERCEL=1` (and more) on every build and
+ *   deploy, previews included, so the switch is dead there whatever else is configured. (An
+ *   empty value counts as not set: playwright.config.ts blanks the names a pulled `.env.local`
+ *   may carry, which is also what keeps Next from loading them from that file.)
+ * - `NODE_ENV` is not "production" (`next build` / `next start`, anywhere).
+ * Anything else: null, silently. The first path segment the router adds is the provider's name,
+ * which is the fake's "route" (tests/fake-ai/server.ts).
+ */
+export function fakeAiUrl(env: Record<string, string | undefined> = process.env): string | null {
+  const raw = env.AI_FAKE_URL;
+  if (!raw) return null;
+  if (env.NODE_ENV === "production" || process.env.NODE_ENV === "production") return null;
+  if (Object.keys(env).some((key) => key.startsWith("VERCEL") && env[key])) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return null;
+  if (url.username || url.password) return null;
+  return url.origin;
 }
 
 /** Plain tool definitions as SDK tools, or undefined when there are none. */
