@@ -1,5 +1,6 @@
 /*
  * Settings actions (M1-38): disconnect MyCourses, delete everything.
+ * M2-26 adds her switch "Use my course files with AI" (`users.settings.ai.useFiles`).
  *
  * The real work sits in plain functions that take a `Db` and a user id, so the
  * tests run them against `createTestDb()` with no request. The two Server
@@ -8,12 +9,12 @@
  *
  * There is no file-level "use server" on purpose: that would turn every export
  * here (including `deleteAccountFor`, which takes any user id) into a callable
- * endpoint. Only the two `...Action` functions carry the directive.
+ * endpoint. Only the `...Action` functions carry the directive.
  */
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   currentUser,
   NotSignedIn,
@@ -56,6 +57,23 @@ export async function deleteAccountFor(
   return { ok: true };
 }
 
+/**
+ * Sets her switch `users.settings.ai.useFiles` (read by `mayUseFiles`, src/server/ai/consent.ts).
+ * Written with `jsonb_set`, so every other key in `settings`, and any other key under `ai`,
+ * stays as it was.
+ */
+export async function setUseFilesFor(database: Db, userId: string, on: boolean): Promise<void> {
+  await database
+    .update(users)
+    .set({
+      settings: sql`jsonb_set(
+        jsonb_set(${users.settings}, '{ai}', case when jsonb_typeof(${users.settings} -> 'ai') = 'object'
+          then ${users.settings} -> 'ai' else '{}'::jsonb end),
+        '{ai,useFiles}', ${on ? "true" : "false"}::jsonb)`,
+    })
+    .where(eq(users.id, userId));
+}
+
 async function signedInUser(): Promise<User | null> {
   try {
     return await currentUser();
@@ -71,6 +89,18 @@ export async function disconnectAction(): Promise<void> {
   const user = await signedInUser();
   if (!user) redirect("/");
   await disconnectFor(defaultDb, user.id);
+  revalidatePath("/settings");
+}
+
+/**
+ * Form action for the "Use my course files with AI" checkbox. A ticked box sends
+ * `useFiles=on`; an unticked one sends nothing, which turns the switch off.
+ */
+export async function setUseFilesAction(form: FormData): Promise<void> {
+  "use server";
+  const user = await signedInUser();
+  if (!user) redirect("/");
+  await setUseFilesFor(defaultDb, user.id, form.get("useFiles") !== null);
   revalidatePath("/settings");
 }
 

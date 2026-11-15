@@ -1,5 +1,7 @@
 /*
  * Settings, plain (M1-38): MyCourses, your data, what Ready keeps.
+ * M2-26 adds a plain checkbox under "What Ready keeps": "Use my course files with AI"
+ * (M8-03 turns it into the designed switch).
  *
  * Built from existing pieces only; no design pass (M8-01 designs it). Works
  * with or without the (app) frame from M1-25: it is an ordinary page in the
@@ -7,13 +9,14 @@
  */
 import { eq } from "drizzle-orm";
 import { connection } from "next/server";
-import { Suspense } from "react";
+import { cache, Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { dateLine } from "@/lib/dates";
+import { filesSwitchOn } from "@/server/ai/consent";
 import { ensureSession } from "@/server/auth/session";
 import { db } from "@/server/db/client";
 import { moodleConnections } from "@/server/db/schema/moodle";
-import { DELETE_PHRASE, deleteAccountAction, disconnectAction } from "./actions";
+import { DELETE_PHRASE, deleteAccountAction, disconnectAction, setUseFilesAction } from "./actions";
 
 // src/lib/schools.ts (the school's `lms` name) does not exist on this branch
 // yet; swap this for it when it lands.
@@ -32,6 +35,14 @@ type AccountProps = {
   /** True after a delete attempt whose typed text did not match. */
   confirmWrong: boolean;
 };
+
+/** The visitor's user, read once per request for both parts that need it. */
+const sessionUser = cache(async () => {
+  // Request time only: the session and DB reads touch the clock, which Next refuses during
+  // (runtime) prerendering.
+  await connection();
+  return ensureSession();
+});
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
@@ -53,10 +64,7 @@ export default function SettingsPage({ searchParams }: { searchParams: SearchPar
 }
 
 async function AccountSections({ searchParams }: { searchParams: SearchParams }) {
-  // Request time only: the session and DB reads below touch the clock, which
-  // Next refuses during (runtime) prerendering.
-  await connection();
-  const user = await ensureSession();
+  const user = await sessionUser();
   const [row] = await db
     .select({
       connectedAt: moodleConnections.connectedAt,
@@ -151,7 +159,31 @@ function Account({ connection, confirmWrong }: AccountProps) {
   );
 }
 
-/** Static: no request data, so it prerenders into the shell. */
+/** Her own switch for course files and AI. Reads the session, so it streams in behind <Suspense>. */
+async function AiFilesSwitch() {
+  const user = await sessionUser();
+  return <AiFiles on={filesSwitchOn(user.settings)} />;
+}
+
+function AiFiles({ on }: { on: boolean }) {
+  return (
+    <form action={setUseFilesAction} className="space-y-2">
+      <label className="flex min-h-11 items-center gap-2">
+        <input type="checkbox" name="useFiles" defaultChecked={on} className="size-5" />
+        Use my course files with AI
+      </label>
+      <p className="fine">
+        When this is on, Ready may send the text of your course files to an AI model, only in courses you marked as
+        allowing AI. When it is off, the chat works from the assignment text only.
+      </p>
+      <Button type="submit" variant="secondary" size="sm">
+        Save
+      </Button>
+    </form>
+  );
+}
+
+/** Static except the switch: the lists prerender into the shell. */
 function Privacy() {
   return (
     <section id="privacy" aria-labelledby="privacy-title" className="space-y-3">
@@ -165,6 +197,9 @@ function Privacy() {
         <li>The text of files you open</li>
         <li>Your answers and progress</li>
       </ul>
+      <Suspense fallback={null}>
+        <AiFilesSwitch />
+      </Suspense>
       <h3 className="font-semibold">What it never does</h3>
       <ul className="list-disc space-y-1 pl-5">
         <li>Hand in without your tap</li>

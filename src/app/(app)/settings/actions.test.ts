@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureSessionFor, newToken } from "@/server/auth/session";
@@ -21,9 +21,10 @@ import {
   studySessions,
 } from "@/server/db/schema/study";
 import { aiCalls, jobs, usageEvents } from "@/server/db/schema/system";
-import { confirmCodes, identities } from "@/server/db/schema/users";
+import { filesSwitchOn } from "@/server/ai/consent";
+import { confirmCodes, identities, users } from "@/server/db/schema/users";
 import { assignments, chatMessages, chats, drafts, submissions } from "@/server/db/schema/work";
-import { DELETE_PHRASE, deleteAccountFor, disconnectFor, matchesDeletePhrase } from "./actions";
+import { DELETE_PHRASE, deleteAccountFor, disconnectFor, matchesDeletePhrase, setUseFilesFor } from "./actions";
 
 // Made-up values for tests only.
 const FAKE_SECRET = "test-only-seal-secret-not-real";
@@ -227,5 +228,39 @@ describe("deleteAccountFor", () => {
       expect(await deleteAccountFor(t.db, her, typed)).toEqual({ ok: false, reason: "confirmation" });
     }
     expect(await totals()).toEqual(before);
+  });
+});
+
+describe("setUseFilesFor", () => {
+  const settingsOf = async (userId: string) =>
+    (await t.db.select({ settings: users.settings }).from(users).where(eq(users.id, userId)))[0].settings;
+
+  it("turns her switch off and on again and keeps every other settings key", async () => {
+    const her = await newUser();
+    const other = await newUser();
+    const before = { syncCursor: { at: 5 }, moodleCalls: { n: 3, day: "2026-11-15" }, ai: { other: "kept" } };
+    await t.db.update(users).set({ settings: before }).where(eq(users.id, her));
+    expect(filesSwitchOn(await settingsOf(her))).toBe(true);
+
+    await setUseFilesFor(t.db, her, false);
+    expect(await settingsOf(her)).toEqual({ ...before, ai: { other: "kept", useFiles: false } });
+    expect(filesSwitchOn(await settingsOf(her))).toBe(false);
+
+    await setUseFilesFor(t.db, her, true);
+    expect(await settingsOf(her)).toEqual({ ...before, ai: { other: "kept", useFiles: true } });
+    expect(filesSwitchOn(await settingsOf(her))).toBe(true);
+
+    // Someone else's settings are not touched.
+    expect(await settingsOf(other)).toEqual({});
+  });
+
+  it("works from empty settings, and from an `ai` value that is not an object", async () => {
+    const her = await newUser();
+    await setUseFilesFor(t.db, her, false);
+    expect(await settingsOf(her)).toEqual({ ai: { useFiles: false } });
+
+    await t.db.update(users).set({ settings: { ai: "odd", keep: 1 } }).where(eq(users.id, her));
+    await setUseFilesFor(t.db, her, false);
+    expect(await settingsOf(her)).toEqual({ ai: { useFiles: false }, keep: 1 });
   });
 });
