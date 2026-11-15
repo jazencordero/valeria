@@ -1,71 +1,26 @@
 {
   "_about": "Accessibility findings we already know (M8-22). screen -> rule id -> the ticket that fixes it, or \"accepted: <reason>\". tests/e2e/a11y.spec.ts fails only on a finding that is not listed here. When a ticket is fixed, delete its lines. The findings, tickets and reasons are written up in the M8-22 findings note.",
   "known": {
-    "welcome": {
-      "color-contrast": "M8-60"
-    },
-    "school": {
-      "color-contrast": "M8-60"
-    },
-    "connect": {
-      "color-contrast": "M8-60"
-    },
-    "connect-qr": {
-      "color-contrast": "M8-60"
-    },
     "home": {
-      "color-contrast": "M8-60 (quiet text), M8-61 (the grades card on butter, light and dark)",
+      "color-contrast": "M8-61 (the grades card on butter, light and dark)",
       "label-content-name-mismatch": "M8-62 (the Notes button is named Notepad). The side-nav links on the same screen are accepted, see assignments."
     },
     "assignments": {
-      "color-contrast": "M8-60",
       "label-content-name-mismatch": "accepted: the side-nav links are named \"Assignments, 3 open\" and \"Exams, 2 upcoming\" on purpose (M4-04): the name starts with the word on screen and says what the number badge means. axe only trips on the comma."
-    },
-    "assignment": {
-      "color-contrast": "M8-60"
-    },
-    "handin-sheet": {
-      "color-contrast": "M8-60"
     },
     "exams": {
-      "color-contrast": "M8-60",
       "label-content-name-mismatch": "accepted: the side-nav links are named \"Assignments, 3 open\" and \"Exams, 2 upcoming\" on purpose (M4-04): the name starts with the word on screen and says what the number badge means. axe only trips on the comma."
-    },
-    "exam-form-sheet": {
-      "color-contrast": "M8-60"
     },
     "exam": {
-      "color-contrast": "M8-60",
       "label-content-name-mismatch": "accepted: the side-nav links are named \"Assignments, 3 open\" and \"Exams, 2 upcoming\" on purpose (M4-04): the name starts with the word on screen and says what the number badge means. axe only trips on the comma."
     },
-    "session-basic": {
-      "color-contrast": "M8-60"
-    },
-    "session-basic-answer": {
-      "color-contrast": "M8-60"
-    },
-    "session-cloze": {
-      "color-contrast": "M8-60"
-    },
-    "session-mcq": {
-      "color-contrast": "M8-60"
-    },
-    "session-match": {
-      "color-contrast": "M8-60"
-    },
-    "session-explain": {
-      "color-contrast": "M8-60"
-    },
     "grades": {
-      "color-contrast": "M8-60",
       "label-content-name-mismatch": "accepted: the side-nav links are named \"Assignments, 3 open\" and \"Exams, 2 upcoming\" on purpose (M4-04): the name starts with the word on screen and says what the number badge means. axe only trips on the comma."
     },
     "calendar": {
-      "color-contrast": "M8-60",
       "label-content-name-mismatch": "accepted: the side-nav links are named \"Assignments, 3 open\" and \"Exams, 2 upcoming\" on purpose (M4-04): the name starts with the word on screen and says what the number badge means. axe only trips on the comma."
     },
     "settings": {
-      "color-contrast": "M8-60",
       "label-content-name-mismatch": "accepted: the side-nav links are named \"Assignments, 3 open\" and \"Exams, 2 upcoming\" on purpose (M4-04): the name starts with the word on screen and says what the number badge means. axe only trips on the comma."
     }
   }

@@ -9,7 +9,7 @@
   --surface: oklch(0.992 0.006 85);
   --ink: oklch(0.25 0.03 40);
   --ink-2: oklch(0.46 0.025 45);
-  --ink-3: oklch(0.62 0.02 55);
+  --ink-3: oklch(0.54 0.02 55); /* M8-60: darker than the prototype (0.62) so small text reaches 4.5:1 */
   --line: oklch(0.90 0.015 80);
   --accent: oklch(0.64 0.17 12);
   --accent-ink: oklch(0.99 0.01 85);
@@ -17,7 +17,7 @@
   --butter: oklch(0.93 0.07 95);
   --mint: oklch(0.93 0.05 165);
   --sky: oklch(0.93 0.04 230);
-  --due: oklch(0.58 0.14 65);
+  --due: oklch(0.55 0.14 65); /* M8-60: darker than the prototype (0.58) for 4.5:1 */
   --btn: oklch(0.25 0.03 40);
   --btn-ink: oklch(0.972 0.012 85);
   --btn-ledge: oklch(0.15 0.02 40);
