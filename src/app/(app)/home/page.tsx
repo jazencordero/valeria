@@ -63,6 +63,20 @@ function doneMeta(a: HomeDone, now: Date): string {
 }
 
 function DoFirst({ first, lastDone, now }: { first: HomeFirst | null; lastDone: HomeDone | null; now: Date }) {
+  // What she handed in this week stays on top as a done row, above what is next.
+  const done = lastDone ? (
+    <DoneRow title={`${lastDone.title} handed in`} meta={doneMeta(lastDone, now)} />
+  ) : null;
+  if (first && done) {
+    return (
+      <>
+        {done}
+        <div className="mt-3">
+          <DoFirst first={first} lastDone={null} now={now} />
+        </div>
+      </>
+    );
+  }
   if (first?.dueAt) {
     const urgent = first.dueAt.getTime() - now.getTime() < URGENT_MS;
     return (
@@ -98,9 +112,7 @@ function DoFirst({ first, lastDone, now }: { first: HomeFirst | null; lastDone: 
       </Queue>
     );
   }
-  if (lastDone) {
-    return <DoneRow title={`${lastDone.title} handed in`} meta={doneMeta(lastDone, now)} />;
-  }
+  if (done) return done;
   return <p className="py-3 text-[15px] text-ink-2">Nothing open. Enjoy it.</p>;
 }
 
