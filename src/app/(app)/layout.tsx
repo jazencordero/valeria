@@ -10,6 +10,15 @@
  * streamed inside Suspense; the fallback is the same side nav without her
  * courses or chip. The tab bar needs only the path.
  *
+ * The side nav folds to a 72 px icon rail (M4-01, logic in
+ * `@/components/shell/use-side`). Folded between 700 and 1000 px, open from
+ * 1000 px, unless she chose: her choice is in localStorage['ready-side'] and
+ * mirrored on <html data-side>. The server cannot read localStorage, so
+ * SIDE_BOOT runs before the side nav is parsed and copies the choice onto
+ * <html> (which already has suppressHydrationWarning for the theme script).
+ * The grid turns that and the width into `--side-c` (1 folded, 0 open), which
+ * sizes the side nav in plain CSS: no jump on reload, no hydration mismatch.
+ *
  * A demo user (M1-37, `users.settings.demo`) gets a thin "Demo data" line at
  * the top of the page area, with "Restart demo" (GET /demo?reset=1).
  */
@@ -66,21 +75,38 @@ async function DemoBanner() {
   );
 }
 
+// Same key as SIDE_KEY in @/components/shell/use-side (a client module, so
+// its exports cannot be read here).
+const SIDE_BOOT = `try{var s=localStorage.getItem('ready-side');if(s==='collapsed'||s==='expanded')document.documentElement.setAttribute('data-side',s)}catch(e){}`;
+
+/** `--side-c`: 1 folded, 0 open. Her choice on <html> beats the width default. */
+const SIDE_VAR =
+  "[--side-c:0] max-[1000px]:[--side-c:1] " +
+  "[html[data-side=collapsed]_&]:[--side-c:1] [html[data-side=expanded]_&]:[--side-c:0]";
+
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="grid h-dvh grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-surface min-[700px]:grid-cols-[auto_minmax(0,1fr)] min-[700px]:grid-rows-[minmax(0,1fr)] min-[700px]:bg-paper">
-      <Suspense fallback={<SideNavView courses={[]} user={null} pathname={null} />}>
-        <SideNavForUser />
-      </Suspense>
-      <main className="relative min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain bg-surface [container-type:inline-size]">
-        <Suspense fallback={null}>
-          <DemoBanner />
+    <>
+      <script dangerouslySetInnerHTML={{ __html: SIDE_BOOT }} />
+      <div
+        className={`${SIDE_VAR} grid h-dvh grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-surface min-[700px]:grid-cols-[auto_minmax(0,1fr)] min-[700px]:grid-rows-[minmax(0,1fr)] min-[700px]:bg-paper`}
+      >
+        <Suspense fallback={<SideNavView courses={[]} user={null} pathname={null} />}>
+          <SideNavForUser />
         </Suspense>
-        {children}
-      </main>
-      <Suspense fallback={<TabBarView pathname={null} />}>
-        <TabBar />
-      </Suspense>
-    </div>
+        <main
+          id="main"
+          className="relative min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain bg-surface [container-type:inline-size]"
+        >
+          <Suspense fallback={null}>
+            <DemoBanner />
+          </Suspense>
+          {children}
+        </main>
+        <Suspense fallback={<TabBarView pathname={null} />}>
+          <TabBar />
+        </Suspense>
+      </div>
+    </>
   );
 }
