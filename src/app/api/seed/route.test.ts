@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { signUp } from "@/server/auth/accounts";
 import { ensureSessionFor, newToken, SESSION_COOKIE } from "@/server/auth/session";
 import type { Db } from "@/server/db/client";
@@ -637,5 +637,106 @@ describe("the tool's --upload, against POST /api/login and POST /api/seed", () =
     expect(await run(upload(), null, b.io)).toBe(1);
     expect(b.err).toEqual(["At account: refused: A demo account cannot be filled from files. Stopped. Nothing was written."]);
     expect(Object.values(await rowCounts(t.db)).every((n) => n === 0)).toBe(true);
+  });
+
+  it("--tutor on: applied when the app lists the username in TUTOR_USERS, ignored (and said so) when not", async () => {
+    onTestFinished(() => void vi.unstubAllEnvs());
+    vi.stubEnv("TUTOR_USERS", "someone.else");
+    const { calls, fetcher } = app();
+    const ignored = io(fetcher);
+    expect(await run(upload(["--tutor", "on"]), null, ignored.io)).toBe(0);
+    // Sent once, right after the account part, with the same session.
+    const seedCalls = calls.filter((c) => c.path === "/api/seed");
+    expect(JSON.parse(seedCalls[1].body)).toEqual({ part: "tutor", tutor: "on" });
+    expect(seedCalls[1].cookie).toBe(seedCalls[0].cookie);
+    expect(ignored.out).toContain("Tutor: ignored by the app; the setting was not changed. It takes --tutor only from accounts listed in its TUTOR_USERS setting.");
+    expect(ignored.out.join("\n")).not.toContain("someone.else");
+    const [before] = await t.db.select().from(users).where(eq(users.id, userId));
+    expect(before.settings.tutor).toBeUndefined();
+
+    vi.stubEnv("TUTOR_USERS", " Other.Name ,TEST.Student ");
+    const listed = io(app().fetcher);
+    expect(await run(upload(["--tutor", "on"]), null, listed.io)).toBe(0);
+    expect(listed.out).toContain("Tutor: switched on (applied by the app).");
+    nothingSecretIn([...listed.out, ...listed.err], []);
+    const [after] = await t.db.select().from(users).where(eq(users.id, userId));
+    expect(after.settings.tutor).toEqual({ enabled: true });
+
+    // The dry run lists the request and sends nothing.
+    const dry = io(app().fetcher);
+    expect(await run(upload(["--tutor", "off", "--dry-run"]), null, dry.io)).toBe(0);
+    expect(dry.out[3]).toMatch(/^\s+2\. tutor\s+[\d.]+ B\s+switch the tutor off/);
+  });
+});
+
+describe("the tutor switch over upload (M2-28)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /** Her settings, without the request count the route keeps in them. */
+  const tutorOf = async (userId: string) => {
+    const rest = { ...(await t.db.select({ settings: users.settings }).from(users).where(eq(users.id, userId)))[0].settings };
+    delete rest.throttle;
+    return rest;
+  };
+  const switchTutor = async (cookie: string, tutor: unknown) => post(JSON.stringify({ part: "tutor", tutor }), cookie);
+
+  it("applies on and off for a username TUTOR_USERS lists (any case, spaces trimmed), keeping her other settings", async () => {
+    const { userId, cookie } = await signIn();
+    const [{ username }] = await t.db.select({ username: users.username }).from(users).where(eq(users.id, userId));
+    await t.db.update(users).set({ settings: { ai: { useFiles: true }, tutor: { note: "kept" } } }).where(eq(users.id, userId));
+    vi.stubEnv("TUTOR_USERS", ` another.one , ${username!.toUpperCase()} ,`);
+
+    const on = await switchTutor(cookie, "on");
+    expect(on.status).toBe(200);
+    expect(on.headers.get("cache-control")).toBe("no-store");
+    expect(await on.json()).toEqual({ part: "tutor", applied: true, on: true, changed: true });
+    expect(await tutorOf(userId)).toMatchObject({ ai: { useFiles: true }, tutor: { note: "kept", enabled: true } });
+
+    expect(await (await switchTutor(cookie, "on")).json()).toEqual({ part: "tutor", applied: true, on: true, changed: false });
+    expect(await (await switchTutor(cookie, "off")).json()).toEqual({ part: "tutor", applied: true, on: false, changed: true });
+    expect(await tutorOf(userId)).toMatchObject({ ai: { useFiles: true }, tutor: { note: "kept", enabled: false } });
+  });
+
+  it("ignores it for a username TUTOR_USERS does not list, and when TUTOR_USERS is unset or empty: nothing changes, and the answer names nobody", async () => {
+    const { userId, cookie } = await signIn();
+    await t.db.update(users).set({ settings: { ai: { useFiles: true } } }).where(eq(users.id, userId));
+    const before = await tutorOf(userId);
+
+    for (const list of ["test.student.listed", undefined, "", " , "]) {
+      vi.stubEnv("TUTOR_USERS", list);
+      for (const tutor of ["on", "off"]) {
+        const res = await switchTutor(cookie, tutor);
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body).toEqual({ part: "tutor", applied: false, message: expect.any(String) });
+        expect(JSON.stringify(body)).not.toContain("test.student.listed");
+      }
+      expect(await tutorOf(userId)).toEqual(before);
+    }
+
+    // Someone listed whose name is only the start of hers is not her.
+    const [{ username }] = await t.db.select({ username: users.username }).from(users).where(eq(users.id, userId));
+    vi.stubEnv("TUTOR_USERS", `${username}x`);
+    expect(await (await switchTutor(cookie, "on")).json()).toMatchObject({ applied: false });
+    expect(await tutorOf(userId)).toEqual(before);
+  });
+
+  it("refuses a bad value (400), a part that names a user, and a caller with no account; writes nothing", async () => {
+    const { userId, cookie } = await signIn();
+    const [{ username }] = await t.db.select({ username: users.username }).from(users).where(eq(users.id, userId));
+    vi.stubEnv("TUTOR_USERS", username!);
+    for (const tutor of ["yes", true, "ON ", null]) {
+      const res = await switchTutor(cookie, tutor);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid", problems: ["tutor: tutor must be on or off."] });
+    }
+    const named = await post(JSON.stringify({ part: "tutor", tutor: "on", userId }), cookie);
+    expect(named.status).toBe(400);
+    const device = await deviceSession();
+    expect((await switchTutor(device.cookie, "on")).status).toBe(403);
+    expect((await switchTutor("", "on")).status).toBe(401);
+    expect((await tutorOf(userId)).tutor).toBeUndefined();
   });
 });

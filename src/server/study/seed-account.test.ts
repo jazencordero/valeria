@@ -703,6 +703,85 @@ describe("CLI", () => {
   );
 });
 
+describe("--tutor on|off (M2-28)", () => {
+  it("parses on or off (any case), refuses anything else, and does not go with --link", () => {
+    expect(parseArgs(["a", "b", "--tutor", "on"])).toMatchObject({ ok: true, args: { tutor: "on" } });
+    expect(parseArgs(["a", "b", "--tutor", "OFF"])).toMatchObject({ ok: true, args: { tutor: "off" } });
+    expect((parseArgs(["a", "b"]) as { args: { tutor?: string } }).args.tutor).toBeUndefined();
+    for (const bad of [["--tutor"], ["--tutor", "yes"], ["--tutor", "true"], ["--tutor", "--dry-run"]]) {
+      expect(parseArgs(["a", "b", ...bad])).toEqual({ ok: false, help: false, error: "--tutor needs on or off." });
+    }
+    expect(parseArgs(["a", "--link", "--tutor", "on"])).toMatchObject({ ok: false, error: expect.stringContaining("--tutor and --link do not go together") });
+    expect(parseArgs(["a", "b", "--upload", "https://ready.example.test", "--username", "test.student", "--tutor", "on"])).toMatchObject({ ok: true, args: { tutor: "on" } });
+  });
+
+  it(
+    "a direct run switches it on and off, keeps her other settings, and leaves it alone without the flag; a bad value writes nothing",
+    async () => {
+      const lines: string[] = [];
+      const io = { out: (l: string) => void lines.push(l), err: (l: string) => void lines.push(l) };
+      const settings = async () => (await t.db.select({ settings: users.settings }).from(users))[0].settings;
+
+      // A bad value: refused before anything is written.
+      expect(await run([ACCOUNT, bundles, "--tutor", "maybe"], t.db, io)).toBe(1);
+      expect(lines[0]).toMatch(/^--tutor needs on or off\.\n/);
+      expect(await t.db.select().from(users)).toHaveLength(0);
+
+      // First run, on: the new user gets it, next to the seed's marker.
+      lines.length = 0;
+      expect(await run([ACCOUNT, bundles, "--tutor", "on"], t.db, io)).toBe(0);
+      expect(lines).toContain("Tutor: switched on.");
+      const first = await settings();
+      expect(first.tutor).toEqual({ enabled: true });
+      expect(first.seededFrom).toMatchObject({ key: expect.any(String) });
+
+      // Settings she has since (and other keys under tutor) are kept by a later switch.
+      await t.db.update(users).set({ settings: { ...first, ai: { useFiles: true }, tutor: { enabled: true, note: "kept" } } });
+      lines.length = 0;
+      expect(await run([ACCOUNT, bundles, "--tutor", "on"], t.db, io)).toBe(0);
+      expect(lines).toContain("Tutor: already on.");
+      expect(await run([ACCOUNT, bundles, "--tutor", "off", "--dry-run"], t.db, io)).toBe(0);
+      expect(lines).toContain("Tutor: would be switched off.");
+      expect((await settings()).tutor).toEqual({ enabled: true, note: "kept" });
+      expect(await run([ACCOUNT, bundles, "--tutor", "off"], t.db, io)).toBe(0);
+      expect(lines).toContain("Tutor: switched off.");
+      const off = await settings();
+      expect(off).toMatchObject({ ai: { useFiles: true }, tutor: { enabled: false, note: "kept" }, seededFrom: first.seededFrom });
+
+      // No flag: left alone, and nothing said about it.
+      lines.length = 0;
+      expect(await run([ACCOUNT, bundles], t.db, io)).toBe(0);
+      expect(lines.join("\n")).not.toContain("Tutor");
+      expect(await settings()).toEqual(off);
+      await t.db.update(users).set({ settings: { ...off, tutor: { enabled: true } } });
+      expect(await run([ACCOUNT, bundles], t.db, io)).toBe(0);
+      expect((await settings()).tutor).toEqual({ enabled: true });
+    },
+    T,
+  );
+
+  it(
+    "applySeed switches it in the seed's own transaction, after the seed's marker is written",
+    async () => {
+      const plan = planSeed(await loadSeed(ACCOUNT, bundles));
+      const result = await applySeed(t.db, plan, { now: NOW, tutor: true });
+      expect(result.tutor).toEqual({ on: true, changed: true });
+      // A rerun from newer files rewrites the marker; the switch is not lost with it.
+      const newer = { ...plan, pulledAt: "2026-11-16T00:00:00Z" };
+      const again = await applySeed(t.db, newer, { now: NOW });
+      expect(again.tutor).toBeUndefined();
+      const [row] = await t.db.select({ settings: users.settings }).from(users);
+      expect(row.settings).toMatchObject({ tutor: { enabled: true }, seededFrom: { pulledAt: "2026-11-16T00:00:00Z" } });
+      // A dry run rolls it back.
+      const dry = await applySeed(t.db, plan, { now: NOW, tutor: false, dryRun: true });
+      expect(dry.tutor).toEqual({ on: false, changed: true });
+      const [still] = await t.db.select({ settings: users.settings }).from(users);
+      expect(still.settings.tutor).toEqual({ enabled: true });
+    },
+    T,
+  );
+});
+
 describe("upload: the same seed sent in parts (M3-58)", () => {
   /** A size that makes the sample course folder take several requests. */
   const SMALL = 4_000;

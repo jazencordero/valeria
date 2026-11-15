@@ -6,6 +6,7 @@
  *   const result = await applySeed(db, plan, { name, dryRun }); // one transaction
  *   const link = await mintOpenLink(db, result.userId);     // GET /open?code=...
  *   await setSeededLogin(db, result.userId, { username, password }); // log in (M5-14)
+ *   applySeed(db, plan, { tutor: true })                     // `--tutor on|off` (M2-28), same transaction
  *
  * Inputs (both read at run time, never copied):
  * - `<account-dir>/account.json` (M0-16's pull): `{ pulledAt, source, courses: [{ code, name,
@@ -766,6 +767,8 @@ export type SeedResult = {
   skipped: string[];
   notStored: string[];
   notes: string[];
+  /** Set when the run was asked to switch the tutor (`options.tutor`, M2-28): what it is now, and whether that changed it. */
+  tutor?: TutorOutcome;
 };
 
 const zero = (): Count => ({ created: 0, skipped: 0, updated: 0 });
@@ -814,7 +817,7 @@ async function accountForUpload(tx: Db, userId: string): Promise<NonNullable<Awa
 export async function applySeed(
   database: Db,
   plan: SeedPlan,
-  options: { dryRun?: boolean; name?: string; now?: Date } = {},
+  options: { dryRun?: boolean; name?: string; now?: Date; tutor?: boolean } = {},
   into?: { userId: string },
 ): Promise<SeedResult> {
   const dryRun = options.dryRun ?? false;
@@ -1019,7 +1022,11 @@ export async function applySeed(
         notes.push("Where a bundle's seed gives another exam date than account.json, account.json's date is kept.");
       }
 
-      const result: SeedResult = { dryRun, userId, counts, imports, skipped, notStored: plan.notStored, notes };
+      // The tutor switch (M2-28), last: the writes of `seededFrom` above replace the settings
+      // object they read at the start, so this merge must come after them.
+      const tutor = options.tutor === undefined ? undefined : await setTutorFor(tx, userId, options.tutor);
+
+      const result: SeedResult = { dryRun, userId, counts, imports, skipped, notStored: plan.notStored, notes, ...(tutor ? { tutor } : {}) };
       if (dryRun) throw new DryRunRollback(result);
       return result;
     });
@@ -1027,6 +1034,72 @@ export async function applySeed(
     if (err instanceof DryRunRollback) return err.result;
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The tutor switch (M2-28): `users.settings.tutor.enabled`
+// ---------------------------------------------------------------------------
+//
+// The tutor is shown only to an account whose `settings.tutor.enabled` is true (`tutorEnabled`,
+// src/server/tutor/context.ts). The seed tool's `--tutor on|off` sets it:
+// - a direct run: inside `applySeed`'s transaction, for the seeded user;
+// - an upload: a `{ part: "tutor", tutor: "on" | "off" }` request, which the app applies only
+//   when the logged-in account's username is listed in the server's `TUTOR_USERS` (comma-
+//   separated, any case; unset or empty = nobody). Otherwise it is ignored: answered with
+//   `applied: false` and nothing written, so nobody can switch it on for themselves. `off` goes
+//   by the same rule: one rule is easier to trust, and the switch is the operator's either way.
+//   The answer never names who is listed; it only says whether this account's request was applied.
+
+export type TutorSwitch = "on" | "off";
+/** What the tutor setting is after a switch, and whether the switch changed it. */
+export type TutorOutcome = { on: boolean; changed: boolean };
+
+const tutorIsOn = (settings: unknown): boolean => {
+  const tutor = isRecord(settings) ? settings.tutor : null;
+  return isRecord(tutor) && tutor.enabled === true;
+};
+
+/**
+ * Sets `settings.tutor.enabled` for `userId`, merged in: other settings keys, and other keys of
+ * `settings.tutor`, are kept (the same `jsonb_set` as `setUseFilesFor`). Run it inside a
+ * transaction: it reads the row (locked) and then writes it.
+ */
+export async function setTutorFor(database: Db, userId: string, on: boolean): Promise<TutorOutcome> {
+  const [row] = await database.select({ settings: users.settings }).from(users).where(eq(users.id, userId)).for("update");
+  if (!row) throw new SeedRefused("This account does not exist any more. Nothing was written.");
+  const tutor = isRecord(row.settings) ? row.settings.tutor : null;
+  const was = tutorIsOn(row.settings);
+  if (isRecord(tutor) && tutor.enabled === on) return { on, changed: false };
+  await database
+    .update(users)
+    .set({
+      settings: sql`jsonb_set(
+        jsonb_set(${users.settings}, '{tutor}', case when jsonb_typeof(${users.settings} -> 'tutor') = 'object'
+          then ${users.settings} -> 'tutor' else '{}'::jsonb end),
+        '{tutor,enabled}', ${on ? "true" : "false"}::jsonb)`,
+    })
+    .where(eq(users.id, userId));
+  return { on, changed: was !== on };
+}
+
+/** The usernames `TUTOR_USERS` lists: comma-separated, trimmed, lowered. Unset or empty: none. */
+export function tutorUsersOf(value: string | undefined): Set<string> {
+  return new Set((value ?? "").split(",").map((u) => u.trim().toLowerCase()).filter(Boolean));
+}
+
+/** The answer's words when an upload's tutor part is ignored. Says nothing about other accounts. */
+export const TUTOR_IGNORED = "The tutor setting was not changed: this app does not take it from this account over upload.";
+
+/**
+ * The tutor part of an upload into the logged-in account. Applied only when `user.username` is
+ * listed in `allowed` (the server's `TUTOR_USERS`); otherwise nothing is written and the answer
+ * says so.
+ */
+export async function applyTutorPart(database: Db, user: { id: string; username: string | null }, part: TutorPart, allowed: string | undefined): Promise<SeedAnswer> {
+  const listed = user.username !== null && tutorUsersOf(allowed).has(user.username.trim().toLowerCase());
+  if (!listed) return { part: "tutor", applied: false, message: TUTOR_IGNORED };
+  const outcome = await database.transaction(async (tx) => setTutorFor(tx as unknown as Db, user.id, part.tutor === "on"));
+  return { part: "tutor", applied: true, ...outcome };
 }
 
 // ---------------------------------------------------------------------------
@@ -1213,10 +1286,20 @@ const StudyBundlePartSchema = z.object({
 export type StudyBundlePart = z.infer<typeof StudyBundlePartSchema>;
 
 export type BundlePart = ExamBundlePart | StudyBundlePart;
+
+/** `--tutor on|off` over upload (M2-28): see "The tutor switch". */
+const TutorPartSchema = z.object({
+  part: z.literal("tutor"),
+  tutor: z.enum(["on", "off"], { error: "tutor must be on or off." }),
+});
+export type TutorPart = z.infer<typeof TutorPartSchema>;
+
 export type SeedPart = AccountPart | BundlePart;
+/** Any request body POST /api/seed takes: a part of the seed, or the tutor switch. */
+export type UploadPart = SeedPart | TutorPart;
 
 /** A request body: Dates become ISO text, which the same schemas read back to the same instants. */
-export function serialisePart(part: SeedPart): string {
+export function serialisePart(part: UploadPart): string {
   return JSON.stringify(part);
 }
 
@@ -1363,12 +1446,24 @@ export function readSeedPart(body: unknown): SeedPart {
   return part;
 }
 
+/** A request body of an upload: the tutor switch (M2-28), or a part of the seed (`readSeedPart`). */
+export function readUploadPart(body: unknown): UploadPart {
+  if (!isRecord(body) || body.part !== "tutor") return readSeedPart(body);
+  const named = NOT_FROM_THE_BODY.filter((k) => k in body);
+  if (named.length) throw new SeedInvalid([`${named.join(", ")}: a part cannot say whose account it is for; it goes into the signed-in one.`]);
+  const parsed = TutorPartSchema.safeParse(body);
+  if (!parsed.success) throw new SeedInvalid(partIssues(parsed.error));
+  return parsed.data;
+}
+
 /** What the server answers for one part. */
 export type SeedAnswer =
   | { part: "account"; counts: SeedCounts; skipped: string[]; notStored: string[]; notes: string[] }
   | { part: "bundle"; kind: "exam"; courseCode: string; batch: { n: number; of: number }; imported: true; counts: ImportCounts; problems: ImportProblem[] }
   | { part: "bundle"; kind: "studyOnly"; courseCode: string; batch: { n: number; of: number }; imported: true; counts: StudyOnlyCounts }
-  | { part: "bundle"; kind: "exam" | "studyOnly"; courseCode: string; batch: { n: number; of: number }; imported: false; reason: string };
+  | { part: "bundle"; kind: "exam" | "studyOnly"; courseCode: string; batch: { n: number; of: number }; imported: false; reason: string }
+  | { part: "tutor"; applied: true; on: boolean; changed: boolean }
+  | { part: "tutor"; applied: false; message: string };
 
 /**
  * The account part into `userId`'s account: planned here by `planSeed`, applied by `applySeed`'s

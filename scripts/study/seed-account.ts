@@ -1,9 +1,9 @@
 /*
  * M3-57: seed one student's whole account from files, with no Moodle sign-in.
  *
- *   npx tsx scripts/study/seed-account.ts <account-dir> <bundles-dir> [--name <first name>] [--username <name>] [--set-password] [--dry-run] [--origin <url>]
+ *   npx tsx scripts/study/seed-account.ts <account-dir> <bundles-dir> [--name <first name>] [--username <name>] [--set-password] [--tutor on|off] [--dry-run] [--origin <url>]
  *   npx tsx scripts/study/seed-account.ts <account-dir> --link [--username <name>] [--set-password] [--origin <url>]
- *   npx tsx scripts/study/seed-account.ts <account-dir> <bundles-dir> --upload https://<host> --username <name> [--dry-run]
+ *   npx tsx scripts/study/seed-account.ts <account-dir> <bundles-dir> --upload https://<host> --username <name> [--tutor on|off] [--dry-run]
  *
  * The work is done by src/server/study/seed-account.ts (see there for the input shapes and
  * the matching rules). This file only reads the arguments and prints.
@@ -31,6 +31,12 @@
  * - Of an answer only the documented fields are used: the counts, and a refusal's `message`,
  *   `problems` and Retry-After.
  * When the password is piped in (stdin is not a terminal) its first line is taken: for tests.
+ *
+ * Tutor (M2-28): `--tutor on|off` switches the tutor for the account (`users.settings.tutor.
+ * enabled`, merged into the other settings); left out, the setting is left alone. A direct run
+ * sets it in the seed's transaction. An upload sends it as one more request after the account
+ * part; the app applies it only for a username its `TUTOR_USERS` lists, else ignores it, and
+ * the run prints which (an ignored switch is not an error: exit code 0).
  */
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -60,9 +66,11 @@ import {
   type BundlePart,
   type SeedAnswer,
   type SeedInput,
-  type SeedPart,
   type SeedPlan,
   type SeedResult,
+  type TutorPart,
+  type TutorSwitch,
+  type UploadPart,
   type UploadSummary,
 } from "@/server/study/seed-account";
 
@@ -71,9 +79,9 @@ export const DEFAULT_ORIGIN = "http://localhost:3000";
 export const HELP = `Seed one student's whole account from files, with no Moodle sign-in.
 
 Usage:
-  npx tsx scripts/study/seed-account.ts <account-dir> <bundles-dir> [--name <first name>] [--username <name>] [--set-password] [--dry-run] [--origin <url>]
+  npx tsx scripts/study/seed-account.ts <account-dir> <bundles-dir> [--name <first name>] [--username <name>] [--set-password] [--tutor on|off] [--dry-run] [--origin <url>]
   npx tsx scripts/study/seed-account.ts <account-dir> --link [--username <name>] [--set-password] [--origin <url>]
-  npx tsx scripts/study/seed-account.ts <account-dir> <bundles-dir> --upload https://<host> --username <name> [--dry-run]
+  npx tsx scripts/study/seed-account.ts <account-dir> <bundles-dir> --upload https://<host> --username <name> [--tutor on|off] [--dry-run]
 
 The first two write straight to a database. The third (--upload) opens no database: it logs
 in to the app at <host> and sends the files' content there, into the logged-in account.
@@ -88,6 +96,11 @@ in to the app at <host> and sends the files' content there, into the logged-in a
                   with --upload: the EXISTING account to log in to. Nothing is renamed and no
                   password is set; its password is asked at a hidden prompt.
   --set-password  asks for a new password at a hidden prompt (the account needs a username)
+  --tutor on|off  switches the tutor (the chat in the notes panel) on or off for this
+                  account; left out, the setting is left alone. A direct run sets it with the
+                  seed. With --upload the app takes it only from an account listed in its
+                  TUTOR_USERS setting (the server's environment) and otherwise ignores it; the
+                  run says which. Does not go with --link.
   --dry-run       check and count everything, write nothing (no link either)
   --link          only print a fresh one-time link for the student seeded from <account-dir>
   --origin        where the app runs, for the link (default ${DEFAULT_ORIGIN}); give a
@@ -117,7 +130,7 @@ The local database takes a lock file: stop \`next dev\` first.
 Exit code: 1 when nothing could be written (bad files, refused) or the username or password
 could not be set (the seed itself is kept), else 0, also when some parts were skipped (they
 are listed). An upload: 1 when it could not log in or stopped before every part was sent
-(what was sent is kept and listed), else 0.`;
+(what was sent is kept and listed), else 0 (also when the app ignored --tutor: it says so).`;
 
 /** Hosts a plain http upload is taken for: this machine only. */
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -135,6 +148,8 @@ export type CliArgs = {
   upload?: string;
   /** Ask for a new password even when the account has one. */
   setPassword: boolean;
+  /** `--tutor on|off` (M2-28); left out, the setting is left alone. */
+  tutor?: TutorSwitch;
 };
 
 export type ParsedArgs = { ok: true; args: CliArgs } | { ok: false; help: true } | { ok: false; help: false; error: string };
@@ -148,6 +163,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let username: string | undefined;
   let setPassword = false;
   let upload: string | undefined;
+  let tutor: TutorSwitch | undefined;
   let originGiven = false;
   const fail = (error: string): ParsedArgs => ({ ok: false, help: false, error });
   for (let i = 0; i < argv.length; i++) {
@@ -166,6 +182,11 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       username = value()?.trim();
       if (!username) return fail("--username needs a name.");
       if (!normalizeUsername(username)) return fail(`--username: ${BAD_USERNAME}`);
+    }
+    else if (a === "--tutor") {
+      const v = value()?.trim().toLowerCase();
+      if (v !== "on" && v !== "off") return fail("--tutor needs on or off.");
+      tutor = v;
     }
     else if (a === "--name") {
       name = value()?.trim();
@@ -202,6 +223,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   }
   if (linkOnly && dryRun) return fail("--link and --dry-run do not go together.");
   if (setPassword && dryRun) return fail("--set-password and --dry-run do not go together.");
+  if (tutor && linkOnly) return fail("--tutor and --link do not go together: run the seed (it updates in place) with --tutor.");
   if (upload) {
     if (linkOnly) return fail("--upload and --link do not go together: an upload prints no link.");
     if (setPassword) return fail("--upload and --set-password do not go together: an upload logs in with the password the account has.");
@@ -223,6 +245,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       origin,
       ...(username ? { username } : {}),
       ...(upload ? { upload } : {}),
+      ...(tutor ? { tutor } : {}),
       setPassword,
     },
   };
@@ -379,6 +402,14 @@ function printResult(r: SeedResult | UploadSummary, io: Io, heading?: string): v
   }
 }
 
+/** The line a direct run prints for `--tutor`. */
+function tutorLine(r: SeedResult): string | null {
+  if (!r.tutor) return null;
+  const state = r.tutor.on ? "on" : "off";
+  if (r.dryRun) return r.tutor.changed ? `Tutor: would be switched ${state}.` : `Tutor: already ${state}; would stay so.`;
+  return r.tutor.changed ? `Tutor: switched ${state}.` : `Tutor: already ${state}.`;
+}
+
 async function printLink(database: Db, userId: string, origin: string, io: Io): Promise<void> {
   const { code, expiresAt } = await mintOpenLink(database, userId);
   io.out("");
@@ -469,12 +500,13 @@ const minutes = (seconds: number) => {
 const kB = (bytes: number) => (bytes < 1000 ? `${bytes} B` : bytes < 1_000_000 ? `${(bytes / 1000).toFixed(1)} kB` : `${(bytes / 1_000_000).toFixed(1)} MB`);
 const some = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
-function partName(p: SeedPart): string {
-  return p.part === "account" ? "account" : `bundle ${p.courseCode} ${p.batch.n}/${p.batch.of}`;
+function partName(p: UploadPart): string {
+  return p.part === "account" ? "account" : p.part === "tutor" ? "tutor" : `bundle ${p.courseCode} ${p.batch.n}/${p.batch.of}`;
 }
 
-function partHolds(p: SeedPart): string {
+function partHolds(p: UploadPart): string {
   if (p.part === "account") return some(p.account.courses.length, "course");
+  if (p.part === "tutor") return `switch the tutor ${p.tutor} (taken only from accounts the app lists)`;
   const pages = `${p.pages.length} page${p.pages.length === 1 ? "" : "s"}`;
   if (p.kind === "studyOnly") return `study-only, ${pages}`;
   const cardCount = p.decks.reduce((s, d) => s + d.cards.length, 0);
@@ -482,10 +514,11 @@ function partHolds(p: SeedPart): string {
 }
 
 /** Whether a 200 answer is the answer to `part` (anything else is not this app's seed route). */
-function isAnswerTo(part: SeedPart, data: unknown): data is SeedAnswer {
+function isAnswerTo(part: UploadPart, data: unknown): data is SeedAnswer {
   if (typeof data !== "object" || data === null) return false;
   const a = data as Record<string, unknown>;
   if (a.part !== part.part) return false;
+  if (part.part === "tutor") return a.applied === false || (a.applied === true && typeof a.on === "boolean" && typeof a.changed === "boolean");
   const counted = typeof a.counts === "object" && a.counts !== null;
   if (part.part === "account") return counted && Array.isArray(a.skipped) && Array.isArray(a.notStored) && Array.isArray(a.notes);
   if (a.imported === false) return typeof a.reason === "string";
@@ -516,7 +549,7 @@ function withoutResent(first: SeedAnswer[], second: SeedAnswer[]): SeedAnswer[] 
   });
 }
 
-function printPlanned(plan: SeedPlan, parts: SeedPart[], args: CliArgs, io: Io): void {
+function printPlanned(plan: SeedPlan, parts: UploadPart[], args: CliArgs, io: Io): void {
   const account = normalizeUsername(args.username!) ?? args.username!;
   io.out("Dry run: nothing was sent, nobody was logged in and no password was asked.");
   io.out(`An upload to ${args.upload} into the account ${account} would send ${parts.length} request${parts.length === 1 ? "" : "s"}:`);
@@ -544,11 +577,14 @@ async function runUpload(args: CliArgs, io: Io): Promise<number> {
   const input: SeedInput = await loadSeed(args.accountDir, args.bundlesDir!);
   const plan = planSeed(input);
   const parts = seedPartsOf(input, maxBytes);
-  if (parts.length > REQUESTS_AN_HOUR) {
-    io.out(`This is ${parts.length} requests and the app takes ${REQUESTS_AN_HOUR} an hour per account: it will stop part way and say how long to wait. Run the same command again then.`);
+  const tutorPart: TutorPart | null = args.tutor ? { part: "tutor", tutor: args.tutor } : null;
+  const requests = parts.length + (tutorPart ? 1 : 0);
+  if (requests > REQUESTS_AN_HOUR) {
+    io.out(`This is ${requests} requests and the app takes ${REQUESTS_AN_HOUR} an hour per account: it will stop part way and say how long to wait. Run the same command again then.`);
   }
   if (args.dryRun) {
-    printPlanned(plan, parts, args, io);
+    // The tutor switch goes right after the account part.
+    printPlanned(plan, tutorPart ? [parts[0], tutorPart, ...parts.slice(1)] : parts, args, io);
     return 0;
   }
 
@@ -619,14 +655,17 @@ async function runUpload(args: CliArgs, io: Io): Promise<number> {
   let stopped: string | null = null;
   let stoppedProblems: string[] = [];
 
+  /** What the app said to `--tutor`, when it was sent. */
+  let tutorAnswer: SeedAnswer | null = null;
+
   /** Sends one part; a 200 that fits comes back as the answer, anything else as the reply. */
-  const send = async (part: SeedPart): Promise<{ answer: SeedAnswer } | { reply: Reply }> => {
+  const send = async (part: UploadPart): Promise<{ answer: SeedAnswer } | { reply: Reply }> => {
     const reply = await postJson(fetcher, `${origin}/api/seed`, serialisePart(part), cookie);
     if (reply.status === 200 && isAnswerTo(part, reply.data)) return { answer: reply.data };
     return { reply };
   };
   /** The sentence for a reply that ends the upload. */
-  const whyStopped = (part: SeedPart, reply: Reply): string => {
+  const whyStopped = (part: UploadPart, reply: Reply): string => {
     const where = `At ${partName(part)}:`;
     const message = messageOf(reply.data);
     switch (reply.status) {
@@ -655,6 +694,14 @@ async function runUpload(args: CliArgs, io: Io): Promise<number> {
     else if (first.reply.status === 409) {
       also.push("The account part (courses, assignments, calendar, grade weights, exams, AI rules): not written. This account is connected to the school's Moodle, so its sync keeps those; the course folders were still sent.");
     } else stopped = whyStopped(accountPart, first.reply);
+
+    // `--tutor`: one small request after the account part (also when that one was refused for
+    // a Moodle connection: the switch is not part of what the sync owns).
+    if (tutorPart && !stopped) {
+      const sent = await send(tutorPart);
+      if ("answer" in sent) tutorAnswer = sent.answer;
+      else stopped = whyStopped(tutorPart, sent.reply);
+    }
 
     for (const folder of stopped ? [] : folders) {
       let batches = folder.batches;
@@ -712,11 +759,19 @@ async function runUpload(args: CliArgs, io: Io): Promise<number> {
   // fails it runs out by itself, and its token was never anywhere but in this process.
   await fetcher(`${origin}/logout`, { method: "POST", headers: { Cookie: cookie }, redirect: "manual", signal: AbortSignal.timeout(15_000) }).catch(() => {});
 
-  const any = answers.length > 0 || also.length > 0;
+  const any = answers.length > 0 || also.length > 0 || tutorAnswer !== null;
   if (any) {
     const summary = combineAnswers(plan, answers);
     summary.skipped.push(...also);
     printResult(summary, io, stopped ? `Stopped before the end. Sent to ${origin}, into the account ${account}, so far:` : `Uploaded to ${origin}, into the account ${account}:`);
+  }
+  if (tutorAnswer?.part === "tutor") {
+    if (tutorAnswer.applied) {
+      const state = tutorAnswer.on ? "on" : "off";
+      io.out(tutorAnswer.changed ? `Tutor: switched ${state} (applied by the app).` : `Tutor: already ${state} (applied by the app; nothing changed).`);
+    } else {
+      io.out(`Tutor: ignored by the app; the setting was not changed. It takes --tutor only from accounts listed in its TUTOR_USERS setting.`);
+    }
   }
   if (stopped) {
     io.err(any ? stopped : `${stopped} Nothing was written.`);
@@ -768,8 +823,11 @@ export async function run(argv: readonly string[], database: Db | null, io: Io =
 
     const input = await loadSeed(args.accountDir, args.bundlesDir!);
     const plan = planSeed(input);
-    const result = await applySeed(database, plan, { dryRun: args.dryRun, name: args.name });
+    const tutor = args.tutor === undefined ? undefined : args.tutor === "on";
+    const result = await applySeed(database, plan, { dryRun: args.dryRun, name: args.name, tutor });
     printResult(result, io);
+    const tutorSaid = tutorLine(result);
+    if (tutorSaid) io.out(tutorSaid);
     if (args.dryRun) {
       if (args.username) io.out(`Would set the username ${normalizeUsername(args.username)} (no password asked in a dry run).`);
       return 0;

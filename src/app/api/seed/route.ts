@@ -8,7 +8,14 @@
  *   { "part": "account", ... }                    courses, assignments, calendar, weights, exams, AI rules
  *   { "part": "bundle", "kind": "exam", ... }     one course folder, or one batch of it
  *   { "part": "bundle", "kind": "studyOnly", ... }
+ *   { "part": "tutor", "tutor": "on" | "off" }    switch the tutor (M2-28), see below
  *   -> 200 { part, counts, ... }                  the counts a direct run prints (`SeedAnswer`)
+ *
+ * The tutor switch (M2-28) is taken only from an account whose username the server's
+ * `TUTOR_USERS` lists (comma-separated, trimmed, any case; unset or empty = nobody), for `on`
+ * and `off` alike, so nobody can switch the tutor on for themselves. From anyone else it is
+ * ignored: 200 `{ part: "tutor", applied: false, message }`, nothing written. Applied:
+ * 200 `{ part: "tutor", applied: true, on, changed }`. The answer never says who is listed.
  *
  * Whose account: the signed-in caller's, from the session cookie, never from the body. A body
  * that names a user (or a seed key) is refused; the parts have no field for one. The caller must
@@ -52,7 +59,16 @@ import { currentUserFor, NotSignedIn, SESSION_COOKIE, type User } from "@/server
 import { db } from "@/server/db/client";
 import { users } from "@/server/db/schema/users";
 import { isDemo } from "@/server/demo/seed";
-import { applyAccountPart, applyBundlePart, readSeedPart, SeedInvalid, SeedRefused, UPLOAD_MAX_BYTES, type SeedPart } from "@/server/study/seed-account";
+import {
+  applyAccountPart,
+  applyBundlePart,
+  applyTutorPart,
+  readUploadPart,
+  SeedInvalid,
+  SeedRefused,
+  UPLOAD_MAX_BYTES,
+  type UploadPart,
+} from "@/server/study/seed-account";
 import { allow } from "@/server/throttle";
 
 export const maxDuration = 60;
@@ -136,16 +152,21 @@ export async function POST(request: NextRequest) {
   const bytes = await readUpTo(request, UPLOAD_MAX_BYTES);
   if (bytes === null) return refuse(413, "too_large", TOO_LARGE);
 
-  let part: SeedPart;
+  let part: UploadPart;
   try {
-    part = readSeedPart(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
+    part = readUploadPart(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
   } catch (err) {
     if (err instanceof SeedInvalid) return refuse(400, "invalid", "The part does not fit; nothing was written.", { problems: err.problems });
     return refuse(400, "invalid", "The body is not valid JSON; nothing was written.", { problems: [] });
   }
 
   try {
-    const answer = part.part === "account" ? await applyAccountPart(db, user.id, part) : await applyBundlePart(db, user.id, part);
+    const answer =
+      part.part === "account"
+        ? await applyAccountPart(db, user.id, part)
+        : part.part === "tutor"
+          ? await applyTutorPart(db, user, part, process.env.TUTOR_USERS)
+          : await applyBundlePart(db, user.id, part);
     return Response.json(answer, { headers: NO_STORE });
   } catch (err) {
     if (err instanceof SeedInvalid) return refuse(400, "invalid", "The part does not fit; nothing was written.", { problems: err.problems });
