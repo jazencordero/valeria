@@ -53,6 +53,7 @@ import { exams } from "@/server/db/schema/study";
 import { examView, setGradeMode, type ExamView } from "@/server/study/actions";
 import { queueConcepts } from "@/server/study/exams";
 import { dayKey, loadDeck, StudyNotFound, type DayCount, type Deck } from "@/server/study/store";
+import { loadExamDocuments } from "./documents/[slug]/page";
 
 type Params = Promise<{ id: string }>;
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -291,6 +292,7 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
       verdict={view.verdict.text}
       rollFrom={from !== undefined && from !== view.forecastShown ? from : undefined}
       today={await todayOf(user, view, deck, course.aiStudy, now)}
+      documents={await loadExamDocuments(db, user.id, exam.id)}
       progress={{
         grade: gradeFor(view.forecastShown),
         planEnd: view.planEnd,

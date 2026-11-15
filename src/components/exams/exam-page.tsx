@@ -8,9 +8,11 @@
  * (progressHTML), 6063-6079 (practiseHTML) and CSS 1505-1513 (from 1000 px
  * the page fits one screen and each panel scrolls inside itself).
  *
- *  - Today: the bite block only (M3-24). While the cards are still being made
+ *  - Today: the bite block (M3-24). While the cards are still being made
  *    it says so; while the course has no answer about AI tools it asks
  *    (`StudyAsk`, the M2-21 card for the course's study rule, `ai_study`).
+ *    At its end, the exam's documents (M3-54, `ExamDocuments`), when it has
+ *    any; M9-23 moves them into the Notes tab.
  *  - Progress: the big percent, its sentence and the chart (side by side 5:7
  *    from 1000 px), WHERE YOU GAIN MOST, and the button that opens the "How
  *    it is going" sheet (M3-48).
@@ -33,6 +35,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { DoodleDefs } from "@/components/doodle";
 import { makingLine } from "@/components/exams/exam-card";
+import { ExamDocuments, type ExamDocumentRow } from "@/components/exams/exam-documents";
 import { BiteCard, type BiteCardNext } from "@/components/study/bite-card";
 import { ExamHeader } from "@/components/study/exam-header";
 import type { ForecastChartData } from "@/components/study/forecast-chart";
@@ -88,6 +91,8 @@ export type ExamPageProps = {
   /** The old forecast, when coming back from a session (`?from=<pct>`). */
   rollFrom?: number;
   today: ExamPageToday;
+  /** Her bundle's documents for this exam, in position order. None: no list. */
+  documents?: readonly ExamDocumentRow[];
   progress: {
     /** Today's grade, 0..5. */
     grade: number;
@@ -279,6 +284,8 @@ function Making({ lectures }: { lectures: number }) {
 
 // ---------------------------------------------------------------------------
 
+const NO_DOCUMENTS: readonly ExamDocumentRow[] = [];
+
 export function ExamPage({
   examId,
   course,
@@ -287,6 +294,7 @@ export function ExamPage({
   verdict,
   rollFrom,
   today,
+  documents = NO_DOCUMENTS,
   progress,
   practise,
   setGradeMode,
@@ -445,7 +453,16 @@ export function ExamPage({
           if (id === "progress") setProgressShown(true);
         }}
         tabs={[
-          { id: "today", label: "Today", content: <Panel>{todayPanel}</Panel> },
+          {
+            id: "today",
+            label: "Today",
+            content: (
+              <Panel>
+                {todayPanel}
+                <ExamDocuments examId={examId} documents={documents} />
+              </Panel>
+            ),
+          },
           { id: "progress", label: "Progress", content: <Panel>{progressPanel}</Panel> },
           { id: "practise", label: "Practise", content: <Panel>{practisePanel}</Panel> },
         ]}
