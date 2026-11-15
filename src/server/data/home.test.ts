@@ -384,6 +384,14 @@ describe("getHomeView: bite row and exam cards", () => {
       expect(view.biteFirst).toBe(false);
       expect(view.exams.map((e) => e.title)).toEqual(["No cards yet", "Starts later"]);
       expect(view.exams.every((e) => e.biteMinutes === null)).toBe(true);
+      // Before its study start the card says when it starts; the other card says nothing of the kind.
+      expect(view.exams.map((e) => e.starts)).toEqual([undefined, "Wed 25 Nov"]);
+
+      // From 00:00 Helsinki on that day it is an ordinary card again.
+      const onTheDay = await getHomeView(u.id, { now: new Date("2026-11-25T00:00:00+02:00") }, t.db);
+      expect(onTheDay.exams.map((e) => [e.title, e.starts])).toEqual([["Starts later", undefined]]);
+      const nightBefore = await getHomeView(u.id, { now: new Date("2026-11-24T23:59:00+02:00") }, t.db);
+      expect(nightBefore.exams.map((e) => [e.title, e.starts])).toEqual([["Starts later", "Wed 25 Nov"]]);
     },
     DB_TIMEOUT,
   );

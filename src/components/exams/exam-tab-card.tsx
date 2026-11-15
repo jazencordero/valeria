@@ -19,6 +19,7 @@
  * `openCardLink` (both in `@/lib/motion/shared`, which describes the whole
  * transition). A client component for that click only.
  */
+import { startsLine } from "@/lib/dates";
 import Link from "next/link";
 import type { ComponentProps } from "react";
 import { WORK_TRANSITION_CSS, openCardLink, workSource } from "@/lib/motion/shared";
@@ -57,6 +58,8 @@ export type ExamTabCardProps = Omit<
   counts: ExamCounts;
   /** Cards still being made from this many lectures. */
   making?: { lectures: number };
+  /** Before the study start, the day it opens ("Tue 24 Nov"): one line, no forecast or counts. */
+  starts?: string;
 };
 
 const KD = "inline-block size-[7px] rounded-full";
@@ -98,6 +101,7 @@ export function ExamTabCard({
   concepts,
   counts,
   making,
+  starts,
   className = "",
   ...rest
 }: ExamTabCardProps) {
@@ -126,12 +130,16 @@ export function ExamTabCard({
           <span className="mt-0.5 block text-[13px] text-ink-3">{course}</span>
           <span className="mono mt-1 block text-ink-3">{when}</span>
         </span>
-        {!making && <Ring value={f} size={48} />}
+        {!making && !starts && <Ring value={f} size={48} />}
       </span>
 
       {making ? (
         <span className="mt-3.5 block text-[15px] text-ink-2">
           {makingLine(making.lectures)}
+        </span>
+      ) : starts ? (
+        <span className="mt-3.5 block text-[15px] text-ink-2" data-testid="starts">
+          {startsLine(starts)}
         </span>
       ) : (
         <>
@@ -158,7 +166,7 @@ export function ExamTabCard({
       )}
 
       <span className="mt-3.5 flex items-center justify-between gap-3">
-        {making ? <span /> : <Counts counts={counts} />}
+        {making || starts ? <span /> : <Counts counts={counts} />}
         <span className="inline-flex items-center gap-0.5 text-[13px] font-semibold">
           Open
           <Chevron d="M9.5 5.5L16 12l-6.5 6.5" />

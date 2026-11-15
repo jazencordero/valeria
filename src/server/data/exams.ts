@@ -21,9 +21,13 @@
  * lecture count is the course's lectures, or, before those exist, the lecture
  * files with text the job reads. An exam with no job (a course with no
  * lecture files) or a failed one gets the plain card: nothing is being made.
+ *
+ * `starts` is set before an exam's study start (`exams.start_new_on`, M3-53):
+ * the cards then say "Starts Tue 24 Nov. Nothing to do here until then."
+ * instead of a forecast, a verdict or a plan.
  */
 import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
-import { dateLine, daysBetween } from "@/lib/dates";
+import { dateLine, dayMonth, daysBetween } from "@/lib/dates";
 import { listCourses } from "@/server/courses/store";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courseFiles, courses } from "@/server/db/schema/courses";
@@ -33,6 +37,7 @@ import { jobs } from "@/server/db/schema/system";
 import { examView, type ExamView } from "@/server/study/actions";
 import { CONCEPTS_KIND } from "@/server/study/exams";
 import { gradeOfTarget } from "@/server/study/import-bundle";
+import { newCardsAllowed } from "@/server/study/start-date";
 import { StudyNotFound } from "@/server/study/store";
 import { shortNameOf } from "./courses";
 
@@ -61,6 +66,8 @@ export type ExamsTabExam = {
   counts: { new: number; learning: number; due: number };
   /** Set while the cards are still being made from this many lectures. */
   making?: { lectures: number };
+  /** Set before the exam's study start (`exams.start_new_on`): the day it opens, "Tue 24 Nov". */
+  starts?: string;
 };
 
 export type ExamsTabCourse = { id: string; name: string };
@@ -90,6 +97,16 @@ export function targetGradeOf(stored: unknown): number | null {
   const inner = typeof stored === "object" && stored !== null ? (stored as { grade?: unknown }).grade : stored;
   const grade = typeof inner === "number" ? gradeOfTarget(inner) : null;
   return grade !== null && Number.isInteger(grade) && grade >= 1 && grade <= 5 ? grade : null;
+}
+
+/**
+ * Before an exam's study start (`exams.start_new_on`, a Helsinki day): that day as "Tue 24 Nov".
+ * Null from that day on, or with no start day (`newCardsAllowed`).
+ */
+export function startsOn(startNewOn: string | null | undefined, now: Date): string | null {
+  if (!startNewOn || newCardsAllowed({ startNewOn }, now)) return null;
+  // Noon UTC is the same calendar day in Helsinki, summer or winter.
+  return dayMonth(`${startNewOn.slice(0, 10)}T12:00:00Z`);
 }
 
 const examHref = (examId: string) => `/exams/${encodeURIComponent(examId)}`;
@@ -138,6 +155,7 @@ export async function getExamsView(
         at: exams.at,
         targetPct: exams.targetPct,
         gradeTarget: exams.gradeTarget,
+        startNewOn: exams.startNewOn,
         course: courses.name,
       })
       .from(exams)
@@ -172,6 +190,7 @@ export async function getExamsView(
         throw err;
       }
       const lectureCount = beingMade.has(row.id) ? (lecturesIn.get(row.courseId) ?? 0) : 0;
+      const starts = startsOn(row.startNewOn, now);
       return {
         id: row.id,
         href: examHref(row.id),
@@ -188,6 +207,7 @@ export async function getExamsView(
         concepts: v.concepts.map((c) => ({ id: c.id, name: c.name, rung: c.rung })),
         counts: v.counts,
         ...(v.concepts.length === 0 && lectureCount > 0 ? { making: { lectures: lectureCount } } : {}),
+        ...(starts ? { starts } : {}),
       };
     }),
   );

@@ -270,6 +270,7 @@ function ExamCards({ exams }: { exams: HomeExam[] }) {
             }))}
             biteMinutes={e.biteMinutes}
             making={e.making}
+            starts={e.starts}
           />
         </li>
       ))}

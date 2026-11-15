@@ -221,3 +221,8 @@ export function byDay(at: DateInput, now: DateInput): string {
   const days = daysBetween(now, at);
   return days >= 0 && days <= 6 ? WEEKDAY_NAMES[WEEKDAYS.indexOf(weekdayOf(at))] : dayMonth(at);
 }
+
+/** An exam before its study start, `day` as `dayMonth` gives it: "Starts Tue 24 Nov. Nothing to do here until then." */
+export function startsLine(day: string): string {
+  return `Starts ${day}. Nothing to do here until then.`;
+}

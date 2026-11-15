@@ -41,4 +41,12 @@ describe("ExamCard", () => {
     expect(screen.getByText("If it were today. The target is 62%.")).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/needs/);
   });
+
+  it("before the study start, says only when it starts: no forecast, verdict or needed percent", () => {
+    render(<ExamCard {...base} biteMinutes={null} starts="Tue 24 Nov" />);
+    expect(screen.getByTestId("starts").textContent).toBe("Starts Tue 24 Nov. Nothing to do here until then.");
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/On track|forecast|needs|%/);
+    expect(screen.getByRole("button", { name: "Open the exam" })).toBeTruthy();
+  });
 });

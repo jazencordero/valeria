@@ -109,7 +109,9 @@ export type ExamPageToday =
   /** No cards, and the course's study rule is not a yes. */
   | { state: "ask"; rule: Exclude<StudyRule, "allowed"> }
   /** No cards and nothing is making any. */
-  | { state: "empty" };
+  | { state: "empty" }
+  /** Nothing to do: one plain line, for example "Starts Tue 24 Nov. Nothing to do here until then." */
+  | { state: "quiet"; line: string };
 
 export type ExamPageProps = {
   examId: string;
@@ -146,6 +148,8 @@ export type ExamPageProps = {
     daysLeft: number;
     /** "Final review starts Tue 17." */
     phaseNext?: string;
+    /** Said instead of the grade and plan sentence, when there is no plan to promise. */
+    note?: string;
     week: Week;
     weeksInARow: number;
     freeSkipsLeft: number;
@@ -483,6 +487,10 @@ export function ExamPage({
       <Making lectures={today.lectures} />
     ) : today.state === "ask" ? (
       <StudyAsk course={course} rule={today.rule} setStudyRule={setStudyRule} />
+    ) : today.state === "quiet" ? (
+      <p className="py-3 text-[15px] text-ink-2" data-testid="quiet">
+        {today.line}
+      </p>
     ) : (
       <p className="py-3 text-[15px] text-ink-2" data-testid="no-cards">
         No cards for this one yet.
@@ -507,6 +515,7 @@ export function ExamPage({
         chart={progress.chart}
         shown={progressShown && !held}
         rollFrom={rollFrom}
+        note={progress.note}
         className={
           "min-[1000px]:grid min-[1000px]:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] min-[1000px]:items-center " +
           "min-[1000px]:gap-x-6 min-[1000px]:[&>*+*]:mt-0 min-[1000px]:[&>*+*]:border-t-0 min-[1000px]:[&>*+*]:pt-0"

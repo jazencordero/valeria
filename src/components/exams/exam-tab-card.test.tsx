@@ -38,4 +38,25 @@ describe("ExamTabCard", () => {
     expect(dots.className).toContain("flex-wrap");
     expect(dots.textContent).toContain("48 concepts");
   });
+
+  it("before the study start, says only when it starts: no forecast, dots or counts", () => {
+    render(
+      <ExamTabCard
+        href="#exam"
+        phase="Learn"
+        title="Sample exam"
+        course="Sample course"
+        when="THU 3 DEC · 09:00 · in 18 days"
+        forecast={0}
+        spark={{ history: [], forecast: 0, daysLeft: 18 }}
+        target={80}
+        concepts={concepts}
+        counts={{ new: 40, learning: 0, due: 0 }}
+        starts="Tue 24 Nov"
+      />,
+    );
+    expect(screen.getByTestId("starts").textContent).toBe("Starts Tue 24 Nov. Nothing to do here until then.");
+    expect(screen.queryByTestId("concept-dots")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/forecast|%|due|new/);
+  });
 });

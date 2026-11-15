@@ -30,6 +30,8 @@ export type ProgressHeadProps = {
   shown?: boolean;
   /** The old forecast, when coming back from a bite. The big number rolls from it. */
   rollFrom?: number;
+  /** Said instead of the grade and plan sentence, when there is no plan to promise. */
+  note?: string;
   className?: string;
 };
 
@@ -41,6 +43,7 @@ export function ProgressHead({
   chart,
   shown = true,
   rollFrom,
+  note,
   className = "",
 }: ProgressHeadProps) {
   const f = Math.round(Math.min(100, Math.max(0, forecast)));
@@ -65,8 +68,7 @@ export function ProgressHead({
           right if it were today
         </p>
         <p className="mt-0.5 text-[13px] text-ink-2">
-          That is a {grade} today. A bite a day gets you to about {Math.round(planEnd)}% by{" "}
-          {dayName}.
+          {note ?? `That is a ${grade} today. A bite a day gets you to about ${Math.round(planEnd)}% by ${dayName}.`}
         </p>
       </div>
       <div className="border-t border-line pt-3.5">

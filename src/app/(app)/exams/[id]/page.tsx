@@ -10,6 +10,9 @@
  * inside Suspense (cacheComponents).
  *
  * Choices:
+ * - Before the study start (`exams.start_new_on` still ahead, M3-53) the page says one thing:
+ *   "Starts Tue 24 Nov. Nothing to do here until then." in place of the verdict, the done plan
+ *   and the plan sentence. A bite `examView` still builds (cards she has already graded) shows.
  * - Today. An exam with cards shows the bite block: today's bite, or the done
  *   state when `examView` has none. With no cards it shows, in this order:
  *   the AI question while the course's study rule (`courses.ai_study`) is not
@@ -43,13 +46,13 @@ import type { HeatDay } from "@/components/study/heatmap";
 import type { ReviewDay } from "@/components/study/next-reviews";
 import type { PracticeType } from "@/components/study/practice-tiles";
 import type { ProgressConcept } from "@/components/study/progress-sheet";
-import { byDay, TIME_ZONE } from "@/lib/dates";
+import { byDay, startsLine, TIME_ZONE } from "@/lib/dates";
 import { biteMinutes } from "@/lib/study/bite";
 import { gradeFor } from "@/lib/study/forecast";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { shortNameOf } from "@/server/data/courses";
 import { getExamTabs } from "@/server/data/exam-tabs";
-import { getExamsView, targetGradeOf } from "@/server/data/exams";
+import { getExamsView, startsOn, targetGradeOf } from "@/server/data/exams";
 import { db } from "@/server/db/client";
 import { AI_STUDY, courses } from "@/server/db/schema/courses";
 import { exams } from "@/server/db/schema/study";
@@ -233,6 +236,7 @@ async function todayOf(
   deck: Deck,
   aiStudy: (typeof AI_STUDY)[number],
   now: Date,
+  quiet: string | null,
 ): Promise<ExamPageToday> {
   const today = dayKey(now);
   if (view.bite) {
@@ -249,6 +253,7 @@ async function todayOf(
         : {}),
     };
   }
+  if (quiet) return { state: "quiet", line: quiet };
   if (deck.cards.length > 0) return { state: "done", nextReviews: nextReviewsLine(view.nextReviews, today) };
   if (aiStudy !== "allowed") return { state: "ask", rule: aiStudy };
 
@@ -278,9 +283,9 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
     .from(courses)
     .where(and(eq(courses.id, view.exam.courseId), eq(courses.userId, user.id)));
   if (!course || course.hidden) notFound();
-  // What `examView` does not carry: the grade her bundle aims for.
+  // What `examView` does not carry: the grade her bundle aims for and its study start.
   const [stored] = await db
-    .select({ gradeTarget: exams.gradeTarget })
+    .select({ gradeTarget: exams.gradeTarget, startNewOn: exams.startNewOn })
     .from(exams)
     .where(and(eq(exams.id, view.exam.id), eq(exams.userId, user.id)));
 
@@ -290,6 +295,9 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
   const at = partsOf(examDay);
   const courseName = shortNameOf(course.name);
   const tabs = await getExamTabs(user.id, { examId: exam.id, courseId: exam.courseId, courseName, now });
+  // Before the study start: one calm line instead of a verdict, a done plan or a promised percent.
+  const starts = startsOn(stored?.startNewOn, now);
+  const quiet = starts ? startsLine(starts) : null;
   const from = typeof query.from === "string" && /^\d{1,3}$/.test(query.from) ? Math.min(100, Number(query.from)) : undefined;
 
   return (
@@ -299,9 +307,9 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
       course={courseName}
       sub={`${exam.title} · ${at.weekday} ${at.day} ${at.month} ${clockOf.format(exam.at)}`}
       forecast={view.forecastShown}
-      verdict={view.verdict.text}
+      verdict={starts ? `Starts ${starts}` : view.verdict.text}
       rollFrom={from !== undefined && from !== view.forecastShown ? from : undefined}
-      today={await todayOf(user, view, deck, course.aiStudy, now)}
+      today={await todayOf(user, view, deck, course.aiStudy, now, quiet)}
       documents={await loadExamDocuments(db, user.id, exam.id)}
       lectures={tabs.lectures}
       notes={tabs.notes}
@@ -309,6 +317,7 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
         grade: gradeFor(view.forecastShown),
         planEnd: view.planEnd,
         dayName: byDay(exam.at, now),
+        ...(quiet ? { note: quiet } : {}),
         chart: {
           history: view.history,
           forecast: view.forecast,

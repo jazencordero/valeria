@@ -13,7 +13,9 @@
  * end with "Today's bite · 5 min", or "Open the exam" when there is no bite.
  *
  * `making` swaps the forecast block for "Making your cards from N lectures.
- * Usually ready within a day." while the cards are still being made.
+ * Usually ready within a day." while the cards are still being made, and
+ * `starts` swaps it for "Starts Tue 24 Nov. Nothing to do here until then."
+ * before the exam's study start.
  *
  * Plain props: the page works out the forecast, verdict, rungs and minutes.
  *
@@ -25,6 +27,7 @@
  */
 import { useId, useState, type HTMLAttributes, type MouseEvent, type ReactNode } from "react";
 import { WORK_SOURCE_ATTR, WORK_TRANSITION_CSS, openCardPage, workSource } from "@/lib/motion/shared";
+import { startsLine } from "@/lib/dates";
 import { useMotionMode } from "@/lib/motion/use-calm";
 import { Ring } from "@/components/ui/ring";
 import { Button } from "@/components/ui/button";
@@ -124,6 +127,8 @@ export type ExamCardProps = Omit<
   biteMinutes?: number | null;
   /** Cards still being made from this many lectures. */
   making?: { lectures: number };
+  /** Before the study start, the day it opens ("Tue 24 Nov"): one line, no forecast, verdict or plan. */
+  starts?: string;
   /** Concepts open on first show (uncontrolled). */
   defaultOpen?: boolean;
   /** Controlled disclosure. */
@@ -148,6 +153,7 @@ export function ExamCard({
   concepts,
   biteMinutes,
   making,
+  starts,
   defaultOpen = false,
   open: openProp,
   onOpenChange,
@@ -198,12 +204,16 @@ export function ExamCard({
           <p className="mt-0.5 text-[13px] text-ink-3">{course}</p>
           <p className="mono mt-1 text-ink-3">{when}</p>
         </div>
-        {!making && <Ring value={f} size={48} />}
+        {!making && !starts && <Ring value={f} size={48} />}
       </div>
 
       {making ? (
         <p className="mt-3.5 text-[15px] text-ink-2">
           {makingLine(making.lectures)}
+        </p>
+      ) : starts ? (
+        <p className="mt-3.5 text-[15px] text-ink-2" data-testid="starts">
+          {startsLine(starts)}
         </p>
       ) : (
         <>

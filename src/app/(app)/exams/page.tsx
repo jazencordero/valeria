@@ -55,6 +55,7 @@ async function ExamCards() {
                 concepts={exam.concepts}
                 counts={exam.counts}
                 making={exam.making}
+                starts={exam.starts}
               />
             </li>
           ))}
