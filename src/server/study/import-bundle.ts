@@ -482,10 +482,11 @@ export function pageHash(page: Page): string {
   return createHash("sha256").update(canonicalJson(page)).digest("hex");
 }
 
-/** Card fields M3-49 has no place for; `parseCard` drops them. Counted and reported, never a failure. */
+/**
+ * Card fields M3-49 has no place for; `parseCard` drops them. Counted and reported, never a failure.
+ * `accept`, `first` and `core` are kept since M3-52 (they land in cards.body).
+ */
 const UNSTORED_CARD_FIELDS = [
-  ["accept", "also-accepted answers for a blank"],
-  ["first", "marks the card that opens its concept"],
   ["beyondSlides", "says the card goes beyond the slides"],
   ["basis", "what the card is based on"],
   ["quote", "a quote from the slides"],

@@ -126,10 +126,14 @@ describe("planImport (pure)", () => {
 
   it("drops the fields M3-49 cannot hold, never failing a card for them, and lists them", () => {
     for (const p of plan.cards) {
-      for (const f of ["id", "accept", "first", "beyondSlides", "basis", "quote", "fromFigure"]) expect(p.card).not.toHaveProperty(f);
+      for (const f of ["id", "beyondSlides", "basis", "quote", "fromFigure"]) expect(p.card).not.toHaveProperty(f);
     }
     const notes = plan.notes.join("\n");
-    for (const f of ["accept", "first", "beyondSlides", "basis", "quote", "fromFigure"]) expect(notes).toContain(`"${f}" on 1 card`);
+    for (const f of ["beyondSlides", "basis", "quote", "fromFigure"]) expect(notes).toContain(`"${f}" on 1 card`);
+    // Kept since M3-52: accept (the array shorthand of a one-blank cloze) and first.
+    for (const f of ["accept", "first"]) expect(notes).not.toContain(`"${f}" on`);
+    const tf2 = plan.cards.find((p) => p.card.type === "cloze" && "accept" in p.card);
+    expect(tf2?.card).toMatchObject({ accept: { seasonality: ["seasonal pattern", "season"] } });
     expect(notes).toContain("body.importId");
   });
 

@@ -16,6 +16,20 @@
  *   first, cards she can study now (new or due) before ones scheduled later,
  *   then deck order. When every concept is used up and the bite is still
  *   short, remaining cards below those rungs fill in, in the same order.
+ *
+ *   Study order (M3-52), only for a deck where some card is marked `core` or
+ *   `first` (a hand-made, seeded deck): new concepts open one at a time in
+ *   study order; once started, a concept competes by focus score. A concept
+ *   is started when one of its active cards (by `conceptId`) has been graded.
+ *   Each pick is `focusConcept` over the started concepts left plus only the
+ *   unstarted one with the lowest `order`; the other unstarted concepts wait
+ *   their turn. So a fresh deck goes in `order`, and the next new concept
+ *   opens as soon as it outscores the started ones (it scores its full
+ *   weight, mastery 0). Within a concept the sort gains two keys in front:
+ *   a never-graded `first` card comes first (it opens the concept), then
+ *   `core` cards before the rest, then the order above. A deck with no core
+ *   or first card is built exactly as before: the first-card and core keys
+ *   are all equal there and the concept order is plain focus order.
  * - boss: 1 boss card whose concepts overlap today's concepts (the warm cards
  *   and the first three learn cards, which are always kept). Most overlap
  *   wins, then deck order. None when no boss card overlaps.
@@ -64,6 +78,10 @@ export type BiteCard = {
   boss: boolean;
   /** False for a card she suspended or removed. */
   active: boolean;
+  /** Essential: comes before the concept's other cards in learn. Default false. */
+  core?: boolean;
+  /** Opens its concept: shown first while never graded. Default false. */
+  first?: boolean;
 };
 
 export type BiteConcept = {
@@ -134,8 +152,17 @@ function session(sections: Section[]): Bite | null {
   return { sections: kept, minutes: biteMinutes(n), gainEstimate: biteGain(n) };
 }
 
-/** Concepts in focus order: repeatedly the focus concept of those left. */
-function conceptsInFocusOrder(deck: Deck) {
+/** A seeded deck: some card says it is core or opens its concept. */
+const usesStudyOrder = (deck: Deck) => deck.cards.some((c) => c.core === true || c.first === true);
+
+const isGraded = (deck: Deck, id: string) => (deck.states[id]?.lastReviewAt ?? null) !== null;
+
+/**
+ * Concepts in focus order: repeatedly the focus concept of those left. With
+ * `studyOrder`, unstarted concepts only compete one at a time, lowest
+ * `order` first (see the header).
+ */
+function conceptsInFocusOrder(deck: Deck, studyOrder: boolean) {
   const examAt = new Date(ms(deck.examAt));
   const left = [...deck.concepts]
     .sort((a, b) => a.order - b.order)
@@ -144,11 +171,15 @@ function conceptsInFocusOrder(deck: Deck) {
         .filter((k) => k.conceptId === c.id)
         .map((k) => ({ state: stateOf(deck, k.id), active: k.active }));
       const mastery = conceptMastery(cards, examAt);
-      return { ...c, mastery, target: Math.min(5, rungOf(mastery) + 1) };
+      const started = deck.cards.some((k) => k.conceptId === c.id && k.active && isGraded(deck, k.id));
+      return { ...c, mastery, started, target: Math.min(5, rungOf(mastery) + 1) };
     });
   const out: typeof left = [];
   while (left.length > 0) {
-    const next = focusConcept(left)!;
+    // `left` is in `order`, so the first unstarted one is the next to open.
+    const nextNew = left.find((c) => !c.started);
+    const pool = studyOrder ? left.filter((c) => c.started || c === nextNew) : left;
+    const next = focusConcept(pool)!;
     out.push(next);
     left.splice(left.indexOf(next), 1);
   }
@@ -173,11 +204,14 @@ export function buildBite(input: BiteInput): Bite | null {
   const used = new Set(warm.map((c) => c.id));
 
   // Learn candidates, up to LEARN_MAX, in the order described above.
+  const opens = (c: BiteCard) => Number(c.first === true && !isGraded(deck, c.id));
   const byRungThenNow = (a: BiteCard, b: BiteCard) =>
+    opens(b) - opens(a) ||
+    Number(b.core === true) - Number(a.core === true) ||
     a.rung - b.rung ||
     Number(isDue(deck, b.id)) - Number(isDue(deck, a.id)) ||
     index.get(a.id)! - index.get(b.id)!;
-  const order = conceptsInFocusOrder(deck);
+  const order = conceptsInFocusOrder(deck, usesStudyOrder(deck));
   const learn: BiteCard[] = [];
   const take = (pick: (c: BiteCard, target: number) => boolean) => {
     for (const concept of order) {
