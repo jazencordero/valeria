@@ -29,14 +29,21 @@
  *   so the same Intl-based method is repeated here (no offsets hard-coded).
  * - `listExams` orders by `at`, then creation time, then id, so the order is
  *   stable when two exams share a time.
+ *
+ * Concepts (M3-14). A new exam gets a `concepts` job (src/server/ai/jobs/concepts.ts sorts the
+ * course's lectures into concepts) when its course has at least one lecture file with
+ * extracted text. `queueConcepts` adds it, one per exam (dedupe key `exam:<id>`); `addExam`
+ * and the Moodle sync (src/server/sync/events.ts) call it. This file stays free of the AI
+ * router: it only writes a row to the job queue.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { gradeStep } from "@/lib/grades/scale";
 import { TIME_ZONE } from "@/lib/dates";
 import { db as defaultDb, type Db } from "@/server/db/client";
-import { courses } from "@/server/db/schema/courses";
+import { courseFiles, courses } from "@/server/db/schema/courses";
 import { EXAM_KINDS, exams } from "@/server/db/schema/study";
+import { enqueue } from "@/server/jobs/queue";
 
 export type Exam = typeof exams.$inferSelect;
 export type ExamKind = (typeof EXAM_KINDS)[number];
@@ -246,6 +253,42 @@ async function assertExam(database: Db, userId: string, id: string): Promise<voi
 }
 
 // ---------------------------------------------------------------------------
+// Concepts job
+
+/** The job kind of the concepts job (src/server/ai/jobs/concepts.ts, /api/cron/concepts). */
+export const CONCEPTS_KIND = "concepts";
+
+/**
+ * Queues the concepts job for a new exam when its course has a lecture file with extracted
+ * text (`text_status = 'done'`, not attached to an assignment). At most one live job per exam.
+ * Returns true when a job was added. Pass the transaction as `database` to add it with the exam.
+ */
+export async function queueConcepts(
+  exam: { id: string; userId: string; courseId: string },
+  database: Db = defaultDb,
+): Promise<boolean> {
+  const [file] = await database
+    .select({ id: courseFiles.id })
+    .from(courseFiles)
+    .where(
+      and(
+        eq(courseFiles.userId, exam.userId),
+        eq(courseFiles.courseId, exam.courseId),
+        eq(courseFiles.textStatus, "done"),
+        isNull(courseFiles.assignmentId),
+      ),
+    )
+    .limit(1);
+  if (!file) return false;
+  const { created } = await enqueue(
+    CONCEPTS_KIND,
+    { examId: exam.id },
+    { userId: exam.userId, dedupeKey: `exam:${exam.id}`, db: database },
+  );
+  return created;
+}
+
+// ---------------------------------------------------------------------------
 // Store
 
 /** Her exams and quizzes, soonest first. */
@@ -257,15 +300,23 @@ export async function listExams(userId: string, database: Db = defaultDb): Promi
     .orderBy(asc(exams.at), asc(exams.createdAt), asc(exams.id));
 }
 
-/** Adds an exam to one of her courses. `targetPct` defaults to the schema's 80 (grade 4). */
+/**
+ * Adds an exam to one of her courses. `targetPct` defaults to the schema's 80 (grade 4).
+ * Queues its concepts job when the course has extracted lecture files (`queueConcepts`).
+ */
 export async function addExam(userId: string, input: AddExamInput, database: Db = defaultDb): Promise<Exam> {
   const v = parse(addSchema, input);
   await assertCourse(database, userId, v.courseId);
-  const [row] = await database
-    .insert(exams)
-    .values({ userId, courseId: v.courseId, title: v.title, kind: v.kind, at: v.at, targetPct: v.targetPct })
-    .returning();
-  return row;
+  return database.transaction(async (txRaw) => {
+    const tx = txRaw as unknown as Db;
+    const [row] = await tx
+      .insert(exams)
+      .values({ userId, courseId: v.courseId, title: v.title, kind: v.kind, at: v.at, targetPct: v.targetPct })
+      .returning();
+    // Added with the exam: both land, or neither.
+    await queueConcepts(row, tx);
+    return row;
+  });
 }
 
 /** Changes the given fields of one of her exams; moving it to another course needs that course to be hers. */

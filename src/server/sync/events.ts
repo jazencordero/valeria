@@ -58,6 +58,10 @@
  * while it still has the event's old date and title, so a date or name she
  * changed herself is kept.
  *
+ * Each suggested exam also gets its concepts job (M3-14, `queueConcepts` in
+ * src/server/study/exams.ts) when its course has extracted lecture files; the
+ * job is added in the same transaction, one per exam.
+ *
  * Moodle is read in full before anything is written; all writes are one
  * transaction. `added` and `updated` count event rows, `exams` exam rows added.
  */
@@ -66,6 +70,7 @@ import { db as defaultDb, type Db } from "@/server/db/client";
 import { EVENT_KINDS, events } from "@/server/db/schema/calendar";
 import { courses } from "@/server/db/schema/courses";
 import { exams } from "@/server/db/schema/study";
+import { queueConcepts } from "@/server/study/exams";
 import { NotAllowed } from "@/server/moodle/client";
 import { getConnection } from "@/server/moodle/connect";
 import { getQuizzes, getUpcoming, type CalendarEvent, type Quiz } from "@/server/moodle/read/calendar";
@@ -178,16 +183,20 @@ export async function syncEvents(
     let updated = 0;
     let examsAdded = 0;
     const suggest = async (eventId: string, e: Incoming & { kind: "exam" | "quiz" }) => {
-      await tx.insert(exams).values({
-        userId,
-        courseId: e.courseId,
-        eventId,
-        title: e.title,
-        kind: e.kind,
-        at: e.startsAt,
-        targetPct: EXAM_TARGET_PCT,
-      });
+      const [exam] = await tx
+        .insert(exams)
+        .values({
+          userId,
+          courseId: e.courseId,
+          eventId,
+          title: e.title,
+          kind: e.kind,
+          at: e.startsAt,
+          targetPct: EXAM_TARGET_PCT,
+        })
+        .returning({ id: exams.id, userId: exams.userId, courseId: exams.courseId });
       examsAdded += 1;
+      await queueConcepts(exam, tx);
     };
 
     for (const e of incoming.values()) {
