@@ -77,6 +77,8 @@ export type GradePageProps = {
   /** Every grade item of the course, in report order, scores in percent. */
   items: GradePageItem[];
   needsWeights: boolean;
+  /** Parts seeded by hand in points: show the weights and what is known, nothing derived. */
+  weightsOnly?: boolean;
   /** What her school calls its Moodle (`lmsNameOf(user)`). */
   lmsName: string;
   saveTarget: SaveTargetAction;
@@ -112,6 +114,7 @@ export function GradePage({
   course,
   items,
   needsWeights,
+  weightsOnly = false,
   lmsName,
   saveTarget,
   saveWeights,
@@ -203,6 +206,48 @@ export function GradePage({
       backHref={backHref}
     />
   );
+
+  if (weightsOnly && !needsWeights) {
+    // No verdict, no "you need", no trajectory: this course is marked in points with its own
+    // grade bands, which are not stored yet, so the percent scale could say something false.
+    return (
+      <div ref={rootRef} onClickCapture={back}>
+        {transitionCss}
+        <GradeHead
+          name={course.name}
+          code={course.code ?? ""}
+          dot={course.color}
+          trajectory={null}
+          transcript={null}
+          verdict={{ kind: "needs_weights" }}
+          target={target}
+          backHref={backHref}
+        />
+        <section aria-labelledby="weights-only" className="mt-6">
+          <h2 id="weights-only" className="mono text-ink-3">
+            HOW THIS COURSE IS GRADED
+          </h2>
+          <ul className="mt-2">
+            {items.map((it) => (
+              <li
+                key={it.id}
+                className="flex items-baseline justify-between gap-4 border-t border-solid border-line py-3 first:border-t-0"
+              >
+                <span className="min-w-0 text-[15px] [overflow-wrap:anywhere]">{it.name}</span>
+                <span className="mono shrink-0 text-ink-2">
+                  {it.weight == null ? "" : `${Math.round(it.weight * 1000) / 10}%`}
+                  {it.score == null ? "" : ` · ${Math.round(it.score)}% scored`}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-4 text-[13px] text-ink-3">
+            This course is marked in points with its own grade limits, so Ready does not work out a grade for it yet.
+          </p>
+        </section>
+      </div>
+    );
+  }
 
   if (needsWeights) {
     return (

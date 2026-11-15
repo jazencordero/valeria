@@ -60,6 +60,7 @@ async function CourseGrades({ params }: { params: Params }) {
       course={page.course}
       items={page.items}
       needsWeights={page.needsWeights}
+      weightsOnly={page.weightsOnly}
       lmsName={lmsNameOf(user)}
       saveTarget={saveTargetAction}
       saveWeights={saveWeightsAction}

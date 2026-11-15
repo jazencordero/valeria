@@ -76,6 +76,8 @@ export type CourseGrades = {
   items: GradePageItem[];
   /** A weight is missing (or there are no items): the page shows the weights card. */
   needsWeights: boolean;
+  /** Seeded by hand in points: the page shows the weights and nothing worked out from them. */
+  weightsOnly: boolean;
 };
 
 export const gradesHref = (courseId: string) => `/grades/${courseId}`;
@@ -126,7 +128,19 @@ type ItemRow = {
   max: number;
   score: number | null;
   dueText: string | null;
+  moodleRef: string;
 };
+
+/**
+ * Stopgap (truth audit, 2026-11-15): a course whose grade parts were seeded by hand in points
+ * (a part with its own maximum, from a syllabus). Its grade bands are in points and may carry a
+ * pass rule, neither of which is stored yet, so anything worked out from the percent scale
+ * ("you need about 90%", a verdict, a trajectory) could be false. Such a course shows its
+ * weights and what is known, nothing derived, until points mode is wired in.
+ */
+function weightsOnlyOf(rows: readonly ItemRow[]): boolean {
+  return rows.some((r) => r.moodleRef.startsWith("seed:") && r.max !== 100);
+}
 
 function toPageItem(r: ItemRow): GradePageItem {
   return {
@@ -151,6 +165,7 @@ async function itemsOf(userId: string, courseIds: string[], database: Db): Promi
       max: gradeItems.max,
       score: gradeItems.score,
       dueText: gradeItems.dueText,
+      moodleRef: gradeItems.moodleRef,
     })
     .from(gradeItems)
     .where(and(eq(gradeItems.userId, userId), inArray(gradeItems.courseId, courseIds)))
@@ -170,12 +185,16 @@ export async function getGradesList(userId: string, database: Db = defaultDb): P
     database,
   );
 
-  const perCourse = list.map((c) => ({ course: c, items: rows.filter((r) => r.courseId === c.id).map(toPageItem) }));
+  const perCourse = list.map((c) => {
+    const mine = rows.filter((r) => r.courseId === c.id);
+    return { course: c, items: mine.map(toPageItem), weightsOnly: weightsOnlyOf(mine) };
+  });
   return {
-    overall: overall(perCourse.map((p) => ({ items: p.items }))),
-    courses: perCourse.map(({ course, items }) => {
+    // A weights-only course has no trajectory, so it does not count in the overall number.
+    overall: overall(perCourse.filter((p) => !p.weightsOnly).map((p) => ({ items: p.items }))),
+    courses: perCourse.map(({ course, items, weightsOnly }) => {
       const target = targetOf(course.target);
-      const status = statusOf(items, target);
+      const status = weightsOnly ? "early" : statusOf(items, target);
       return {
         id: course.id,
         href: gradesHref(course.id),
@@ -210,11 +229,13 @@ export async function getCourseGrades(
     .limit(1);
   if (!c || c.hidden) return null;
 
-  const items = (await itemsOf(userId, [c.id], database)).map(toPageItem);
+  const rows = await itemsOf(userId, [c.id], database);
+  const items = rows.map(toPageItem);
   return {
     course: { id: c.id, name: shortNameOf(c.name), code: c.code, color: c.color, target: targetOf(c.target) },
     items,
     needsWeights: normaliseWeights(items) === NEEDS_WEIGHTS,
+    weightsOnly: weightsOnlyOf(rows),
   };
 }
 

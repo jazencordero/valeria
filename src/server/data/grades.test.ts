@@ -204,4 +204,28 @@ describe("grades data", () => {
     // The sync left every grade row alone while she changed targets.
     expect(await t.db.select().from(gradeItems).where(eq(gradeItems.userId, userId))).toHaveLength(10);
   }, SLOW);
+  it("works nothing out for a course whose parts were seeded by hand in points", async () => {
+    const { userId, ids } = await seeded();
+    // The on-track course (3102), as a hand-seeded course would hold it: parts from a syllabus,
+    // marked in points (an exam out of 80, exercises out of 30), weights known, nothing graded.
+    await t.db.delete(gradeItems).where(eq(gradeItems.courseId, ids[3102]));
+    await t.db.insert(gradeItems).values([
+      { userId, courseId: ids[3102], moodleRef: "seed:aaaaaaaaaaaaaaaaaaaaaaaa", name: "Invented exam", weight: 0.73, weightSource: "manual", max: 80, position: 1 },
+      { userId, courseId: ids[3102], moodleRef: "seed:bbbbbbbbbbbbbbbbbbbbbbbb", name: "Invented exercises", weight: 0.27, weightSource: "manual", max: 30, position: 2 },
+    ]);
+
+    const page = await getCourseGrades(userId, ids[3102], t.db);
+    expect(page).toMatchObject({ weightsOnly: true, needsWeights: false });
+    expect(page!.items.map((it) => [it.name, it.weight])).toEqual([
+      ["Invented exam", 0.73],
+      ["Invented exercises", 0.27],
+    ]);
+    const row = (await getGradesList(userId, t.db)).courses.find((c) => c.id === ids[3102])!;
+    expect(row).toMatchObject({ status: "early", trajectory: null });
+
+    // A hand-seeded course in percent (every part out of 100) and a synced course are worked out as before.
+    await t.db.update(gradeItems).set({ max: 100 }).where(eq(gradeItems.courseId, ids[3102]));
+    expect((await getCourseGrades(userId, ids[3102], t.db))!.weightsOnly).toBe(false);
+    expect((await getCourseGrades(userId, ids[3103], t.db))!.weightsOnly).toBe(false);
+  }, SLOW);
 });
