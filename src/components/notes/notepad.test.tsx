@@ -1,14 +1,22 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotepadContextResult, NotepadSaveResult } from "@/app/(app)/notes/actions";
+import type { AddCardsResult, ExamChoicesResult } from "@/app/(app)/notes/card-actions";
 
 // The real actions reach the database; the view gets fakes instead.
 vi.mock("@/app/(app)/notes/actions", () => ({
   saveNotepad: vi.fn(),
   notepadContext: vi.fn(),
 }));
+vi.mock("@/app/(app)/notes/card-actions", () => ({
+  addCardsFromNote: vi.fn(),
+  noteCardExams: vi.fn(),
+}));
+const toast = vi.hoisted(() => ({ show: vi.fn() }));
+vi.mock("@/components/ui/toast", () => ({ showToast: toast.show }));
 
-import { NotepadView, SAVE_PAUSE_MS, type NotepadActions } from "./notepad";
+import { COURSE_NO_EXAM, NOTHING_WRITTEN } from "./draft-cards";
+import { NotepadView, openNotepad, SAVE_PAUSE_MS, type NotepadActions } from "./notepad";
 
 const NOTE_ID = "11111111-1111-4111-8111-111111111111";
 const ASSIGNMENT = "/assignments/22222222-2222-4222-8222-222222222222";
@@ -33,20 +41,28 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  toast.show.mockReset();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   delete document.documentElement.dataset.fast;
   localStorage.clear();
 });
 
-function fakeActions(save?: NotepadActions["save"]) {
+function fakeActions(
+  save?: NotepadActions["save"],
+  more: { label?: string; add?: AddCardsResult; exams?: ExamChoicesResult } = {},
+) {
   const saveFn = vi.fn<NotepadActions["save"]>(
     save ?? (async (input) => ({ ok: true, id: input.id ?? NOTE_ID }) as NotepadSaveResult),
   );
   const contextFn = vi.fn<NotepadActions["context"]>(
-    async () => ({ ok: true, label: "Case memo 2" }) as NotepadContextResult,
+    async () => ({ ok: true, label: more.label ?? "Case memo 2" }) as NotepadContextResult,
   );
-  return { save: saveFn, context: contextFn };
+  const addCards = vi.fn<NotepadActions["addCards"]>(
+    async (_id, cards) => more.add ?? { ok: true, added: cards.length, skipped: 0, course: "Strategic IT Management" },
+  );
+  const exams = vi.fn<NotepadActions["exams"]>(async () => more.exams ?? { ok: true, exams: [] });
+  return { save: saveFn, context: contextFn, addCards, exams };
 }
 
 async function flush(ms = 0) {
@@ -220,5 +236,132 @@ describe("Notepad", () => {
     await flush(4500);
     expect(screen.getByRole("button", { name: "Notepad" }).textContent).not.toContain("Notes");
     expect(localStorage.getItem("ready-notes-hint")).toBe("1");
+  });
+});
+
+describe("Notepad: Turn into cards", () => {
+  const turn = () => fireEvent.click(screen.getByRole("button", { name: "Turn into cards" }));
+  const field = (name: string, n = 0) => screen.getAllByLabelText(name)[n] as HTMLInputElement;
+
+  it("drafts up to three editable cards and adds the real count", async () => {
+    const actions = fakeActions();
+    render(<NotepadView pathname="/courses/33333333-3333-4333-8333-333333333333" actions={actions} />);
+    await openPad();
+    fireEvent.change(body(), {
+      target: { value: "- SLA: the promised service level\n\nTCO - total cost of ownership\nVendor lock-in\nFourth line" },
+    });
+    turn();
+    await flush(200);
+    expect(screen.getByText("DRAFT CARDS")).toBeTruthy();
+    expect(field("CARD 1 · FRONT").value).toBe("SLA");
+    expect(field("BACK", 0).value).toBe("the promised service level");
+    expect(field("CARD 2 · FRONT").value).toBe("TCO");
+    expect(field("CARD 3 · FRONT").value).toBe("Explain: Vendor lock-in");
+    expect(field("BACK", 2).value).toBe("Vendor lock-in");
+    expect(screen.queryByLabelText("CARD 4 · FRONT")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add 3 cards" })).toBeTruthy();
+
+    // An emptied front is skipped, and the button says so.
+    fireEvent.change(field("CARD 2 · FRONT"), { target: { value: " " } });
+    fireEvent.change(field("BACK", 0), { target: { value: "service level, in writing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add 2 cards" }));
+    await flush(50);
+    // The note is stored first (no waiting for the pause), then the cards.
+    expect(actions.save).toHaveBeenCalledTimes(1);
+    expect(actions.addCards).toHaveBeenCalledWith(
+      NOTE_ID,
+      [
+        { front: "SLA", back: "service level, in writing" },
+        { front: "Explain: Vendor lock-in", back: "Vendor lock-in" },
+      ],
+      undefined,
+    );
+    expect(toast.show).toHaveBeenCalledWith("Added to Strategic IT Management. First review today.");
+    expect(screen.queryByTestId("draft-cards")).toBeNull();
+  });
+
+  it("with nothing written, says each line becomes a card", async () => {
+    const actions = fakeActions();
+    render(<NotepadView pathname="/home" actions={actions} />);
+    await openPad();
+    turn();
+    await flush(20);
+    expect(screen.getByText(NOTHING_WRITTEN)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Add/ })).toBeNull();
+  });
+
+  it("a course with no exam: nothing added, no toast, a link to add one", async () => {
+    const actions = fakeActions(undefined, { add: { ok: false, reason: "no_exam" } });
+    render(<NotepadView pathname="/courses/33333333-3333-4333-8333-333333333333" actions={actions} />);
+    await openPad();
+    fireEvent.change(body(), { target: { value: "SLA: service level" } });
+    turn();
+    await flush(20);
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 card" }));
+    await flush(50);
+    expect(screen.getByTestId("draft-no-exam").textContent).toContain(COURSE_NO_EXAM);
+    expect(screen.getByRole("link", { name: "Add an exam" }).getAttribute("href")).toBe("/exams");
+    expect(toast.show).not.toHaveBeenCalled();
+    // The drafts stay, so nothing she typed is lost.
+    expect(field("CARD 1 · FRONT").value).toBe("SLA");
+  });
+
+  it("a General note asks which exam first", async () => {
+    const actions = fakeActions(undefined, {
+      label: "General",
+      exams: {
+        ok: true,
+        exams: [
+          { id: "44444444-4444-4444-8444-444444444444", label: "Final · Strategic IT Management" },
+          { id: "55555555-5555-4555-8555-555555555555", label: "Quiz 4 · Forecasting Methods" },
+        ],
+      },
+    });
+    render(<NotepadView pathname="/home" actions={actions} />);
+    await openPad();
+    fireEvent.change(body(), { target: { value: "SLA: service level" } });
+    turn();
+    await flush(20);
+    const add = screen.getByRole("button", { name: "Add 1 card" }) as HTMLButtonElement;
+    expect(add.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Which exam?"), { target: { value: "55555555-5555-4555-8555-555555555555" } });
+    expect(add.disabled).toBe(false);
+    fireEvent.click(add);
+    await flush(50);
+    expect(actions.addCards).toHaveBeenCalledWith(
+      NOTE_ID,
+      [{ front: "SLA", back: "service level" }],
+      "55555555-5555-4555-8555-555555555555",
+    );
+  });
+
+  it("cards she already has: no toast, and it says so", async () => {
+    const actions = fakeActions(undefined, { add: { ok: true, added: 0, skipped: 1, course: "X" } });
+    render(<NotepadView pathname="/courses/33333333-3333-4333-8333-333333333333" actions={actions} />);
+    await openPad();
+    fireEvent.change(body(), { target: { value: "SLA: service level" } });
+    turn();
+    await flush(20);
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 card" }));
+    await flush(50);
+    expect(toast.show).not.toHaveBeenCalled();
+    expect(screen.getByTestId("draft-message").textContent).toBe("You already have this card.");
+  });
+
+  it("opens a stored note with the drafts showing", async () => {
+    const actions = fakeActions();
+    render(<NotepadView pathname="/notes" actions={actions} />);
+    act(() => {
+      openNotepad({
+        note: { id: NOTE_ID, title: "Week 5", body: "SLA: service level", quote: null, highlighted: false, label: "Lecture 5 · Sourcing" },
+        cards: true,
+      });
+    });
+    await flush(200);
+    expect(field("CARD 1 · FRONT").value).toBe("SLA");
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 card" }));
+    await flush(50);
+    expect(actions.save).not.toHaveBeenCalled();
+    expect(actions.addCards).toHaveBeenCalledWith(NOTE_ID, [{ front: "SLA", back: "service level" }], undefined);
   });
 });

@@ -18,8 +18,18 @@
  * the right with no scrim, so the page stays usable. Inside: the chip saying
  * what the note is attached to, "Saved", close; title; the quote when there
  * is one; the ruled body that grows; "• List" (starts the line with "- ") and
- * "Highlight" (butter marker behind the title); "Turn into cards" (disabled
- * until M9-17 builds it) and "Done".
+ * "Highlight" (butter marker behind the title); "Turn into cards" and "Done".
+ *
+ * "Turn into cards" (M9-17) drafts up to three recall cards from the body
+ * (`toCards`) under the tools, editable (`DraftCards`). "Add N cards" first
+ * waits for the note to be stored (`NoteSaver.settled`), then calls
+ * `addCardsFromNote`; when something was stored the toast says "Added to
+ * <course>. First review today." and the drafts fold away (or stay with the
+ * line saying how many she already had). A course with no exam keeps the
+ * drafts and shows the no-exam line with a link to add one. A General note
+ * (chip "General") asks which exam first (`noteCardExams`). The Notes tab's
+ * card menu opens a note with the drafts already showing
+ * (`openNotepad({ note, cards: true })`).
  *
  * Keys: N opens a new note when she is not typing in a field and no modal is
  * open; Escape closes. A new note attaches to the page it was started on
@@ -54,9 +64,14 @@ import {
 import { createPortal } from "react-dom";
 import { notepadContext, saveNotepad } from "@/app/(app)/notes/actions";
 import type { NotepadContextResult, NotepadSaveResult } from "@/app/(app)/notes/actions";
+import { addCardsFromNote, noteCardExams } from "@/app/(app)/notes/card-actions";
+import type { AddCardsResult, ExamChoice, ExamChoicesResult } from "@/app/(app)/notes/card-actions";
+import { DraftCards, type DraftMessage } from "@/components/notes/draft-cards";
 import { Button } from "@/components/ui/button";
+import { showToast } from "@/components/ui/toast";
 import { inertOthers } from "@/lib/a11y/inert";
 import { attachFromPath, GENERAL } from "@/lib/notes/attach";
+import { toCards, usableCards, type DraftCard } from "@/lib/notes/to-cards";
 import { ease } from "@/lib/motion/tokens";
 import { fade } from "@/lib/motion/transitions";
 import { useMotionMode } from "@/lib/motion/use-calm";
@@ -65,6 +80,18 @@ import "./notepad.css";
 export type NotepadActions = {
   save: (input: SaveInput) => Promise<NotepadSaveResult>;
   context: (path: string) => Promise<NotepadContextResult>;
+  addCards: (noteId: string, cards: DraftCard[], examId?: string) => Promise<AddCardsResult>;
+  exams: () => Promise<ExamChoicesResult>;
+};
+
+/** The drafts view: the rows, the General note's exam choice, the last answer. */
+type CardsView = {
+  rows: DraftCard[];
+  /** Left out for a note with a course; null while her exams load. */
+  exams?: ExamChoice[] | null;
+  examId: string;
+  busy: boolean;
+  message: DraftMessage | null;
 };
 
 type SaveInput = {
@@ -125,6 +152,7 @@ class NoteSaver {
   private retryMs = RETRY_FIRST_MS;
   private onState: ((s: SaveState) => void) | null;
   private triesLeft = Infinity;
+  private waiters: ((id: string | null) => void)[] = [];
 
   constructor(
     private readonly path: string,
@@ -174,15 +202,35 @@ class NoteSaver {
           this.retryMs = RETRY_FIRST_MS;
           if (this.dirty) this.flush();
           else this.onState?.("saved");
+          this.wake();
           return;
         }
         if (r.reason === "not_found") this.id = null; // deleted elsewhere: store it again
         this.failed(sent, r.reason !== "invalid");
+        this.wake();
       })
       .catch(() => {
         this.inflight = false;
         this.failed(sent, true);
+        this.wake();
       });
+  }
+
+  /**
+   * Send what is left and wait for it: the stored id once her latest words
+   * are stored, or null when they could not be (a failed save, or nothing
+   * to store).
+   */
+  settled(): Promise<string | null> {
+    this.flush();
+    if (!this.inflight) return Promise.resolve(this.dirty ? null : this.id);
+    return new Promise((resolve) => this.waiters.push(resolve));
+  }
+
+  private wake(): void {
+    if (this.inflight) return;
+    const id = this.dirty ? null : this.id;
+    for (const w of this.waiters.splice(0)) w(id);
   }
 
   /** Drawer closed: send what is left; no more marks. */
@@ -207,9 +255,10 @@ class NoteSaver {
 
 /**
  * Opens the notepad on a new note, from anywhere (M9-16 passes the selected
- * text), or on a stored note when `note` is given (M9-14).
+ * text), or on a stored note when `note` is given (M9-14); `cards` opens it
+ * with the draft cards showing (M9-17).
  */
-export function openNotepad(detail: { quote?: string; note?: OpenNote } = {}): void {
+export function openNotepad(detail: { quote?: string; note?: OpenNote; cards?: boolean } = {}): void {
   window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail }));
 }
 
@@ -318,7 +367,22 @@ export function Notepad() {
   return <NotepadView pathname={pathname} actions={REAL_ACTIONS} />;
 }
 
-const REAL_ACTIONS: NotepadActions = { save: saveNotepad, context: notepadContext };
+const REAL_ACTIONS: NotepadActions = {
+  save: saveNotepad,
+  context: notepadContext,
+  addCards: addCardsFromNote,
+  exams: noteCardExams,
+};
+
+/** What the drawer says after "Add N cards", when it stays open. */
+function skippedText(skipped: number, added: number): string {
+  if (added === 0) return skipped === 1 ? "You already have this card." : "You already have these cards.";
+  return skipped === 1
+    ? "1 was already one of your cards, so it was left out."
+    : `${skipped} were already your cards, so they were left out.`;
+}
+
+const ADD_FAILED = "Could not add these yet. Try again.";
 
 export function NotepadView({ pathname, actions }: NotepadViewProps) {
   const mounted = useMounted();
@@ -331,6 +395,11 @@ export function NotepadView({ pathname, actions }: NotepadViewProps) {
   const [label, setLabel] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [hint, setHint] = useState(false);
+  const [cards, setCards] = useState<CardsView | null>(null);
+  /** Bumped per drafts view, so a late answer for an old one is ignored. */
+  const cardsSeq = useRef(0);
+  const firstFrontRef = useRef<HTMLInputElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   /** Bumped per note, so a late chip answer for an old note is ignored. */
   const noteSeq = useRef(0);
 
@@ -358,9 +427,43 @@ export function NotepadView({ pathname, actions }: NotepadViewProps) {
     };
   }, [wide, path]);
 
+  /** Her exams for a General note's "Which exam?"; one exam is picked for her. */
+  const loadExams = useCallback(
+    (seq: number) => {
+      const done = (r: ExamChoicesResult | null) => {
+        if (cardsSeq.current !== seq) return;
+        setCards((c) => {
+          if (!c) return c;
+          if (!r?.ok) return { ...c, message: { kind: "text", text: "Could not load your exams yet. Try again." } };
+          return { ...c, exams: r.exams, examId: c.examId || (r.exams.length === 1 ? r.exams[0].id : "") };
+        });
+      };
+      actions.exams().then(done, () => done(null));
+    },
+    [actions],
+  );
+
+  /** The drafts from the body, replacing any shown. */
+  const showDrafts = useCallback(
+    (body: string, chip: string | null) => {
+      const seq = ++cardsSeq.current;
+      const general = chip === GENERAL;
+      setCards({ rows: toCards(body), exams: general ? null : undefined, examId: "", busy: false, message: null });
+      if (general) loadExams(seq);
+      requestAnimationFrame(() => {
+        firstFrontRef.current?.focus({ preventScroll: true });
+        const sc = scrollRef.current;
+        if (sc) setTimeout(() => sc.scrollTo?.({ top: sc.scrollHeight, behavior: mode === "full" ? "smooth" : "auto" }), 80);
+      });
+    },
+    [loadExams, mode],
+  );
+
   const startNote = useCallback(
-    (quote: string | null, stored?: OpenNote) => {
+    (quote: string | null, stored?: OpenNote, withCards = false) => {
       saver.current?.close();
+      cardsSeq.current += 1;
+      setCards(null);
       const seq = ++noteSeq.current;
       const fresh: Draft = stored
         ? { title: stored.title, body: stored.body, quote: stored.quote, highlighted: stored.highlighted }
@@ -390,17 +493,75 @@ export function NotepadView({ pathname, actions }: NotepadViewProps) {
       }
       setHint(false);
       setOpen(true);
+      if (stored && withCards) {
+        // From the Notes tab's "Turn into cards": the drafts focus their first field.
+        showDrafts(stored.body, stored.label);
+        return;
+      }
       // Title first; the body when the note starts with a quote.
       requestAnimationFrame(() => {
         const target = quote ? bodyRef.current : titleRef.current;
         target?.focus({ preventScroll: true });
       });
     },
-    [actions, open, path],
+    [actions, open, path, showDrafts],
   );
+
+  const addCards = async () => {
+    if (!cards || cards.busy) return;
+    const seq = cardsSeq.current;
+    const rows = usableCards(cards.rows);
+    const examId = cards.examId || undefined;
+    const update = (f: (c: CardsView) => CardsView) => {
+      if (cardsSeq.current === seq) setCards((c) => (c ? f(c) : c));
+    };
+    const fail = () => update((c) => ({ ...c, busy: false, message: { kind: "text", text: ADD_FAILED } }));
+    update((c) => ({ ...c, busy: true, message: null }));
+    try {
+      const id = (await saver.current?.settled()) ?? null;
+      if (cardsSeq.current !== seq) return;
+      if (!id) return fail();
+      const r = await actions.addCards(id, rows, examId);
+      if (r.ok) {
+        // The toast only when something was really stored.
+        if (r.added > 0) showToast(`Added to ${r.course}. First review today.`);
+        if (r.skipped === 0) {
+          if (cardsSeq.current === seq) {
+            cardsSeq.current += 1;
+            setCards(null);
+          }
+          return;
+        }
+        update((c) => ({ ...c, busy: false, message: { kind: "text", text: skippedText(r.skipped, r.added) } }));
+        return;
+      }
+      if (r.reason === "no_exam") {
+        update((c) => ({ ...c, busy: false, message: { kind: "no_exam" } }));
+        return;
+      }
+      if (r.reason === "choose_exam") {
+        // The chip had not said General yet (or the chosen exam has passed): ask.
+        const asked = cards.exams !== undefined;
+        update((c) => ({
+          ...c,
+          busy: false,
+          exams: c.exams === undefined ? null : c.exams,
+          examId: "",
+          message: asked ? { kind: "text", text: "Pick the exam these are for." } : null,
+        }));
+        if (!asked) loadExams(seq);
+        return;
+      }
+      fail();
+    } catch {
+      fail();
+    }
+  };
 
   const close = useCallback(() => {
     if (!open) return;
+    cardsSeq.current += 1;
+    setCards(null);
     saver.current?.close();
     saver.current = null;
     noteSeq.current += 1;
@@ -451,9 +612,9 @@ export function NotepadView({ pathname, actions }: NotepadViewProps) {
 
   useEffect(() => {
     const onOpen = (e: Event) => {
-      const detail = (e as CustomEvent<{ quote?: string; note?: OpenNote }>).detail;
+      const detail = (e as CustomEvent<{ quote?: string; note?: OpenNote; cards?: boolean }>).detail;
       if (detail?.note) {
-        startNote(null, detail.note);
+        startNote(null, detail.note, detail.cards === true);
         return;
       }
       const quote = detail?.quote?.trim();
@@ -617,7 +778,7 @@ export function NotepadView({ pathname, actions }: NotepadViewProps) {
                 <CloseIcon />
               </Button>
             </div>
-            <div className="np-scroll">
+            <div className="np-scroll" ref={scrollRef}>
               <div className="np-tw">
                 {draft.highlighted ? (
                   <span className={`np-mark${full ? " wipe" : ""}`} aria-hidden="true" />
@@ -662,10 +823,22 @@ export function NotepadView({ pathname, actions }: NotepadViewProps) {
                   <span className="np-pill">Highlight</span>
                 </button>
               </div>
+              {cards ? (
+                <DraftCards
+                  rows={cards.rows}
+                  onRows={(rows) => setCards((c) => (c ? { ...c, rows } : c))}
+                  exams={cards.exams}
+                  examId={cards.examId}
+                  onExam={(examId) => setCards((c) => (c ? { ...c, examId, message: null } : c))}
+                  busy={cards.busy}
+                  message={cards.message}
+                  onAdd={addCards}
+                  firstRef={firstFrontRef}
+                />
+              ) : null}
             </div>
             <div className="np-actions">
-              {/* M9-17 builds "Turn into cards"; until then it is shown but off. */}
-              <Button variant="secondary" disabled>
+              <Button variant="secondary" onClick={() => showDrafts(draft.body, label)}>
                 Turn into cards
               </Button>
               <Button variant="primary" onClick={close}>

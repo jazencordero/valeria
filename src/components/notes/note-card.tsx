@@ -8,13 +8,15 @@
  * The title (or "Untitled"; the butter marker behind it when highlighted),
  * the body clamped to three lines with the quote first in quotation marks,
  * then the attachment pill and the date. Tapping the card opens it (`onOpen`).
- * The small menu top right holds Delete, which asks once: the first press
- * turns it into "Yes, delete it", the second deletes.
+ * The small menu top right holds "Turn into cards" (M9-17: opens the note in
+ * the notepad with the draft cards showing) and Delete, which asks once: the
+ * first press turns it into "Yes, delete it", the second deletes.
  *
  * Plain data in, no fetching: the grid passes what to do on open and delete.
  */
 import { motion } from "motion/react";
 import { useEffect, useId, useRef, useState } from "react";
+import { openNotepad } from "@/components/notes/notepad";
 
 export type NoteCardData = {
   id: string;
@@ -99,6 +101,22 @@ export function NoteCard({ note, onOpen, onDelete, pop = false }: NoteCardProps)
 
   const title = note.title?.trim() ? note.title : "Untitled";
 
+  const toCards = () => {
+    setMenu(false);
+    setConfirm(false);
+    openNotepad({
+      note: {
+        id: note.id,
+        title: note.title ?? "",
+        body: note.body,
+        quote: note.quote,
+        highlighted: note.highlighted,
+        label: note.attachLabel,
+      },
+      cards: true,
+    });
+  };
+
   return (
     <motion.div
       initial={pop ? { opacity: 0, scale: 0.92 } : false}
@@ -166,6 +184,15 @@ export function NoteCard({ note, onOpen, onDelete, pop = false }: NoteCardProps)
           >
             <button
               ref={itemRef}
+              type="button"
+              role="menuitem"
+              disabled={busy}
+              onClick={toCards}
+              className="block w-full cursor-pointer rounded-[10px] border-0 bg-transparent px-3 py-2.5 text-left text-[14px] text-ink hover:bg-paper disabled:opacity-50"
+            >
+              Turn into cards
+            </button>
+            <button
               type="button"
               role="menuitem"
               disabled={busy}
