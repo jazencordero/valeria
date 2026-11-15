@@ -31,7 +31,10 @@
  *   from its path under `exam/`, title from its first heading (else the file name), position
  *   from `seed.documents` (a list of file names) and then file-name order. Other files (pdf,
  *   json, text) are validated and counted, not imported.
- * The root may hold `account.json`: `{ courses: { <code>: { aiAllowed, scope } } }`.
+ * The root may hold `account.json`: `{ courses: { <code>: { aiAllowed, scope } } }` (M3-51), or the
+ *   M3-57 shape `{ exams: [...], aiAllowed: [{courseCode, allowed, scope?}], gradeWeights, ... }`
+ *   (`AccountSchema`). From `exams[]`, a seed whose exam has no date takes the date of the exam
+ *   of the same course and title, and a seed with no exam takes its course's only dated exam.
  *
  * Matching rules (so a second run changes nothing):
  * - Course: one of the user's courses whose `code` equals `courseCode` (trimmed, any case).
@@ -58,7 +61,7 @@
  *   Helsinki). Sessions hold new cards back until that day (`./start-date`).
  * - Exam documents: same exam + same slug. Same title, text and position -> skipped; else
  *   updated. A document no longer in the bundle is left.
- * - AI rules (M2-27): account.json `aiAllowed` true -> both allowed; false + scope "assignments" ->
+ * - AI rules (M2-27, `aiRuleFor`): account.json `aiAllowed` (or a list entry's `allowed`) true -> both allowed; false + scope "assignments" ->
  *   ai_assignments off, ai_study allowed; false otherwise -> off + not_allowed; "unknown"/missing -> untouched.
  *
  * Problems (a card skipped, and why) name the file and the card's position, never its text.
@@ -242,20 +245,69 @@ export const MapSchema = z.object({
 });
 export type StudyMap = z.infer<typeof MapSchema>;
 
-export const AccountSchema = z.object({
-  courses: z
-    .record(
-      z.string(),
-      z.looseObject({
-        aiAllowed: z
-          .union([z.boolean(), z.literal("unknown")], { error: 'aiAllowed must be true, false or "unknown".' })
-          .optional(),
-        scope: z.string().optional(),
-      }),
-    )
-    .default({}),
+const aiAllowedValue = z
+  .union([z.boolean(), z.literal("unknown")], { error: 'aiAllowed must be true, false or "unknown".' })
+  .optional();
+
+/**
+ * One exam of the bundles-level account.json (M3-57): `{courseCode, title, kind, at,
+ * atIsPlaceholderTime, source}`. `at` may be null (no date yet). Other keys are ignored.
+ */
+export const AccountExamSchema = z.looseObject({
+  courseCode: nonEmpty("courseCode"),
+  title: nonEmpty("title"),
+  kind: z.string().optional(),
+  at: z
+    .string()
+    .refine((s) => !Number.isNaN(Date.parse(s)), { error: "at must be an ISO date and time, or null." })
+    .nullish(),
+  atIsPlaceholderTime: z.boolean().optional(),
 });
-export type Account = z.infer<typeof AccountSchema>;
+export type AccountExam = z.infer<typeof AccountExamSchema>;
+
+/**
+ * account.json at the bundle root, in either shape:
+ * - M3-51: `{ courses: { <code>: { aiAllowed, scope } } }`;
+ * - M3-57: `{ exams: [...], gradeWeights: [...], aiAllowed: [{ courseCode, allowed, scope? }], unknown, noExam }`.
+ *   The importer reads `aiAllowed[]` (mapped like the old shape; `aiAllowed` is taken as a
+ *   synonym of `allowed`) and `exams[]` (to fill a seed's missing exam, see `loadBundle`).
+ *   `gradeWeights`, `unknown` and `noExam` are for `seed-account.ts`; other keys are ignored.
+ * When both shapes name a course, the list wins.
+ */
+export const AccountSchema = z
+  .object({
+    courses: z
+      .record(
+        z.string(),
+        z.looseObject({
+          aiAllowed: aiAllowedValue,
+          scope: z.string().optional(),
+        }),
+      )
+      .default({}),
+    aiAllowed: z
+      .array(
+        z.looseObject({
+          courseCode: nonEmpty("courseCode"),
+          allowed: aiAllowedValue,
+          aiAllowed: aiAllowedValue,
+          scope: z.string().optional(),
+        }),
+        { error: "aiAllowed must be a list of {courseCode, allowed}." },
+      )
+      .optional(),
+    exams: z.array(AccountExamSchema, { error: "exams must be a list." }).default([]),
+  })
+  .transform(({ courses: byCode, aiAllowed, exams: examList }) => {
+    const merged: Record<string, { aiAllowed?: boolean | "unknown"; scope?: string; [k: string]: unknown }> = { ...byCode };
+    for (const entry of aiAllowed ?? []) {
+      const { courseCode, allowed, aiAllowed: alias, ...rest } = entry;
+      const key = Object.keys(merged).find((k) => normCode(k) === normCode(courseCode)) ?? courseCode;
+      merged[key] = { ...rest, aiAllowed: allowed ?? alias };
+    }
+    return { courses: merged, exams: examList };
+  });
+export type Account = z.output<typeof AccountSchema>;
 
 // ---------------------------------------------------------------------------
 // loadBundle: read and validate the files (no database)
@@ -278,6 +330,8 @@ export type CourseBundle = {
   examDocProblems: { file: string; reason: string }[];
   /** From account.json, when it names this course. */
   account: { aiAllowed?: boolean | "unknown"; scope?: string; other: string[] } | null;
+  /** Set when the seed's exam (or its date) came from account.json's `exams[]` (M3-57). */
+  examNote?: string | null;
 };
 
 /** One study-only course of a bundle (M3-56): lectures and pages are imported, nothing else. */
@@ -469,6 +523,40 @@ async function loadStudyOnly(
   return { dir, courseCode, seed, pages, decks, deckProblems, examFiles, map, account: accountFor(account, courseCode) };
 }
 
+/** An EXAM_KINDS value for account.json's free `kind` ("exam" when it is not one). */
+export function examKindOf(kind: string | undefined): (typeof EXAM_KINDS)[number] {
+  const k = (kind ?? "").trim().toLowerCase();
+  return (EXAM_KINDS as readonly string[]).includes(k) ? (k as (typeof EXAM_KINDS)[number]) : "exam";
+}
+
+const sameTitle = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * M3-57: exams now live in account.json. A seed whose exam has no date gets the date of the
+ * account.json exam of the same course and title; a seed with no exam at all gets the
+ * course's account.json exam when there is exactly one with a date. Anything else is left for
+ * SeedSchema to refuse as before. Returns the (copied) seed and a note saying what was taken.
+ */
+function examFromAccount(raw: unknown, code: string, account: Account | null): { raw: unknown; note: string | null } {
+  if (!isRecord(raw) || !account || account.exams.length === 0) return { raw, note: null };
+  const mine = account.exams.filter((e) => normCode(e.courseCode) === code && typeof e.at === "string");
+  const exam = raw.exam;
+  if (isRecord(exam)) {
+    if (exam.at !== undefined && exam.at !== null) return { raw, note: null };
+    const title = typeof exam.title === "string" ? exam.title : "";
+    const match = mine.find((e) => sameTitle(e.title, title));
+    if (!match) return { raw, note: null };
+    return { raw: { ...raw, exam: { ...exam, at: match.at } }, note: "The exam's date is from account.json (the seed has none)." };
+  }
+  if (exam !== undefined && exam !== null) return { raw, note: null };
+  if (mine.length !== 1) return { raw, note: null };
+  const e = mine[0];
+  return {
+    raw: { ...raw, exam: { courseCode: e.courseCode, title: e.title, kind: examKindOf(e.kind), at: e.at } },
+    note: "The exam (title, kind, date) is from account.json (the seed has none).",
+  };
+}
+
 /**
  * Reads a bundle: `root/seed.json` (one course) or `root/<sub>/seed.json` (one course per
  * subfolder). With `courses`, only courses whose code is listed are read and validated, so a
@@ -505,7 +593,7 @@ export async function loadBundle(root: string, options: { courses?: string[] } =
     if (places.length === 0) throw new BundleInvalid([`${root}: has no seed.json and no course folder with one.`]);
   }
 
-  const found: { dir: string; label: string; seed: Seed }[] = [];
+  const found: { dir: string; label: string; seed: Seed; examNote: string | null }[] = [];
   const foundStudy: { dir: string; label: string; code: string; seed: StudySeed }[] = [];
   const codesSeen: string[] = [];
   for (const place of places) {
@@ -516,7 +604,8 @@ export async function loadBundle(root: string, options: { courses?: string[] } =
     const loose = (isRecord(raw) ? raw : {}) as { exam?: { courseCode?: unknown }; courseCode?: unknown; studyOnly?: unknown };
     const studyOnly = loose.studyOnly === true;
     // A study-only seed has no exam to carry the code: take a top-level one, else the folder's name.
-    const looseCode = loose.exam?.courseCode ?? (studyOnly ? (loose.courseCode ?? place.label) : undefined);
+    // A seed with no exam (M3-57: its exam is in account.json) is found by the same code.
+    const looseCode = loose.exam?.courseCode ?? (studyOnly || !isRecord(loose.exam) ? (loose.courseCode ?? place.label) : undefined);
     const code = typeof looseCode === "string" && looseCode.trim() !== "" ? normCode(looseCode) : null;
     if (code) codesSeen.push(code);
     if (wanted && (!code || !wanted.has(code))) continue;
@@ -534,12 +623,13 @@ export async function loadBundle(root: string, options: { courses?: string[] } =
       else foundStudy.push({ ...place, code, seed: parsedStudy.data });
       continue;
     }
-    const parsed = SeedSchema.safeParse(raw);
+    const filled = code ? examFromAccount(raw, code, account) : { raw, note: null };
+    const parsed = SeedSchema.safeParse(filled.raw);
     if (!parsed.success) {
       problems.push(...issues(seedLabel, parsed.error));
       continue;
     }
-    found.push({ ...place, seed: parsed.data });
+    found.push({ ...place, seed: parsed.data, examNote: filled.note });
   }
 
   if (wanted) {
@@ -550,7 +640,7 @@ export async function loadBundle(root: string, options: { courses?: string[] } =
   if (problems.length) throw new BundleInvalid(problems);
 
   const coursesOut: CourseBundle[] = [];
-  for (const f of found) coursesOut.push(await loadCourse(f.dir, f.label, f.seed, account, problems));
+  for (const f of found) coursesOut.push({ ...(await loadCourse(f.dir, f.label, f.seed, account, problems)), examNote: f.examNote });
   const studyOut: StudyOnlyCourse[] = [];
   for (const f of foundStudy) studyOut.push(await loadStudyOnly(f.dir, f.label, f.code, f.seed, account, problems));
   if (problems.length) throw new BundleInvalid(problems);
@@ -682,6 +772,7 @@ export function planImport(course: CourseBundle): ImportPlan {
   const problems: ImportProblem[] = [];
   const notes: string[] = [];
   const notStored: string[] = [];
+  if (course.examNote) notes.push(course.examNote);
 
   // Concepts: weights renormalised; position from studyOrder when the map has one.
   const total = seed.concepts.reduce((s, c) => s + c.weight, 0);
@@ -846,19 +937,25 @@ export function planImport(course: CourseBundle): ImportPlan {
  */
 function aiPolicyFor(account: CourseBundle["account"], notes: string[], notStored: string[]): ImportPlan["aiPolicy"] {
   if (!account) return null;
-  let aiPolicy: ImportPlan["aiPolicy"] = null;
-  const { aiAllowed, scope } = account;
-  if (aiAllowed === true) aiPolicy = { aiAssignments: "allowed", aiStudy: "allowed" };
-  else if (aiAllowed === false && scope === "assignments") {
-    // No help with assignments; studying the slides with AI is fine.
-    aiPolicy = { aiAssignments: "off", aiStudy: "allowed" };
-  } else if (aiAllowed === false) {
-    // No scope (or one we do not know): the safe reading is no AI at all for this course.
-    aiPolicy = { aiAssignments: "off", aiStudy: "not_allowed" };
-    if (scope !== undefined) notes.push(`account.json AI scope "${scope}" is not known; treated as no AI for this course.`);
-  }
+  const aiPolicy = aiRuleFor(account.aiAllowed, account.scope, notes);
   if (account.other.length) notStored.push(`account.json fields ${account.other.join(", ")} are not stored.`);
   return aiPolicy;
+}
+
+/**
+ * One course's AI rule from account.json (either shape) -> M2-27's two columns, or null to
+ * leave her own answer alone. Shared with `seed-account.ts` (M3-57).
+ */
+export function aiRuleFor(aiAllowed: boolean | "unknown" | undefined, scope: string | undefined, notes: string[] = []): ImportPlan["aiPolicy"] {
+  if (aiAllowed === true) return { aiAssignments: "allowed", aiStudy: "allowed" };
+  // No help with assignments; studying the slides with AI is fine.
+  if (aiAllowed === false && scope === "assignments") return { aiAssignments: "off", aiStudy: "allowed" };
+  if (aiAllowed === false) {
+    // No scope (or one we do not know): the safe reading is no AI at all for this course.
+    if (scope !== undefined) notes.push(`account.json AI scope "${scope}" is not known; treated as no AI for this course.`);
+    return { aiAssignments: "off", aiStudy: "not_allowed" };
+  }
+  return null;
 }
 
 /** A study-only course's plan: its lectures and pages, and what is left out. */

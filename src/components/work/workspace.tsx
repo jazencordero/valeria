@@ -112,6 +112,11 @@ export type WorkspaceProps = {
   maxFiles: number | null;
   lms: string;
   lmsUrl: string;
+  /**
+   * False when she has no Moodle connection (an account seeded from files, M3-57): every
+   * hand-in becomes "Connect <LMS> to hand in", a link to /connect. Default true.
+   */
+  connected?: boolean;
   /** The course's `ai_assignments`. */
   aiAssignments: AiAssignments;
   /** Stores her answer to the policy card. Usually the bound server action. */
@@ -439,6 +444,8 @@ function LiveAssistant({ text, complete }: { text: string; complete: boolean }) 
 /* ---------- The workspace ---------- */
 
 const WIDE_PAD = "min-[700px]:px-[max(48px,calc((100%-720px)/2))]";
+/** Where "Connect <LMS> to hand in" goes (M3-57). */
+const CONNECT_HREF = "/connect";
 
 type HandinFrom = "draft" | "file";
 
@@ -455,6 +462,7 @@ export function Workspace({
   maxFiles,
   lms,
   lmsUrl,
+  connected = true,
   aiAssignments,
   setPolicy,
   messages: stored,
@@ -674,7 +682,10 @@ export function Workspace({
   });
   const onSuggestion = (label: string) => {
     if (label === "Back to home") router.push(homeHref);
-    else if (label === `Hand in to ${lms}`) void handInDraft();
+    else if (label === `Hand in to ${lms}`) {
+      if (connected) void handInDraft();
+      else router.push(CONNECT_HREF);
+    }
     else void send(label);
   };
 
@@ -688,11 +699,24 @@ export function Workspace({
   }));
 
   const draftCard = (d: { title: string; markdown?: string }) => (
-    <DraftCard title={d.title} markdown={d.markdown} onHandIn={() => void handInDraft()} className="mt-[-6px]" />
+    <DraftCard
+      title={d.title}
+      markdown={d.markdown}
+      onHandIn={() => (connected ? void handInDraft() : router.push(CONNECT_HREF))}
+      className="mt-[-6px]"
+    />
   );
 
-  const ownFilePart =
-    handed || !acceptsFiles ? null : (
+  // No Moodle connection (M3-57): where the hand-in would be, the way to connect.
+  const connectPart = (
+    <section aria-label="Hand in" className="grid gap-4">
+      <Button block size="lg" href={CONNECT_HREF} data-testid="handin-connect">
+        Connect {lms} to hand in
+      </Button>
+    </section>
+  );
+
+  const ownFilePart = handed ? null : !connected ? connectPart : !acceptsFiles ? null : (
       <section aria-label="Hand in" className="grid gap-4">
         <FilePick
           lms={lms}
@@ -838,7 +862,17 @@ export function Workspace({
                 lastInput={lastInput}
               />
               <Composer busy={replying} onSend={(text) => void send(text)} onInput={() => setLastInput((n) => n + 1)} />
-              {!handed && acceptsFiles && !ownFile ? (
+              {!handed && !connected ? (
+                <p className="mt-2 text-center text-[13px]">
+                  <a
+                    href={CONNECT_HREF}
+                    className="text-ink-3 underline decoration-line underline-offset-2 hover:text-ink-2"
+                    data-testid="handin-connect"
+                  >
+                    Connect {lms} to hand in
+                  </a>
+                </p>
+              ) : !handed && acceptsFiles && !ownFile ? (
                 <p className="mt-2 text-center text-[13px]">
                   <button
                     type="button"
@@ -860,7 +894,7 @@ export function Workspace({
               {policyCard}
               {brief ? <Brief brief={brief} lmsName={lms} sourceUrl={lmsUrl} /> : null}
               {receipt}
-              {handed ? null : acceptsFiles ? (
+              {handed ? null : acceptsFiles || !connected ? (
                 ownFilePart
               ) : (
                 <p className="text-[15px] text-ink-2">

@@ -426,3 +426,40 @@ describe("syncAssignments", () => {
     expect({ rows: await rowsOf(userId), files: await filesOf(userId) }).toEqual(before);
   }, SLOW);
 });
+
+describe("syncAssignments: an assignment seeded before she connected (M3-57)", () => {
+  it("takes over the one seeded row of the same name in the course, so no second row appears", async () => {
+    const userId = await connectedUser();
+    const { deps } = fakeWith();
+    // Which course Moodle puts "Assignment 3" in.
+    const probe = await syncAssignments(userId, t.db, deps);
+    expect(probe.added).toBe(3);
+    const [real] = (await rowsOf(userId)).filter((r) => r.moodleId === 7101);
+    await t.db.delete(assignments).where(eq(assignments.userId, userId));
+
+    const [seeded] = await t.db
+      .insert(assignments)
+      .values({ userId, courseId: real.courseId, moodleId: -777, name: " assignment 3", state: "draft" })
+      .returning();
+    expect(await syncAssignments(userId, t.db, deps)).toEqual({ added: 2, updated: 1 });
+    const rows = await rowsOf(userId);
+    expect(rows).toHaveLength(3);
+    expect(rows.find((r) => r.moodleId === 7101)).toMatchObject({ id: seeded.id, name: "Assignment 3" });
+    expect(rows.some((r) => r.moodleId < 0)).toBe(false);
+    expect(await syncAssignments(userId, t.db, deps)).toEqual({ added: 0, updated: 0 });
+  }, SLOW);
+
+  it("takes none over when two seeded rows share the name", async () => {
+    const userId = await connectedUser();
+    const { deps } = fakeWith();
+    await syncAssignments(userId, t.db, deps);
+    const [real] = (await rowsOf(userId)).filter((r) => r.moodleId === 7101);
+    await t.db.delete(assignments).where(eq(assignments.userId, userId));
+    await t.db.insert(assignments).values([
+      { userId, courseId: real.courseId, moodleId: -1, name: "Assignment 3" },
+      { userId, courseId: real.courseId, moodleId: -2, name: "Assignment 3" },
+    ]);
+    expect(await syncAssignments(userId, t.db, deps)).toEqual({ added: 3, updated: 0 });
+    expect((await rowsOf(userId)).filter((r) => r.moodleId < 0)).toHaveLength(2);
+  }, SLOW);
+});

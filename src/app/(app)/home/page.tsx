@@ -288,7 +288,9 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
   const now = new Date();
   const flash = await readFlash(now);
   const view = await getHomeView(user.id, { now, flash });
-  if (!view.connection) redirect("/connect");
+  // An account seeded from files (M3-57) has courses but no connection yet: it stays on Home.
+  const seeded = Boolean((user.settings as { seededFrom?: unknown } | null)?.seededFrom);
+  if (!view.connection && !seeded) redirect("/connect");
   // The hand-in she has just made, when Home should rearrange itself for it (M4-12).
   const handed = flash?.kind === "handedIn" && !fast && !arrive && view.lastDone?.dueAt ? view.lastDone : null;
   const handedDue = handed?.dueAt ?? null;
@@ -308,7 +310,7 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
           Home
         </h1>
 
-        {view.connection.status === "expired" && (
+        {view.connection?.status === "expired" && (
           <Link
             href="/connect"
             className="mt-4 block rounded-[14px] bg-butter px-4 py-3 text-[15px] font-medium text-ink"

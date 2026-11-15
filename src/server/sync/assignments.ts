@@ -37,6 +37,14 @@
  * - Moodle is read in full before anything is written: a failed read changes
  *   nothing. All writes are one transaction.
  *
+ * - Take-over (M3-57): an assignment Moodle returns that we do not store by its id, while
+ *   her course holds exactly one seeded assignment with no Moodle id (negative
+ *   `moodle_id`, see src/server/study/seed-account.ts) of the same name (trimmed, any
+ *   case), is that row: it gets the real `moodle_id` and Moodle's values, so no second row
+ *   appears and its chat, draft and hand-ins stay attached. Seeded rows whose file gave a
+ *   Moodle id already carry the real one and match as usual. Two seeded rows of one name:
+ *   none is taken over; the new one is added beside them.
+ *
  * Cut: no time estimate (`estimate_min` stays null until M2-12). A new attempt
  * opened after grading is not noticed. An attachment the teacher removes stays
  * in `course_files`. A replaced attachment (same name, new size) keeps its old
@@ -130,7 +138,20 @@ export async function syncAssignments(
     for (const a of seen.values()) {
       const courseId = courseIdOf.get(a.courseMoodleId);
       if (!courseId) continue;
-      const row = rowOf.get(a.moodleId);
+      let row = rowOf.get(a.moodleId);
+      let tookOver = false;
+      if (!row) {
+        // M3-57: an assignment seeded from files before she connected, with no Moodle id
+        // (negative moodle_id), becomes this one when it is the only one of that name in the course.
+        const name = a.name.trim().toLowerCase();
+        const seeded = existing.filter((r) => r.moodleId < 0 && r.courseId === courseId && r.name.trim().toLowerCase() === name);
+        if (seeded.length === 1) {
+          row = seeded[0];
+          await tx.update(assignments).set({ moodleId: a.moodleId }).where(eq(assignments.id, row.id));
+          row.moodleId = a.moodleId;
+          tookOver = true;
+        }
+      }
       const status = statusOf.get(a.moodleId);
 
       const fromMoodle = {
@@ -200,8 +221,8 @@ export async function syncAssignments(
             .update(assignments)
             .set({ ...fromMoodle, state, submittedAt })
             .where(eq(assignments.id, row.id));
-          updated += 1;
         }
+        if (!same || tookOver) updated += 1;
       }
 
       const done = new Set<string>();

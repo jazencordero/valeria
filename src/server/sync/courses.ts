@@ -15,6 +15,12 @@
  * - `updated` counts rows that already existed and changed (name, short name,
  *   code, or shown again). `hidden` counts rows hidden by this run only.
  *
+ * - Take-over (M3-57): a course Moodle returns that we do not store by its id, whose code
+ *   matches exactly one of her seeded courses (negative `moodle_id`, made by
+ *   src/server/study/seed-account.ts before she connected), is that row: it gets the real
+ *   `moodle_id`, name and short name and keeps its colour, so there is no second row and
+ *   everything hanging off it stays. It counts as `updated`.
+ *
  * Cut: no past-semester filtering; every course Moodle returns is shown.
  */
 import { and, eq, inArray } from "drizzle-orm";
@@ -77,11 +83,31 @@ export async function syncCourses(
     const existing = await tx.select().from(courses).where(eq(courses.userId, userId));
     const byMoodleId = new Map(existing.map((row) => [row.moodleId, row]));
 
+    // M3-57: courses seeded from files before she connected have a negative moodle_id.
+    const norm = (code: string) => code.trim().toUpperCase();
+    const seededByCode = new Map<string, (typeof existing)[number][]>();
+    for (const row of existing) {
+      if (row.moodleId >= 0 || !row.code) continue;
+      seededByCode.set(norm(row.code), [...(seededByCode.get(norm(row.code)) ?? []), row]);
+    }
+
     let updated = 0;
     const fresh: Course[] = [];
     for (const course of seen.values()) {
       const row = byMoodleId.get(course.moodleId);
       if (!row) {
+        const seeded = course.code ? seededByCode.get(norm(course.code)) : undefined;
+        if (seeded?.length === 1) {
+          // Take the seeded row over: same row, the real id, so her assignments, exams and cards stay.
+          seededByCode.delete(norm(course.code!));
+          await tx
+            .update(courses)
+            .set({ moodleId: course.moodleId, name: course.name, shortName: course.shortName, code: course.code, hidden: false })
+            .where(eq(courses.id, seeded[0].id));
+          seeded[0].moodleId = course.moodleId;
+          updated += 1;
+          continue;
+        }
         fresh.push(course);
         continue;
       }

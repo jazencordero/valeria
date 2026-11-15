@@ -24,6 +24,7 @@ import type { AiAssignments } from "@/lib/ai-policy";
 import { cleanBrief, type CleanBrief } from "@/lib/html/clean";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courseFiles, courses } from "@/server/db/schema/courses";
+import { moodleConnections } from "@/server/db/schema/moodle";
 import { assignments, chats, drafts } from "@/server/db/schema/work";
 import { listMessages, type ChatPart } from "@/server/chat/store";
 import { LMS_NAME, lmsAssignmentUrl } from "@/server/handin/prepare";
@@ -75,6 +76,11 @@ export type AssignmentPage = {
   lms: string;
   /** This assignment on the LMS (its own page, or its course page). */
   lmsUrl: string;
+  /**
+   * Whether she has a Moodle connection. False for an account seeded from files (M3-57):
+   * its assignments are read-only and the page offers "Connect <LMS> to hand in".
+   */
+  connected: boolean;
 };
 
 export async function getAssignmentPage(
@@ -132,6 +138,12 @@ export async function getAssignmentPage(
     .where(and(eq(drafts.assignmentId, row.id), eq(drafts.userId, userId)))
     .limit(1);
 
+  const [link] = await database
+    .select({ id: moodleConnections.id })
+    .from(moodleConnections)
+    .where(eq(moodleConnections.userId, userId))
+    .limit(1);
+
   const brief = row.introHtml ? cleanBrief(row.introHtml) : null;
   const handedInAt = row.submittedAt ?? (HANDED_IN.has(row.state) ? row.firstSeenAt : null);
 
@@ -161,6 +173,7 @@ export async function getAssignmentPage(
     maxFiles: row.maxFiles,
     lms: LMS_NAME,
     lmsUrl: await lmsAssignmentUrl(userId, { cmid: row.cmid, courseMoodleId: row.courseMoodleId }, database),
+    connected: link !== undefined,
   };
 }
 

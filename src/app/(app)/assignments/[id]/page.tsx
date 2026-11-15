@@ -52,6 +52,7 @@ async function Workspace({ params }: { params: Params }) {
       maxFiles={page.maxFiles}
       lms={lmsNameOf(user)}
       lmsUrl={page.lmsUrl}
+      connected={page.connected}
       aiAssignments={page.aiAssignments}
       setPolicy={setCourseAiPolicy.bind(null, page.courseId)}
       messages={page.messages}

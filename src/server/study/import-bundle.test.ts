@@ -932,3 +932,71 @@ describe("CLI", () => {
     T,
   );
 });
+
+describe("account.json in the M3-57 shape", () => {
+  let newRoot: string;
+  beforeAll(async () => {
+    newRoot = await mkdtemp(path.join(os.tmpdir(), "bundle-new-account-"));
+    // One seed with no exam date, one with no exam at all; account.json holds both exams.
+    await cp(FIXTURE, path.join(newRoot, "TST-E0001"), { recursive: true });
+    const seed = JSON.parse(await readFile(path.join(newRoot, "TST-E0001", "seed.json"), "utf8"));
+    await write(path.join(newRoot, "TST-E0001", "seed.json"), { ...seed, exam: { ...seed.exam, at: null } });
+    await cp(FIXTURE, path.join(newRoot, "TST-E0004"), { recursive: true });
+    const { exam: _exam, ...noExam } = seed;
+    void _exam;
+    await write(path.join(newRoot, "TST-E0004", "seed.json"), noExam);
+    await write(path.join(newRoot, "account.json"), {
+      exams: [
+        { courseCode: "TST-E0001", title: "intro to forecasting FINAL exam", kind: "exam", at: "2026-12-12T09:00:00+02:00", source: "invented" },
+        { courseCode: "TST-E0004", title: "Invented quiz", kind: "quiz", at: "2026-12-14T10:00:00+02:00" },
+        { courseCode: "TST-E0005", title: "Undated", kind: "exam", at: null },
+      ],
+      gradeWeights: [],
+      aiAllowed: [
+        { courseCode: "TST-E0001", allowed: false, scope: "assignments" },
+        { courseCode: "tst-e0004", allowed: true, extra: 1 },
+      ],
+      unknown: [],
+      noExam: [],
+    });
+  });
+  afterAll(async () => {
+    await rm(newRoot, { recursive: true, force: true });
+  });
+
+  it("maps the aiAllowed list like the old record, and still reads the old shape", async () => {
+    const bundle = await loadBundle(newRoot);
+    const one = bundle.courses.find((c) => c.seed.exam.courseCode === "TST-E0001")!;
+    const four = bundle.courses.find((c) => c.seed.exam.courseCode === "TST-E0004")!;
+    expect(planImport(one).aiPolicy).toEqual({ aiAssignments: "off", aiStudy: "allowed" });
+    const p4 = planImport(four);
+    expect(p4.aiPolicy).toEqual({ aiAssignments: "allowed", aiStudy: "allowed" });
+    expect(p4.notStored.join(" ")).toContain("extra");
+    // The old shape (the shared root above) is unchanged.
+    const [old] = (await loadBundle(root, { courses: ["TST-E0001"] })).courses;
+    expect(planImport(old).aiPolicy).toEqual({ aiAssignments: "off", aiStudy: "allowed" });
+  });
+
+  it("fills a seed's missing exam date, or its missing exam, from account.json's exams", async () => {
+    const bundle = await loadBundle(newRoot);
+    const one = planImport(bundle.courses.find((c) => c.seed.exam.courseCode === "TST-E0001")!);
+    expect(one.exam.title).toBe("Intro to Forecasting final exam");
+    expect(one.exam.at).toEqual(new Date("2026-12-12T07:00:00Z"));
+    expect(one.notes.join(" ")).toMatch(/date is from account\.json/);
+    const four = planImport(bundle.courses.find((c) => c.seed.exam.courseCode === "TST-E0004")!);
+    expect(four.exam).toMatchObject({ title: "Invented quiz", kind: "quiz", at: new Date("2026-12-14T08:00:00Z") });
+  });
+
+  it("still refuses a seed with no date when account.json has none for it either", async () => {
+    const lone = await mkdtemp(path.join(os.tmpdir(), "bundle-no-date-"));
+    try {
+      await cp(path.join(newRoot, "TST-E0001"), path.join(lone, "TST-E0001"), { recursive: true });
+      await write(path.join(lone, "account.json"), { exams: [{ courseCode: "TST-E0001", title: "Another exam", at: "2026-12-12T09:00:00Z" }] });
+      const err = await loadBundle(lone).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BundleInvalid);
+      expect((err as BundleInvalid).problems.join(" ")).toContain(NO_EXAM_DATE);
+    } finally {
+      await rm(lone, { recursive: true, force: true });
+    }
+  });
+});

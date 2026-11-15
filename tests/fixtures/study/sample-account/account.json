@@ -1,0 +1,74 @@
+{
+  "pulledAt": "2026-11-15T08:00:00.000Z",
+  "source": "https://moodle.example.test",
+  "courses": [
+    {
+      "code": "TST-E0001",
+      "name": "Intro to Forecasting",
+      "starts": "2026-09-01",
+      "ends": "2026-12-18",
+      "assignments": [
+        {
+          "id": 910001,
+          "cmid": 920001,
+          "name": "Exercise 1: moving averages",
+          "dueAt": "2026-11-20T21:59:00.000Z",
+          "cutoffAt": null,
+          "status": "new",
+          "graded": false,
+          "gradingstatus": "notgraded",
+          "submittedAt": null,
+          "files": [],
+          "requiresSubmitPress": true,
+          "isGroup": false
+        },
+        {
+          "id": 910002,
+          "cmid": 920002,
+          "name": "Exercise 0: warm-up",
+          "dueAt": "2026-11-01T21:59:00.000Z",
+          "cutoffAt": null,
+          "status": "submitted",
+          "graded": true,
+          "gradingstatus": "graded",
+          "submittedAt": "2026-10-30T12:00:00.000Z",
+          "files": [{ "name": "warmup.pdf", "size": 1200 }],
+          "requiresSubmitPress": false,
+          "isGroup": false
+        }
+      ],
+      "calendarNext60Days": [
+        { "id": 930001, "name": "Exercise 1: moving averages is due", "modulename": "assign", "eventtype": "due", "timestart": "2026-11-20T21:59:00.000Z" },
+        { "id": 930002, "name": "Guest lecture on demand planning", "eventtype": "course", "timestart": "2026-11-26T10:00:00.000Z" }
+      ]
+    },
+    {
+      "code": "TST-E0002",
+      "name": "Applied Statistics Lab",
+      "starts": "2026-09-01",
+      "ends": "2026-12-18",
+      "assignments": [
+        {
+          "name": "Lab report 2",
+          "dueAt": "2026-11-24T14:00:00.000Z",
+          "status": "draft"
+        }
+      ],
+      "calendarNext60Days": []
+    },
+    {
+      "code": "TST-E0003",
+      "name": "Service Sketching",
+      "starts": "2026-10-26",
+      "ends": "2026-12-18",
+      "assignments": [],
+      "calendarNext60Days": [
+        { "title": "Studio critique", "at": "2026-12-02T12:00:00.000Z" }
+      ]
+    }
+  ],
+  "gradesFirstCourseOnly": [
+    { "id": 940001, "name": "Exercise 0: warm-up", "itemtype": "mod", "itemmodule": "assign", "score": 9, "max": 10, "percent": 90, "weight": 0.1, "hidden": false, "gradedAt": "2026-11-03T10:00:00.000Z", "isTotal": false }
+  ],
+  "notKnownYet": ["The lab's exam date"]
+}

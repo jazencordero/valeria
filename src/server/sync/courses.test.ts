@@ -201,3 +201,23 @@ describe("syncCourses", () => {
     expect(await rowsOf(userId)).toEqual(before);
   }, SLOW);
 });
+
+describe("syncCourses: a course seeded before she connected (M3-57)", () => {
+  it("takes the seeded row over by its code: same row, the real id, no second row", async () => {
+    const userId = await connectedUser();
+    const made = { ...madeUp(5501), code: "TST-E0001", name: "Made-up course, real name" };
+    const [seeded] = await t.db
+      .insert(courses)
+      .values({ userId, moodleId: -12345, code: "tst-e0001", name: "Made-up course", color: "sky" })
+      .returning();
+    const deps = fakeWith((list) => [...list, made]);
+    const result = await syncCourses(userId, t.db, deps);
+    expect(result.updated).toBe(1);
+    const rows = await rowsOf(userId);
+    const mine = rows.filter((r) => r.code === "TST-E0001");
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ id: seeded.id, moodleId: 5501, name: "Made-up course, real name", color: "sky", hidden: false });
+    // A second run changes nothing.
+    expect((await syncCourses(userId, t.db, deps)).updated).toBe(0);
+  }, SLOW);
+});
