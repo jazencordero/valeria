@@ -50,9 +50,10 @@ export function wholeGrade(trajectory: number | null): number {
 /** Nothing graded yet: the prototype's `soFar(c) == null`. */
 const tooEarly = (c: GradesCardRow) => c.status === "early";
 
-function Scale({ filled, target }: { filled: number; target: number }) {
+/** `target` null: a course marked in points, whose page offers no target, so no step is marked. */
+function Scale({ filled, target }: { filled: number; target: number | null }) {
   return (
-    <span aria-hidden="true" className="inline-flex gap-[3px]" data-filled={filled} data-target={target}>
+    <span aria-hidden="true" className="inline-flex gap-[3px]" data-filled={filled} data-target={target ?? undefined}>
       {[1, 2, 3, 4, 5].map((k) => (
         <i
           key={k}
@@ -118,12 +119,12 @@ export function GradesCard({ courses, lmsName, className = "" }: GradesCardProps
                   {c.trajectory == null ? (
                     <>
                       <span aria-hidden="true">–</span>
-                      <span className="sr-only">no trajectory yet, aiming for {c.target}</span>
+                      <span className="sr-only">no trajectory yet{c.target != null && `, aiming for ${c.target}`}</span>
                     </>
                   ) : (
                     <>
                       {fmt1(c.trajectory)}
-                      <span className="sr-only"> on this trajectory, aiming for {c.target}</span>
+                      <span className="sr-only"> on this trajectory{c.target != null && `, aiming for ${c.target}`}</span>
                     </>
                   )}
                 </span>

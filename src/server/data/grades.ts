@@ -60,7 +60,8 @@ export type GradesListRow = {
   name: string;
   color: CourseColor;
   status: GradeStatus;
-  target: Target;
+  /** Her target, `null` for a course marked in points (its page offers no target, so the row names none). */
+  target: Target | null;
   /** 0..5 on the trajectory, `null` while too early or without weights. */
   trajectory: number | null;
 };
@@ -203,7 +204,7 @@ export async function getGradesList(userId: string, database: Db = defaultDb): P
         name: shortNameOf(course.name),
         color: course.color,
         status,
-        target,
+        target: weightsOnly ? null : target,
         trajectory: listTrajectory(items, status),
       };
     }),

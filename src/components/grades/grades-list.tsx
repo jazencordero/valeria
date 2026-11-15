@@ -118,7 +118,7 @@ export function GradesListView({ overall, courses, lmsName }: GradesListProps) {
                     )}
                     {STATUS_LABEL[c.status]}
                   </span>
-                  <span className="mono text-ink-3">aiming for {c.target}</span>
+                  {c.target != null && <span className="mono text-ink-3">aiming for {c.target}</span>}
                 </span>
               </span>
               <span

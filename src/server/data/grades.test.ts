@@ -222,7 +222,8 @@ describe("grades data", () => {
       ["Invented exercises", 0.27],
     ]);
     const row = (await getGradesList(userId, t.db)).courses.find((c) => c.id === ids[3102])!;
-    expect(row).toMatchObject({ status: "early", trajectory: null });
+    // Its page offers no target, so the row names none ("aiming for 5" would be a target she never saw).
+    expect(row).toMatchObject({ status: "early", trajectory: null, target: null });
 
     // A hand-seeded course in percent (every part out of 100) and a synced course are worked out as before.
     await t.db.update(gradeItems).set({ max: 100 }).where(eq(gradeItems.courseId, ids[3102]));
