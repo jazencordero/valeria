@@ -178,6 +178,10 @@ describe("syncProgress", () => {
     ]);
     expect(await look()).toMatchObject({ stage: "dates", dates: 2 });
 
+    // Dates are in, grades are being read: its own stage, not 'dates' again.
+    await setCursor(userId, { startedAt: Date.now(), done: [1], assignmentsDone: true, datesDone: true, gradesDone: [] });
+    expect(await look()).toMatchObject({ stage: "grades", dates: 2 });
+
     // The sync finished: cursor gone, last_sync_at set, files job queued.
     await setCursor(userId, null);
     await t.db.update(moodleConnections).set({ lastSyncAt: new Date() }).where(eq(moodleConnections.userId, userId));
@@ -191,7 +195,7 @@ describe("syncProgress", () => {
     await t.db.update(jobs).set({ status: "done" }).where(eq(jobs.kind, SYNC_FILES_KIND));
     expect(await look()).toEqual({ stage: "done", courses: ["Forecasting", "Statistics"], files: 2, dates: 2 });
 
-    expect(stages).toEqual(["courses", "assignments", "assignments", "dates", "files", "files", "done"]);
+    expect(stages).toEqual(["courses", "assignments", "assignments", "dates", "grades", "files", "files", "done"]);
     expectInOrder(stages);
   });
 

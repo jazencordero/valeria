@@ -19,7 +19,8 @@
  * `stage` is the step being worked on now, taken from the sync's own state,
  * not guessed from counts where that state exists:
  * 1. A sync cursor in `users.settings.syncCursor` (./run): an unfinished sync.
- *    `assignmentsDone` set means 'dates', otherwise 'assignments'.
+ *    `datesDone` set means 'grades' (only her grades are left), `assignmentsDone`
+ *    alone means 'dates', otherwise 'assignments'.
  * 2. No cursor, `moodle_connections.last_sync_at` set (a sync finished): her
  *    `sync-files` job (./files) still queued or running means 'files',
  *    otherwise 'done'. A failed files job also counts as 'done': it will not
@@ -30,10 +31,10 @@
  *    when it runs out of time, so a fast Moodle finishes courses, assignments
  *    and dates in one call and the cursor is never seen.
  *
- * So the order she sees is courses, assignments, dates, files, done
- * (`STAGE_ORDER`). Dates come before files because that is the order the sync
- * runs in: `syncNow` syncs the dates, then marks itself finished and adds the
- * `sync-files` job. Stages can be skipped between two polls, never go back
+ * So the order she sees is courses, assignments, dates, grades, files, done
+ * (`STAGE_ORDER`). Dates and grades come before files because that is the
+ * order the sync runs in: `syncNow` syncs the dates, then the grades, then
+ * marks itself finished and adds the `sync-files` job. Stages can be skipped between two polls, never go back
  * during one first sync. 'done' means: the sync finished and her course files
  * are listed (or listing them failed for good).
  *
@@ -82,10 +83,10 @@ import { NotConnected } from "./courses";
 import { SYNC_FILES_KIND, syncFiles, type SyncFilesDeps } from "./files";
 import { cursorFrom, syncNow, type SyncNowDeps } from "./run";
 
-export type SyncStage = "courses" | "assignments" | "files" | "dates" | "done";
+export type SyncStage = "courses" | "assignments" | "dates" | "grades" | "files" | "done";
 
-/** The order the stages happen in (see the header: dates before files). */
-export const STAGE_ORDER: readonly SyncStage[] = ["courses", "assignments", "dates", "files", "done"];
+/** The order the stages happen in (see the header: dates and grades before files). */
+export const STAGE_ORDER: readonly SyncStage[] = ["courses", "assignments", "dates", "grades", "files", "done"];
 
 export type SyncProgress = {
   stage: SyncStage;
@@ -133,7 +134,7 @@ export async function syncProgress(userId: string, database: Db = defaultDb): Pr
   const names = courseRows.map((c) => c.name);
   const cursor = cursorFrom(me?.settings);
   let stage: SyncStage;
-  if (cursor) stage = cursor.assignmentsDone ? "dates" : "assignments";
+  if (cursor) stage = cursor.datesDone ? "grades" : cursor.assignmentsDone ? "dates" : "assignments";
   else if (link?.lastSyncAt) stage = filesJob ? "files" : "done";
   else stage = names.length > 0 ? "assignments" : "courses";
 
