@@ -31,6 +31,7 @@ import { z } from "zod";
 import { pagesFromBytes } from "@/server/files/extract";
 import { PROVIDERS, type ProviderEntry, type SizeClass } from "@/server/ai/providers.config";
 import { createRouter, AiBusy } from "@/server/ai/router";
+import { providerCooldowns } from "@/server/db/schema/system";
 import { createTestDb } from "@/server/db/test-db";
 import type { Db } from "@/server/db/client";
 
@@ -42,6 +43,8 @@ type Args = {
   aiAllowed: boolean;
   count: number;
   maxChars: number;
+  maxChunks: number;
+  maxTokens: number;
   sizes: SizeClass[];
   out: string;
 };
@@ -56,8 +59,10 @@ function usage(message?: string): never {
       "  --ai-allowed     required for a real run: the course these lectures belong to allows AI help",
       "  --fake           use the fake AI server instead of real providers (no keys, nothing leaves the machine)",
       "  --count N        cards per lecture (default 12)",
-      "  --max-chars N    lecture text sent per request, in characters (default 16000, about 4,000 tokens;",
-      "                   Groq's free plan allows 8,000 tokens a minute per model)",
+      "  --max-chars N    lecture text sent per request, in characters (default 10000, about 3,000 tokens;",
+      "                   Groq's free plan allows 8,000 tokens a minute per model, reply included)",
+      "  --max-chunks N   a long lecture is split into at most N requests, cards spread over them (default 3)",
+      "  --max-tokens N   reply length cap sent to the model (default 3000; Groq counts it against the minute limit)",
       "  --sizes a,b      size classes to try (default small,medium)",
       "  --out DIR        where to write card-eval.md and card-review.md",
     ].join("\n"),
@@ -72,7 +77,9 @@ function parseArgs(argv: string[]): Args {
     fake: false,
     aiAllowed: false,
     count: 12,
-    maxChars: 16_000,
+    maxChars: 10_000,
+    maxChunks: 3,
+    maxTokens: 3_000,
     sizes: ["small", "medium"],
   };
   while (rest.length) {
@@ -81,6 +88,8 @@ function parseArgs(argv: string[]): Args {
     else if (arg === "--ai-allowed") a.aiAllowed = true;
     else if (arg === "--count") a.count = positiveInt(rest.shift(), "--count");
     else if (arg === "--max-chars") a.maxChars = positiveInt(rest.shift(), "--max-chars");
+    else if (arg === "--max-chunks") a.maxChunks = positiveInt(rest.shift(), "--max-chunks");
+    else if (arg === "--max-tokens") a.maxTokens = positiveInt(rest.shift(), "--max-tokens");
     else if (arg === "--sizes") {
       const sizes = (rest.shift() ?? "").split(",").filter(Boolean);
       for (const s of sizes) if (!(s in PROVIDERS)) usage(`Unknown size class: ${s}`);
@@ -117,8 +126,8 @@ const SOURCE_RE = /^Lecture (\d+), slides? (\d+)(?: (?:to|-|–) (\d+))?$/;
 
 const base = {
   concept: z.string().min(1).max(60),
-  rung: z.number().int().min(1).max(5),
-  boss: z.boolean(),
+  rung: z.coerce.number().int().min(1).max(5),
+  boss: z.boolean().default(false),
   q: z.string().min(8),
   why: z.string().min(1).optional(),
   source: z.string().regex(SOURCE_RE),
@@ -130,9 +139,9 @@ export const CardSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("mcq"),
     ...base,
-    why: z.string().min(1),
     opts: z
-      .array(z.tuple([z.string().min(1), z.boolean()]))
+      // Some models write the flag as "true"/"false"; that is accepted (the app repairs such replies too).
+      .array(z.tuple([z.string().min(1), z.union([z.boolean(), z.enum(["true", "false"]).transform((v) => v === "true")])]))
       .min(3)
       .max(5)
       .refine((o) => o.filter(([, ok]) => ok).length === 1, "exactly one option is right"),
@@ -140,6 +149,8 @@ export const CardSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("match"),
     ...base,
+    // The question is the same for every match card; the prototype's wording when a model leaves it out.
+    q: z.string().min(1).default("Match each term to what it means."),
     pairs: z.array(z.tuple([z.string().min(1), z.string().min(1)])).min(3).max(5),
   }),
   z.object({
@@ -172,19 +183,86 @@ async function readLectures(folder: string): Promise<Lecture[]> {
   return lectures;
 }
 
-/** The slides as the prompt shows them, cut at whole slides once `maxChars` is reached. */
-function slidesText(lecture: Lecture, maxChars: number): { text: string; slides: number; cut: boolean } {
-  const parts: string[] = [];
+type Chunk = { text: string; slides: number };
+
+/**
+ * The lecture as the prompt shows it, split at whole slides into pieces of at most `maxChars`,
+ * so each request fits a free model's per-minute token limit. A lecture with more pieces than
+ * `maxChunks` keeps `maxChunks` of them, spread evenly over the lecture.
+ */
+function lectureChunks(lecture: Lecture, maxChars: number, maxChunks: number): { chunks: Chunk[]; all: number } {
+  const chunks: Chunk[] = [];
+  let parts: string[] = [];
   let used = 0;
   for (const p of lecture.pages) {
-    const block = `[Slide ${p.page}]\n${p.text.replace(/\s+\n/g, "\n").trim()}\n`;
+    const block = `[Slide ${p.page}]\n${p.text.replace(/\s+\n/g, "\n").trim()}\n`.slice(0, maxChars);
     if (used + block.length > maxChars && parts.length > 0) {
-      return { text: parts.join("\n"), slides: parts.length, cut: true };
+      chunks.push({ text: parts.join("\n"), slides: parts.length });
+      parts = [];
+      used = 0;
     }
-    parts.push(block.slice(0, maxChars));
+    parts.push(block);
     used += block.length;
   }
-  return { text: parts.join("\n"), slides: parts.length, cut: false };
+  if (parts.length) chunks.push({ text: parts.join("\n"), slides: parts.length });
+  const all = chunks.length;
+  return { chunks: all <= maxChunks ? chunks : sample(chunks, maxChunks), all };
+}
+
+/** `count` cards spread over `n` requests, at least one each. */
+function cardsPerChunk(count: number, n: number): number[] {
+  return Array.from({ length: n }, (_, i) => Math.max(1, Math.floor(((i + 1) * count) / n) - Math.floor((i * count) / n)));
+}
+
+// ---------- seeing why a call failed ----------
+
+type CallFailure = { status: number; message: string };
+
+/**
+ * Wraps fetch for one model: caps the reply length (`max_tokens`, which Groq counts against its
+ * per-minute limit when it is missing) and keeps the status and the provider's error message of
+ * the last failed call. The request body is never kept or printed (it holds lecture text), and
+ * anything that looks like a key is masked out of the error message.
+ */
+function watchedFetch(base: typeof globalThis.fetch, maxTokens: number, extra: Record<string, unknown> = {}) {
+  const state: { last?: CallFailure; maxTokens: number } = { maxTokens };
+  const fetchFn: typeof globalThis.fetch = async (input, init) => {
+    let body = init?.body;
+    if (typeof body === "string" && body.startsWith("{")) {
+      try {
+        const json = JSON.parse(body) as Record<string, unknown>;
+        if (json.max_tokens === undefined && json.max_completion_tokens === undefined) json.max_tokens = state.maxTokens;
+        Object.assign(json, extra);
+        body = JSON.stringify(json);
+      } catch {
+        // leave the body as it is
+      }
+    }
+    let res: Response;
+    try {
+      res = await base(input, { ...init, body });
+    } catch (error) {
+      state.last = { status: 0, message: `network error: ${error instanceof Error ? error.message : "unknown"}` };
+      throw error;
+    }
+    if (!res.ok) {
+      const text = await res.clone().text().catch(() => "");
+      let message = text;
+      try {
+        const j = JSON.parse(text) as { error?: { message?: string; code?: unknown; metadata?: { raw?: string } } | string; message?: string };
+        message = typeof j.error === "string" ? j.error : (j.error?.message ?? j.message ?? text);
+        if (typeof j.error === "object" && j.error?.metadata?.raw) message += ` (${j.error.metadata.raw})`;
+      } catch {
+        // not JSON
+      }
+      state.last = {
+        status: res.status,
+        message: message.replace(/(sk-|gsk_|Bearer\s+)[A-Za-z0-9_\-.]+/g, "$1***").replace(/\s+/g, " ").slice(0, 300),
+      };
+    }
+    return res;
+  };
+  return { fetch: fetchFn, state };
 }
 
 // ---------- the prompt ----------
@@ -311,16 +389,52 @@ type ModelRun = {
   duplicates: number;
   seconds: number[];
   errors: string[];
+  /** The first reason a card failed the schema, and the keys of one card as the model sent them. */
+  schemaIssue?: string;
+  replyShape?: string;
+  /** The first reply that was not JSON, as its first characters with letters replaced, to show its shape. */
+  notJson?: string;
   cards: CardResult[];
   tokensPerLecture: number[];
 };
 
 /** Free-plan daily limits beyond requests, from context/ai/providers.md (checked 2026-11-14). */
 const TOKENS_PER_DAY: Partial<Record<ProviderEntry["provider"], number>> = { groq: 200_000 };
-/** Pause between two calls to the same provider, so a run stays inside per-minute limits. */
-const GAP_MS: Record<ProviderEntry["provider"], number> = { groq: 61_000, openrouter: 3_500, cloudflare: 1_000 };
+/** Pause between two calls to the same model, so a run stays inside per-minute limits. */
+const GAP_MS: Record<ProviderEntry["provider"], number> = { groq: 30_000, openrouter: 3_500, cloudflare: 1_000 };
+
+/**
+ * Per-model request fields. Reasoning models spend reply tokens on thinking, which cut cards off
+ * mid-JSON under the free reply caps, so thinking is turned down where Groq allows it
+ * (console.groq.com/docs/reasoning: gpt-oss takes reasoning_effort low/medium/high, Qwen 3 takes none/default).
+ */
+function requestExtras(entry: ProviderEntry): Record<string, unknown> {
+  if (entry.provider !== "groq") return {};
+  if (entry.model.startsWith("openai/gpt-oss")) return { reasoning_effort: "low" };
+  if (entry.model.startsWith("qwen/qwen3")) return { reasoning_effort: "none" };
+  return {};
+}
+
+/** Pause between two calls to one model: Groq's free minute limits (8K tokens; Qwen 1K reply tokens). */
+function gapFor(entry: ProviderEntry): number {
+  if (entry.provider === "groq") return entry.model.startsWith("qwen/") ? 61_000 : 40_000;
+  return GAP_MS[entry.provider];
+}
+
+/** Roughly how many reply tokens one card takes, to size requests to a reply cap. */
+const TOKENS_PER_CARD = 140;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Letters become x, digits 9: shows the shape of a reply without its content. */
+const shapeOf = (s: string) => s.slice(0, 160).replace(/\p{L}/gu, "x").replace(/\p{N}/gu, "9").replace(/\s+/g, " ");
+
+function cardShape(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return typeof raw;
+  return Object.entries(raw as Record<string, unknown>)
+    .map(([k, v]) => `${k}: ${Array.isArray(v) ? `array(${v.length})` : v === null ? "null" : typeof v}`)
+    .join(", ");
+}
 
 async function runModel(
   size: SizeClass,
@@ -329,7 +443,6 @@ async function runModel(
   prompt: Prompt,
   args: Args,
   deps: { env: Record<string, string | undefined>; baseUrlFor?: (e: ProviderEntry) => string; database: Db },
-  lastCall: Map<string, number>,
 ): Promise<ModelRun> {
   const run: ModelRun = {
     entry,
@@ -350,62 +463,122 @@ async function runModel(
     run.skipped = `no ${entry.envKey}${entry.accountEnvKey ? ` / ${entry.accountEnvKey}` : ""} in the environment`;
     return run;
   }
+  const watched = watchedFetch(globalThis.fetch, args.maxTokens, args.fake ? {} : requestExtras(entry));
   const router = createRouter({
     providers: { small: [entry], medium: [], large: [] },
     env: deps.env,
     database: deps.database,
     baseUrlFor: deps.baseUrlFor,
+    fetch: watched.fetch,
   });
+  let lastCall = 0;
 
   for (const lecture of lectures) {
-    const slides = slidesText(lecture, args.maxChars);
-    const user = fill(prompt.user, {
-      lecture: String(lecture.n),
-      title: lecture.title,
-      slides: slides.text,
-      count: String(args.count),
-    });
-    if (!args.fake) {
-      const wait = (lastCall.get(entry.provider) ?? 0) + GAP_MS[entry.provider] - Date.now();
-      if (wait > 0) await sleep(wait);
-    }
-    run.calls += 1;
-    run.asked += args.count;
-    const started = Date.now();
-    let text: string;
-    try {
-      ({ text } = await router.runText({
-        size: "small",
-        system: prompt.system,
-        messages: [{ role: "user", content: user }],
-        job: "eval-cards",
-      }));
-    } catch (error) {
-      lastCall.set(entry.provider, Date.now());
-      run.errors.push(`Lecture ${lecture.n}: ${error instanceof AiBusy ? "rate-limited or provider error" : (error as Error).name}`);
-      continue;
-    }
-    lastCall.set(entry.provider, Date.now());
-    run.seconds.push((Date.now() - started) / 1000);
-    run.tokensPerLecture.push(Math.round((prompt.system.length + user.length + text.length) / 4));
-
-    const parsed = parseReply(text);
-    if (!parsed) continue;
-    run.jsonOk += 1;
-    run.returned += parsed.cards.length;
+   for (let pass = 1; pass <= 2; pass++) {
+    // As many cards per request as fit the reply cap; a smaller cap means more, shorter requests.
+    const cap = Math.max(1, Math.floor(watched.state.maxTokens / TOKENS_PER_CARD));
+    const need = Math.ceil(args.count / cap);
+    const total = lecture.pages.reduce((n, p) => n + p.text.length + 12, 0);
+    const maxChars = Math.min(args.maxChars, Math.ceil(total / need) + 300);
+    const { chunks } = lectureChunks(lecture, maxChars, Math.max(args.maxChunks, need));
+    const counts = cardsPerChunk(Math.min(args.count, chunks.length * cap), chunks.length);
+    let lectureTokens = 0;
+    let lectureSeconds = 0;
+    let shrunk = false;
     const kept: Card[] = [];
-    for (const raw of parsed.cards) {
-      const checked = CardSchema.safeParse(raw);
-      if (!checked.success) continue;
-      const card = checked.data;
-      run.schemaOk += 1;
-      const source = checkSource(card, lecture);
-      if (source === "ok") run.sourceOk += 1;
-      const duplicate = isDuplicate(card, kept);
-      if (duplicate) run.duplicates += 1;
-      kept.push(card);
-      run.cards.push({ card, lecture: lecture.n, source, duplicate });
+    for (const [k, chunk] of chunks.entries()) {
+      const user = fill(prompt.user, {
+        lecture: String(lecture.n),
+        title: lecture.title,
+        slides: chunk.text,
+        count: String(counts[k]),
+      });
+      run.asked += counts[k];
+      let text: string | undefined;
+      for (let attempt = 1; attempt <= 2 && text === undefined; attempt++) {
+        if (!args.fake) {
+          const wait = lastCall + gapFor(entry) - Date.now();
+          if (wait > 0) await sleep(wait);
+        }
+        run.calls += 1;
+        watched.state.last = undefined;
+        // Each call is measured on its own: drop the router's cool-down from an earlier 429.
+        await deps.database.delete(providerCooldowns);
+        const started = Date.now();
+        try {
+          ({ text } = await router.runText({
+            size: "small",
+            system: prompt.system,
+            messages: [{ role: "user", content: user }],
+            job: "eval-cards",
+          }));
+          lectureSeconds += (Date.now() - started) / 1000;
+        } catch (error) {
+          const last = watched.state.last as CallFailure | undefined;
+          const why = last
+            ? `HTTP ${last.status}: ${last.message}`
+            : error instanceof AiBusy
+              ? "no provider answered"
+              : `${(error as Error).name}: ${(error as Error).message}`.slice(0, 200);
+          run.errors.push(`Lecture ${lecture.n} part ${k + 1}, try ${attempt}: ${why}`);
+          // One retry after a rate limit; the router has put the provider in a cool-down, so start fresh.
+          // Groq states a per-minute cap on reply tokens (OTPM); adopt it and redo the lecture in smaller requests.
+          const otpm = last?.message.match(/output tokens per minute \(OTPM\): Limit (\d+)/);
+          if (otpm && Number(otpm[1]) < watched.state.maxTokens) {
+            watched.state.maxTokens = Math.max(200, Number(otpm[1]) - 24);
+            if (k === 0 && pass === 1) {
+              run.asked -= counts[k];
+              shrunk = true;
+              await deps.database.delete(providerCooldowns);
+              break;
+            }
+          }
+          if (last?.status === 429 && attempt === 1 && !args.fake) {
+            await deps.database.delete(providerCooldowns);
+            await sleep(62_000);
+          } else {
+            attempt = 3;
+          }
+        } finally {
+          lastCall = Date.now();
+        }
+      }
+      if (shrunk) break;
+      if (text === undefined) continue;
+      lectureTokens += Math.round((prompt.system.length + user.length + text.length) / 3);
+
+      const parsed = parseReply(text);
+      if (!parsed) {
+        run.notJson ??= shapeOf(text);
+        continue;
+      }
+      run.jsonOk += 1;
+      run.returned += parsed.cards.length;
+      for (const raw of parsed.cards) {
+        const checked = CardSchema.safeParse(raw);
+        if (!checked.success) {
+          if (!run.schemaIssue) {
+            const issue = checked.error.issues[0];
+            run.schemaIssue = `${issue.path.join(".") || "(card)"}: ${issue.message}`;
+            run.replyShape = cardShape(raw);
+          }
+          continue;
+        }
+        const card = checked.data;
+        run.schemaOk += 1;
+        const source = checkSource(card, lecture);
+        if (source === "ok") run.sourceOk += 1;
+        const duplicate = isDuplicate(card, kept);
+        if (duplicate) run.duplicates += 1;
+        kept.push(card);
+        run.cards.push({ card, lecture: lecture.n, source, duplicate });
+      }
     }
+    if (shrunk) continue;
+    if (lectureSeconds > 0) run.seconds.push(lectureSeconds);
+    if (lectureTokens > 0) run.tokensPerLecture.push(lectureTokens);
+    break;
+   }
   }
   return run;
 }
@@ -471,8 +644,11 @@ function evalReport(runs: ModelRun[], lectures: Lecture[], args: Args): string {
       ? "> **FAKE RUN.** Every answer came from the fake AI server (tests/fake-ai/server.ts). These numbers prove the script, not the models."
       : `> Real run on ${date}. ${lectures.length} lecture PDF(s) read from a folder outside the repo; neither the PDFs nor their text are stored here. Not committed until Jazen has looked.`,
     "",
-    `Made by \`scripts/ai/eval-cards.ts\` with \`scripts/ai/card-prompt.md\`. ${args.count} cards asked per lecture, up to ${args.maxChars.toLocaleString("en")} characters of slide text per request. Lectures: ${lectures
-      .map((l) => `${l.n} (${l.pages.length} slides with text${slidesText(l, args.maxChars).cut ? `, cut to ${slidesText(l, args.maxChars).slides}` : ""})`)
+    `Made by \`scripts/ai/eval-cards.ts\` with \`scripts/ai/card-prompt.md\`. ${args.count} cards asked per lecture, spread over requests of at most ${args.maxChars.toLocaleString("en")} characters of slide text (at most ${args.maxChunks} requests per lecture; reply capped at ${args.maxTokens.toLocaleString("en")} tokens). Lectures: ${lectures
+      .map((l) => {
+        const { chunks, all } = lectureChunks(l, args.maxChars, args.maxChunks);
+        return `${l.n} (${l.pages.length} slides with text, ${chunks.length} request${chunks.length === 1 ? "" : "s"}${all > chunks.length ? `, ${all - chunks.length} of ${all} parts left out` : ""})`;
+      })
       .join(", ")}.`,
     "",
     pick(runs),
@@ -498,7 +674,9 @@ function evalReport(runs: ModelRun[], lectures: Lecture[], args: Args): string {
       `| Lectures that fit in the free daily limit | ${lecturesPerDay(r)} |`,
       "",
     );
-    if (r.errors.length) out.push(`Errors: ${r.errors.join("; ")}.`, "");
+    if (r.errors.length) out.push("Failed calls:", "", ...r.errors.map((e) => `- ${e}`), "");
+    if (r.notJson) out.push(`First reply that was not JSON (letters shown as x): \`${r.notJson}\``, "");
+    if (r.schemaIssue) out.push(`First card that failed the schema: \`${r.schemaIssue}\`; its fields: \`${r.replyShape}\``, "");
     const samples = sample(r.cards, 10);
     if (samples.length) {
       out.push("Sample cards:", "");
@@ -595,15 +773,25 @@ async function main() {
     baseUrlFor = (e) => `${ai.url}/m${unique.findIndex((u) => u.entry.provider === e.provider && u.entry.model === e.model)}/v1`;
   }
 
-  const lastCall = new Map<string, number>();
-  const runs: ModelRun[] = [];
+  // Providers run side by side (their limits are separate); models of one provider run in turn.
+  const byProvider = new Map<string, { size: SizeClass; entry: ProviderEntry }[]>();
+  // Groq limits each model separately, so its models run side by side too; OpenRouter's free limit is per account.
+  const lane = (e: ProviderEntry) => (e.provider === "groq" ? `${e.provider}:${e.model}` : e.provider);
+  for (const u of unique) byProvider.set(lane(u.entry), [...(byProvider.get(lane(u.entry)) ?? []), u]);
+  const runs: ModelRun[] = new Array(unique.length);
   try {
-    for (const { size, entry } of unique) {
-      process.stdout.write(`${entry.provider}:${entry.model} ... `);
-      const run = await runModel(size, entry, lectures, prompt, args, { env, baseUrlFor, database: testDb.db }, lastCall);
-      runs.push(run);
-      console.log(run.skipped ? `skipped (${run.skipped})` : `${run.schemaOk}/${run.asked} schema-valid, ${run.sourceOk} grounded`);
-    }
+    await Promise.all(
+      [...byProvider.values()].map(async (list) => {
+        for (const u of list) {
+          const run = await runModel(u.size, u.entry, lectures, prompt, args, { env, baseUrlFor, database: testDb.db });
+          runs[unique.indexOf(u)] = run;
+          const first = run.errors[0] ? ` First failure: ${run.errors[0]}` : "";
+          console.log(
+            `${u.entry.provider}:${u.entry.model} ... ${run.skipped ? `skipped (${run.skipped})` : `${run.schemaOk}/${run.asked} schema-valid, ${run.sourceOk} grounded, ${run.jsonOk}/${run.calls} calls gave JSON.${first}${run.schemaIssue ? ` First schema failure: ${run.schemaIssue}` : ""}`}`,
+          );
+        }
+      }),
+    );
   } finally {
     await stopFake?.();
     await testDb.close();
