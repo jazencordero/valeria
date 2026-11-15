@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { KIND_PATTERN, dueKinds } from "@/server/jobs/queue";
+import { scheduleSyncs } from "@/server/sync/schedule";
 
 // The hourly tick (M2-06). GitHub Actions calls it once an hour
 // (.github/workflows/tick.yml) with `Authorization: Bearer <CRON_SECRET>`.
@@ -9,7 +10,10 @@ import { KIND_PATTERN, dueKinds } from "@/server/jobs/queue";
 // own route under `src/app/api/cron/<kind>/route.ts`, which checks the secret
 // again and drains its queue; nothing here lists the kinds.
 //
-// Answer: { ok, kinds: [{ kind, status, ok }], skipped: [kind] }. `status` is
+// Before that it queues background syncs (M7-05, `scheduleSyncs`); see below.
+//
+// Answer: { ok, kinds: [{ kind, status, ok }], skipped: [kind] }, plus
+// `scheduleFailed: true` when queueing the background syncs threw. `status` is
 // what the kind's route answered (0 = it could not be reached). The tick itself
 // answers 200 even when a kind's route fails: the jobs stay queued and the next
 // tick tries again. `skipped` holds kinds whose name is not a-z and dashes;
@@ -44,6 +48,19 @@ async function tick(request: Request): Promise<Response> {
   const kinds: { kind: string; status: number; ok: boolean }[] = [];
   const skipped: string[] = [];
 
+  // First, queue background syncs for users whose data is stale (M7-05,
+  // src/server/sync/schedule.ts). Their jobs run after a jitter, so mostly on
+  // a later tick. A failure here must not stop the rest of the tick: the jobs
+  // already queued still run, and the next tick schedules again. The answer
+  // only says so (`scheduleFailed: true`); the error is not logged, since it
+  // could carry database details.
+  let scheduleFailed = false;
+  try {
+    await scheduleSyncs();
+  } catch {
+    scheduleFailed = true;
+  }
+
   for (const kind of await dueKinds()) {
     if (!KIND_PATTERN.test(kind)) {
       skipped.push(kind);
@@ -64,7 +81,7 @@ async function tick(request: Request): Promise<Response> {
     }
   }
 
-  return Response.json({ ok: kinds.every((k) => k.ok), kinds, skipped });
+  return Response.json({ ok: kinds.every((k) => k.ok), kinds, skipped, ...(scheduleFailed ? { scheduleFailed } : {}) });
 }
 
 export const GET = tick;
