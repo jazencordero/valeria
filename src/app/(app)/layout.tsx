@@ -40,6 +40,10 @@
  * the path on its own and hides itself during a study session (`/study/...`).
  * It sits in its own Suspense because it reads the path.
  *
+ * Toasts (M9-25): the one app-wide `<Toaster />` (a client component that
+ * reads no request data, so it needs no Suspense) is mounted here, outside
+ * the grid, so `showToast` from any signed-in page shows its pill.
+ *
  * A demo user (M1-37, `users.settings.demo`) gets a thin "Demo data" line at
  * the top of the page area, with "Restart demo" (GET /demo?reset=1).
  */
@@ -56,6 +60,7 @@ import {
   type SideUser,
 } from "@/components/shell/side-nav";
 import { TabBar, TabBarView } from "@/components/shell/tab-bar";
+import { Toaster } from "@/components/ui/toast";
 import { sameDay } from "@/lib/dates";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { db } from "@/server/db/client";
@@ -197,6 +202,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <Suspense fallback={null}>
         <Notepad />
       </Suspense>
+      <Toaster />
     </>
   );
 }

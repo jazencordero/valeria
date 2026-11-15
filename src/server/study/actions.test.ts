@@ -408,4 +408,27 @@ describe("an exam with a study start (M3-53)", () => {
     const bite = await beginSession(held.examId, "bite");
     expect(bite!.cards.map((c) => c.id)).toEqual([seen]);
   }, DB_TIMEOUT);
+
+  it("before the start day an imported new card is held and a card from her note is offered (M9-25)", async () => {
+    const held = await seedHeld();
+    // One imported card (Anki) and one she turned from her own note, both new.
+    const [concept] = await t.db.select().from(concepts).where(eq(concepts.examId, held.examId));
+    const made: Record<string, string> = {};
+    for (const origin of ["anki", "note"] as const) {
+      const [card] = await t.db
+        .insert(cards)
+        .values({ userId: her, examId: held.examId, type: "basic", rung: 1, body: { q: `From ${origin}?`, a: "A" }, origin, contentHash: `from-${origin}`, importId: `from-${origin}` })
+        .returning();
+      await t.db.insert(cardConcepts).values({ cardId: card.id, conceptId: concept.id });
+      made[origin] = card.id;
+    }
+
+    // Ten days before the start: only the note card is offered.
+    const extra = await beginSession(held.examId, "extra");
+    expect(extra).not.toBeNull();
+    const offered = extra!.cards.map((c) => c.id);
+    expect(offered).toEqual([made.note]);
+    expect(offered).not.toContain(made.anki);
+    expect(offered.some((id) => held.cardIds.includes(id))).toBe(false);
+  }, DB_TIMEOUT);
 });

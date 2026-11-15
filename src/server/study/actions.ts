@@ -30,7 +30,9 @@
  *   never graded: every session kind is built from `studyDeck`, the deck
  *   without its never-graded cards. Cards she has graded are reviewed as
  *   usual, so before that day a fresh imported exam has no bite at all, and
- *   from that day it has one. The forecast, the concepts' mastery and the
+ *   from that day it has one. Cards she made from her own notes (origin
+ *   `note`, M9-25) are never held: they are offered from the day she makes
+ *   them. The forecast, the concepts' mastery and the
  *   "new" count still read the whole deck. The importer also sets a new
  *   card's first due date to that day (M3-51), which is left as it is.
  * - Days left are whole Helsinki calendar days to the exam (`daysBetween`),
@@ -392,11 +394,15 @@ function toBiteDeck(deck: Deck, examAt: Date, now: Date): BiteDeck {
   };
 }
 
-/** The deck sessions may draw from: before the exam's study start, only cards she has graded. */
-function studyDeckOf(exam: Exam, biteDeck: BiteDeck, now: Date): BiteDeck {
+/**
+ * The deck sessions may draw from: before the exam's study start, only cards
+ * she has graded, plus every card she made from her own notes (M9-25).
+ */
+function studyDeckOf(exam: Exam, deck: Deck, biteDeck: BiteDeck, now: Date): BiteDeck {
   if (newCardsAllowed(exam, now)) return biteDeck;
+  const fromNote = new Set(deck.cards.filter((c) => c.origin === "note").map((c) => c.id));
   const graded = (id: string) => (biteDeck.states[id]?.lastReviewAt ?? null) !== null;
-  return { ...biteDeck, cards: biteDeck.cards.filter((c) => graded(c.id)) };
+  return { ...biteDeck, cards: biteDeck.cards.filter((c) => fromNote.has(c.id) || graded(c.id)) };
 }
 
 /** Each concept's mastery for the given card memories (missing = never graded). */
@@ -425,7 +431,7 @@ async function examState(userId: string, examId: string, now: Date, database: Db
     const rung = rungOf(m);
     return { id: c.id, name: c.name, lecture: c.lecture, icon: c.icon, weight: c.weight, mastery: m, rung, rungName: rungName(rung) };
   });
-  return { exam, deck, biteDeck, studyDeck: studyDeckOf(exam, biteDeck, now), concepts, forecast: forecastOf(deck, mastery) };
+  return { exam, deck, biteDeck, studyDeck: studyDeckOf(exam, deck, biteDeck, now), concepts, forecast: forecastOf(deck, mastery) };
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
