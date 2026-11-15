@@ -38,7 +38,11 @@ vi.mock("@/server/db/client", async (importOriginal) => {
   return { ...real, db };
 });
 
-const { biteDay, biteFor, firstNameOf, getHomeView } = await import("./home");
+const { biteDay, biteFor, firstNameOf, getHomeView, neverMissDismissed, neverMissOn } = await import("./home");
+const { dismissNeverMissFor, turnOffNeverMissFor, turnOnNeverMissFor } = await import(
+  "@/app/(app)/home/never-miss-actions"
+);
+const { itemsForUser } = await import("@/server/calendar/feed");
 const { encodeFlash, FLASH_MAX_AGE_S, parseFlash } = await import("./flash");
 const { beginSession, endSession, saveProgress } = await import("@/server/study/actions");
 
@@ -667,6 +671,80 @@ describe("getHomeView: grades card", () => {
 
     const view = await getHomeView(u.id, { now: NOW }, t.db);
     expect(view.grades).toEqual([]);
+  });
+});
+
+describe("getHomeView: never miss one", () => {
+  it("shows the card (nothing on) and counts the dates her link would list", async () => {
+    const u = await user();
+    const c = await course(u.id, "Forecasting Methods");
+    await assignment(u.id, c.id, "Assignment 3", { dueAt: new Date("2026-11-17T23:59:00+02:00") });
+    await assignment(u.id, c.id, "Blueprint", { dueAt: new Date("2026-11-19T16:00:00+02:00") });
+    await assignment(u.id, c.id, "No date");
+
+    const view = await getHomeView(u.id, { now: NOW }, t.db);
+
+    expect(view.neverMiss.on).toBeNull();
+    expect(view.neverMiss.dismissed).toBe(false);
+    expect(view.neverMiss.dateCount).toBe((await itemsForUser(u.id, t.db)).length);
+    expect(view.neverMiss.dateCount).toBe(2);
+  });
+
+  it("is on after Turn on, and off again once the link is revoked", async () => {
+    const u = await user();
+    await turnOnNeverMissFor(t.db, u.id, { calendar: "google", reminders: null }, "https://ready.example");
+    expect((await getHomeView(u.id, { now: NOW }, t.db)).neverMiss.on).toEqual({ calendar: "google", reminders: null });
+
+    await turnOffNeverMissFor(t.db, u.id);
+    expect((await getHomeView(u.id, { now: NOW }, t.db)).neverMiss.on).toBeNull();
+  });
+
+  it("does not count another user's dates", async () => {
+    const u = await user();
+    const other = await user();
+    const c = await course(other.id, "Their course");
+    await assignment(other.id, c.id, "Theirs", { dueAt: new Date("2026-11-17T23:59:00+02:00") });
+    expect((await getHomeView(u.id, { now: NOW }, t.db)).neverMiss.dateCount).toBe(0);
+  });
+
+  it("leaves the card out for 30 days after Not now", async () => {
+    const u = await user();
+    await dismissNeverMissFor(t.db, u.id, new Date(NOW.getTime() - 60_000));
+    const view = await getHomeView(u.id, { now: NOW }, t.db);
+    expect(view.neverMiss).toMatchObject({ on: null, dismissed: true });
+    const later = await getHomeView(u.id, { now: new Date(NOW.getTime() + 30 * 24 * 3600_000) }, t.db);
+    expect(later.neverMiss.dismissed).toBe(false);
+  });
+});
+
+describe("neverMissDismissed", () => {
+  it("is true only within 30 days of notNowAt", () => {
+    const at = { neverMiss: { notNowAt: NOW.toISOString() } };
+    expect(neverMissDismissed(at, NOW)).toBe(true);
+    expect(neverMissDismissed(at, new Date(NOW.getTime() + 30 * 24 * 3600_000 - 1))).toBe(true);
+    expect(neverMissDismissed(at, new Date(NOW.getTime() + 30 * 24 * 3600_000))).toBe(false);
+    expect(neverMissDismissed(at, new Date(NOW.getTime() - 1))).toBe(false);
+    expect(neverMissDismissed({}, NOW)).toBe(false);
+    expect(neverMissDismissed({ neverMiss: { notNowAt: "soon" } }, NOW)).toBe(false);
+  });
+});
+
+describe("neverMissOn", () => {
+  it("reads the saved choice, the calendar only while the link exists", () => {
+    const saved = { neverMiss: { calendar: "apple", reminders: null, at: "2026-11-14T12:00:00Z" } };
+    expect(neverMissOn(saved, true)).toEqual({ calendar: "apple", reminders: null });
+    expect(neverMissOn(saved, false)).toBeNull();
+    expect(neverMissOn({ neverMiss: { calendar: null, reminders: "push" } }, false)).toEqual({
+      calendar: null,
+      reminders: "push",
+    });
+  });
+
+  it("reads anything missing or malformed as off", () => {
+    expect(neverMissOn({}, true)).toBeNull();
+    expect(neverMissOn(null, true)).toBeNull();
+    expect(neverMissOn({ neverMiss: "yes" }, true)).toBeNull();
+    expect(neverMissOn({ neverMiss: { calendar: "yahoo", reminders: "sms" } }, true)).toBeNull();
   });
 });
 

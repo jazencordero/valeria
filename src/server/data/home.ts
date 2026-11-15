@@ -49,6 +49,16 @@
  *   /grades show the same courses (visible ones, by name), statuses, targets
  *   and trajectories. Each row's `href` is its grade page, `/grades/<id>`.
  *
+ * M7-04 adds Never miss one:
+ * - `neverMiss.dateCount`: how many dates her calendar link lists now
+ *   (M7-02's `itemsForUser`, the same rows the feed serves).
+ * - `neverMiss.on`: what she turned on (`users.settings.neverMiss`, written by
+ *   `src/app/(app)/home/never-miss-actions.ts`), or null. The calendar counts
+ *   as on only while her link exists: a revoked link means off.
+ * - `neverMiss.dismissed`: she said "Not now" (`neverMiss.notNowAt`) under 30
+ *   days ago (`NOT_NOW_DAYS`, as the card's own localStorage snooze). Home then
+ *   leaves the card out, so it does not render and fade out on every visit.
+ *
  * Later Home tickets extend `HomeView` here.
  */
 import { and, eq, gte, lt } from "drizzle-orm";
@@ -57,7 +67,9 @@ import { greeting, type GreetingAssignment, type JustHandedIn, type JustStudied,
 import { WEEK_DAYS, weekModel, type WeekItem, type WeekModel } from "@/lib/home/week";
 import { DONE_WINDOW_MS, type Queue } from "@/lib/queue";
 import { gradeFor } from "@/lib/study/forecast";
+import { FEED_PROVIDERS, itemsForUser, type FeedProvider } from "@/server/calendar/feed";
 import { db as defaultDb, type Db } from "@/server/db/client";
+import { calendarFeeds } from "@/server/db/schema/calendar";
 import { courses } from "@/server/db/schema/courses";
 import { MOODLE_STATUSES, moodleConnections } from "@/server/db/schema/moodle";
 import { users } from "@/server/db/schema/users";
@@ -115,6 +127,47 @@ export type HomeBite =
       href: string;
     };
 
+/** What she turned on in Never miss one (the card's `NeverMissChoice`). */
+export type HomeNeverMissOn = { calendar: FeedProvider | null; reminders: "push" | "email" | null };
+
+export type HomeNeverMiss = {
+  /** Dates her calendar link lists now. */
+  dateCount: number;
+  /** What is on, or null: the card shows. */
+  on: HomeNeverMissOn | null;
+  /** "Not now" under `NOT_NOW_DAYS` ago: no card. */
+  dismissed: boolean;
+};
+
+/** How long "Not now" hides the card (M7-03's `NOT_NOW_MS`, which is client-only). */
+export const NOT_NOW_DAYS = 30;
+
+/** Whether `users.settings.neverMiss.notNowAt` still hides the card at `now`. */
+export function neverMissDismissed(settings: Record<string, unknown> | null | undefined, now: Date): boolean {
+  const raw = settings?.neverMiss;
+  if (!raw || typeof raw !== "object") return false;
+  const at = Date.parse(String((raw as { notNowAt?: unknown }).notNowAt ?? ""));
+  if (!Number.isFinite(at)) return false;
+  const age = now.getTime() - at;
+  return age >= 0 && age < NOT_NOW_DAYS * DAY_MS;
+}
+
+/**
+ * `users.settings.neverMiss` as Home reads it. `hasFeed`: her calendar link exists.
+ * Anything malformed, or nothing left on, reads as null.
+ */
+export function neverMissOn(settings: Record<string, unknown> | null | undefined, hasFeed: boolean): HomeNeverMissOn | null {
+  const raw = settings?.neverMiss;
+  if (!raw || typeof raw !== "object") return null;
+  const { calendar, reminders } = raw as { calendar?: unknown; reminders?: unknown };
+  const cal =
+    hasFeed && typeof calendar === "string" && (FEED_PROVIDERS as readonly string[]).includes(calendar)
+      ? (calendar as FeedProvider)
+      : null;
+  const rem = reminders === "push" || reminders === "email" ? reminders : null;
+  return cal || rem ? { calendar: cal, reminders: rem } : null;
+}
+
 export type HomeView = {
   /** First word of her display name, or `null` when we have none. */
   firstName: string | null;
@@ -132,6 +185,8 @@ export type HomeView = {
   week: WeekModel;
   /** The grades card: one row per visible course, as on /grades. */
   grades: GradesListRow[];
+  /** The Never miss one card, under the grades card. */
+  neverMiss: HomeNeverMiss;
 };
 
 /** "Valeria Example" gives "Valeria"; empty or missing gives null. */
@@ -241,6 +296,25 @@ export function reactionTo(
   return { justHandedIn: null, justStudied: null };
 }
 
+async function neverMissFor(
+  userId: string,
+  settings: Record<string, unknown> | undefined,
+  now: Date,
+  database: Db,
+): Promise<HomeNeverMiss> {
+  const [feed] = await database
+    .select({ userId: calendarFeeds.userId })
+    .from(calendarFeeds)
+    .where(eq(calendarFeeds.userId, userId))
+    .limit(1);
+  const items = await itemsForUser(userId, database);
+  return {
+    dateCount: items.length,
+    on: neverMissOn(settings, !!feed),
+    dismissed: neverMissDismissed(settings, now),
+  };
+}
+
 export async function getHomeView(
   userId: string,
   options: { now: Date; view?: ExamViewLoader; flash?: Flash | null },
@@ -249,7 +323,7 @@ export async function getHomeView(
   const { now, view: load = examView, flash = null } = options;
 
   const [me] = await database
-    .select({ displayName: users.displayName })
+    .select({ displayName: users.displayName, settings: users.settings })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
@@ -352,5 +426,6 @@ export async function getHomeView(
     greeting: sentence,
     week: weekModel(weekItems, now),
     grades: (await getGradesList(userId, database)).courses,
+    neverMiss: await neverMissFor(userId, me?.settings, now, database),
   };
 }

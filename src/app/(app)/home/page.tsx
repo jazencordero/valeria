@@ -37,7 +37,7 @@
  *   area; from there (the prototype's container query, on the scrolling
  *   main) the rail is a 340 px second column next to a main of up to 720 px.
  *
- * Cut: Never miss one (M7-04).
+ * M7-04 puts Never miss one in the rail.
  *
  * M4-11: `/home?arrive=1` (the first visit after connecting) plays the build
  * once: `Arrive` (a client component) is the grid, and each section carries
@@ -60,6 +60,20 @@
  * `getHomeView`'s `grades` (the Grades tab's rows), each linking to
  * `/grades/<courseId>`. No card when she has no courses. It rises in after
  * the week card in the M4-11 build.
+ *
+ * M7-04: under the grades card (under the week card when there is none), M7-03's
+ * Never miss one card (`src/components/home/never-miss.tsx`) with `getHomeView`'s
+ * `neverMiss`: how many dates the link lists and what is on (then the done row
+ * shows instead). "Turn on" calls `turnOnNeverMiss` (`./never-miss-actions.ts`),
+ * which makes the link, saves the choice and answers with the calendar app's
+ * subscribe page; the card opens it in a new tab and cross-fades to the done row.
+ * Reminders are "none" on Home for now (see the actions file). "Not now" hides
+ * the card for 30 days: the card keeps it in localStorage, and `dismissNeverMiss`
+ * saves it too, so after a reload the page leaves the card out (no flash).
+ *
+ * Cut: the week markers' pulse after turning on. `WeekCard` exposes `pulse()`
+ * through a ref, which needs a client component holding both cards; none of this
+ * ticket's files can be one.
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -80,6 +94,7 @@ import {
   Swap,
 } from "@/components/home/handed-in";
 import { GradesCard } from "@/components/home/grades-card";
+import { NeverMiss } from "@/components/home/never-miss";
 import { HeroCard } from "@/components/home/hero-card";
 import { Queue, QueueRow } from "@/components/home/queue-row";
 import { WeekCard } from "@/components/home/week-card";
@@ -87,13 +102,14 @@ import { Button } from "@/components/ui/button";
 import { DoneRow } from "@/components/ui/done-row";
 import { StickyHeader } from "@/components/ui/sticky-header";
 import { ThemeButton } from "@/components/ui/theme-button";
-import { lmsNameOf } from "@/lib/schools";
+import { lmsNameOf, schoolOf } from "@/lib/schools";
 import { dateLine, earlyBy, listDate, sameDay } from "@/lib/dates";
 import { FAST_COOKIE, FAST_PARAM } from "@/lib/motion/fast";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { readFlash } from "@/server/data/flash";
 import { getHomeView, type HomeBite, type HomeDone, type HomeExam, type HomeFirst } from "@/server/data/home";
 import { syncNow } from "@/server/sync/run";
+import { dismissNeverMiss, turnOnNeverMiss } from "./never-miss-actions";
 
 /** The hero card turns urgent (due colour, time left) under this much time. */
 const URGENT_MS = 24 * 60 * 60 * 1000;
@@ -425,6 +441,18 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
         {view.grades.length > 0 && (
           <Slide {...part(6)}>
             <GradesCard courses={view.grades} lmsName={lms} />
+          </Slide>
+        )}
+        {(view.neverMiss.on || !view.neverMiss.dismissed) && (
+          <Slide {...part(7)}>
+            <NeverMiss
+              dateCount={view.neverMiss.dateCount}
+              on={view.neverMiss.on}
+              reminders="none"
+              schoolName={schoolOf(user).name}
+              onTurnOn={turnOnNeverMiss}
+              onDismiss={dismissNeverMiss}
+            />
           </Slide>
         )}
       </aside>
