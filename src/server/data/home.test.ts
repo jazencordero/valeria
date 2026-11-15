@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { courses } from "@/server/db/schema/courses";
+import { gradeItems } from "@/server/db/schema/grades";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import { cardConcepts, cards, concepts, exams } from "@/server/db/schema/study";
 import { users } from "@/server/db/schema/users";
@@ -599,6 +600,73 @@ describe("getHomeView: week", () => {
     expect(week.days).toHaveLength(7);
     expect(week.agenda).toEqual([]);
     expect(week.line).toBe("Nothing due this week.");
+  });
+});
+
+describe("getHomeView: grades card", () => {
+  async function item(
+    userId: string,
+    courseId: string,
+    name: string,
+    extra: Partial<typeof gradeItems.$inferInsert> = {},
+  ) {
+    await t.db
+      .insert(gradeItems)
+      .values({ userId, courseId, moodleRef: `ref-${moodleId++}`, name, max: 100, ...extra });
+  }
+
+  it("gives one row per visible course, by name, linking to its grade page", async () => {
+    const u = await user();
+    const sca = await course(u.id, "Supply Chain Analytics", { target: 4 });
+    const fm = await course(u.id, "Forecasting Methods");
+    const hidden = await course(u.id, "Old course", { hidden: true });
+    // Forecasting: half graded at 80%, the rest assumed the same: heading for a 4, aiming for 5.
+    await item(u.id, fm.id, "Assignment 1", { weight: 0.5, score: 80, position: 0 });
+    await item(u.id, fm.id, "Exam", { weight: 0.5, position: 1 });
+    // Supply chain: nothing graded yet.
+    await item(u.id, sca.id, "Case memo 1", { weight: 1 });
+    await item(u.id, hidden.id, "Old exam", { weight: 1, score: 90 });
+
+    const view = await getHomeView(u.id, { now: NOW }, t.db);
+
+    expect(view.grades).toHaveLength(2);
+    expect(view.grades[0]).toMatchObject({
+      id: fm.id,
+      href: `/grades/${fm.id}`,
+      name: "Forecasting Methods",
+      status: "within",
+      target: 5,
+    });
+    expect(view.grades[0].trajectory).toBeCloseTo(4, 6);
+    expect(view.grades[1]).toMatchObject({
+      id: sca.id,
+      href: `/grades/${sca.id}`,
+      status: "early",
+      target: 4,
+      trajectory: null,
+    });
+  });
+
+  it("agrees with the Grades tab", async () => {
+    const u = await user();
+    const fm = await course(u.id, "Forecasting Methods");
+    await item(u.id, fm.id, "Assignment 1", { weight: 0.4, score: 72 });
+    await item(u.id, fm.id, "Exam", { weight: 0.6 });
+    await course(u.id, "Service Design");
+
+    const { getGradesList } = await import("./grades");
+    const view = await getHomeView(u.id, { now: NOW }, t.db);
+    expect(view.grades).toEqual((await getGradesList(u.id, t.db)).courses);
+  });
+
+  it("leaves out another user's courses, and is empty without courses", async () => {
+    const u = await user();
+    const other = await user();
+    const theirs = await course(other.id, "Their course");
+    await item(other.id, theirs.id, "Exam", { weight: 1, score: 95 });
+
+    const view = await getHomeView(u.id, { now: NOW }, t.db);
+    expect(view.grades).toEqual([]);
   });
 });
 

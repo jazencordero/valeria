@@ -44,7 +44,12 @@
  *   mark their due day done), her upcoming exams (`kind: "exam"`) and quizzes
  *   (`"quiz"`, which count as deadlines). `weekModel` keeps the 7 days.
  *
- * Later Home tickets (grades) extend `HomeView` here.
+ * M6-09 adds the grades card:
+ * - `grades`: the Grades tab's rows (`getGradesList`, M6-08), so Home and
+ *   /grades show the same courses (visible ones, by name), statuses, targets
+ *   and trajectories. Each row's `href` is its grade page, `/grades/<id>`.
+ *
+ * Later Home tickets extend `HomeView` here.
  */
 import { and, eq, gte, lt } from "drizzle-orm";
 import { TIME_ZONE } from "@/lib/dates";
@@ -60,6 +65,7 @@ import { assignments } from "@/server/db/schema/work";
 import { examView, type ExamView } from "@/server/study/actions";
 import { getAssignmentsView, type DoneAssignment, type OpenAssignment } from "./assignments";
 import { getExamsView, type ExamsTabExam, type ExamViewLoader } from "./exams";
+import { getGradesList, type GradesListRow } from "./grades";
 import type { Flash } from "./flash";
 
 export type HomeConnection = { status: (typeof MOODLE_STATUSES)[number] };
@@ -124,6 +130,8 @@ export type HomeView = {
   greeting: string;
   /** The THIS WEEK card. */
   week: WeekModel;
+  /** The grades card: one row per visible course, as on /grades. */
+  grades: GradesListRow[];
 };
 
 /** "Valeria Example" gives "Valeria"; empty or missing gives null. */
@@ -343,5 +351,6 @@ export async function getHomeView(
     biteFirst: first === null && bite?.state === "bite",
     greeting: sentence,
     week: weekModel(weekItems, now),
+    grades: (await getGradesList(userId, database)).courses,
   };
 }

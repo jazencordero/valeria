@@ -37,7 +37,7 @@
  *   area; from there (the prototype's container query, on the scrolling
  *   main) the rail is a 340 px second column next to a main of up to 720 px.
  *
- * Cut: grades card and Never miss one (M6-09, M7-04).
+ * Cut: Never miss one (M7-04).
  *
  * M4-11: `/home?arrive=1` (the first visit after connecting) plays the build
  * once: `Arrive` (a client component) is the grid, and each section carries
@@ -54,6 +54,12 @@
  * the flash those parts render the plain markup. Never together with the
  * M4-11 build, and not under the test switch. A hand-in with no due time has
  * no card to show, so it just appears.
+ *
+ * M6-09: in the rail, under THIS WEEK, the grades card
+ * (`src/components/home/grades-card.tsx`): one row per visible course from
+ * `getHomeView`'s `grades` (the Grades tab's rows), each linking to
+ * `/grades/<courseId>`. No card when she has no courses. It rises in after
+ * the week card in the M4-11 build.
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -73,6 +79,7 @@ import {
   Slide,
   Swap,
 } from "@/components/home/handed-in";
+import { GradesCard } from "@/components/home/grades-card";
 import { HeroCard } from "@/components/home/hero-card";
 import { Queue, QueueRow } from "@/components/home/queue-row";
 import { WeekCard } from "@/components/home/week-card";
@@ -415,6 +422,11 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
         <Slide {...part(5)}>
           <WeekCard week={view.week} />
         </Slide>
+        {view.grades.length > 0 && (
+          <Slide {...part(6)}>
+            <GradesCard courses={view.grades} lmsName={lms} />
+          </Slide>
+        )}
       </aside>
      </HandedIn>
     </Arrive>
