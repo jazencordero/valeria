@@ -44,6 +44,16 @@
  * `data-arrive-part` and its place in the order. Any other visit, and the
  * test switch (?fast=1 or the READY_FAST cookie), renders the same markup at
  * rest. Source: prototype main-flow.html JS 4042-4076.
+ *
+ * M4-12: when the hand-in flash is there (she handed in a moment ago and came
+ * back by a link, not a reload), Home first shows the before state and then
+ * rearranges itself, once (`src/components/home/handed-in.tsx`, prototype
+ * main-flow.html JS 4125-4160). The page sends the after state as always,
+ * plus the handed-in card as it stood in DO FIRST and the next item as the
+ * list row it was; `HandedIn` and its parts decide what shows when. Without
+ * the flash those parts render the plain markup. Never together with the
+ * M4-11 build, and not under the test switch. A hand-in with no due time has
+ * no card to show, so it just appears.
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -54,7 +64,15 @@ import { DoodleDefs } from "@/components/doodle";
 import { CONCEPT_ICON_NAMES, ConceptIcon, iconFor, type ConceptIconName } from "@/components/exams/concept-icons";
 import { Arrive } from "@/components/home/arrive";
 import { BiteRow, HomeExamCard } from "@/components/home/bite-row";
-import { Greeting } from "@/components/home/greeting";
+import {
+  AfterOnly,
+  BeforeOnly,
+  HandedIn,
+  HandedInGreeting,
+  QueueNumber,
+  Slide,
+  Swap,
+} from "@/components/home/handed-in";
 import { HeroCard } from "@/components/home/hero-card";
 import { Queue, QueueRow } from "@/components/home/queue-row";
 import { WeekCard } from "@/components/home/week-card";
@@ -89,6 +107,12 @@ async function signedInUser(): Promise<User> {
     throw err;
   }
 }
+
+/**
+ * A queue number that rolls after a hand-in. `QueueRow` types its `position` as a
+ * number and renders it as given; the rolling number is an element, hence the cast.
+ */
+const rolling = (n: number) => (<QueueNumber n={n} />) as unknown as number;
 
 function SectionLabel({ id, children }: { id: string; children: string }) {
   return (
@@ -235,9 +259,13 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
   const flash = await readFlash(now);
   const view = await getHomeView(user.id, { now, flash });
   if (!view.connection) redirect("/connect");
+  // The hand-in she has just made, when Home should rearrange itself for it (M4-12).
+  const handed = flash?.kind === "handedIn" && !fast && !arrive && view.lastDone?.dueAt ? view.lastDone : null;
+  const handedDue = handed?.dueAt ?? null;
 
   return (
     <Arrive play={arrive} className={GRID}>
+     <HandedIn play={handed !== null} id={handed ? `${handed.id}:${handed.submittedAt.getTime()}` : undefined}>
       <div className="flex min-w-0 flex-col">
         <StickyHeader
           {...part(0, true)}
@@ -260,14 +288,50 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
         )}
 
         <div {...part(1)}>
-          <Greeting sentence={view.greeting} />
+          <HandedInGreeting sentence={view.greeting} />
         </div>
 
         <DoodleDefs />
 
-        <section {...part(2)} className="mt-8" aria-labelledby="lbl-first">
+        <Slide as="section" {...part(2)} className="mt-8" aria-labelledby="lbl-first">
           <SectionLabel id="lbl-first">DO FIRST</SectionLabel>
-          {view.biteFirst && view.bite ? (
+          {handed && handedDue ? (
+            <>
+              <Swap
+                before={
+                  <HeroCard
+                    title={handed.title}
+                    course={handed.course}
+                    code=""
+                    dueAt={handedDue}
+                    now={now}
+                    tone={handedDue.getTime() - now.getTime() < URGENT_MS ? "urgent" : "soon"}
+                    href={`/assignments/${handed.id}`}
+                  />
+                }
+                done={<DoFirst first={null} lastDone={handed} now={now} />}
+              >
+                {view.biteFirst && view.bite ? (
+                  <BiteFor bite={view.bite} first className="mt-3" />
+                ) : view.first ? (
+                  <div className="mt-3">
+                    <DoFirst first={view.first} lastDone={null} now={now} />
+                  </div>
+                ) : null}
+              </Swap>
+              {view.bite &&
+                (view.biteFirst ? (
+                  // Before the hand-in the bite was the row under the card.
+                  <BeforeOnly>
+                    <BiteFor bite={view.bite} className="mt-3" />
+                  </BeforeOnly>
+                ) : (
+                  <Slide className="mt-3">
+                    <BiteFor bite={view.bite} />
+                  </Slide>
+                ))}
+            </>
+          ) : view.biteFirst && view.bite ? (
             <>
               {view.lastDone && <DoFirst first={null} lastDone={view.lastDone} now={now} />}
               <BiteFor bite={view.bite} first className={view.lastDone ? "mt-3" : undefined} />
@@ -278,16 +342,37 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
               {view.bite && <BiteFor bite={view.bite} className="mt-3" />}
             </>
           )}
-        </section>
+        </Slide>
 
-        <section {...part(3)} className="mt-8 flex flex-col" aria-labelledby="lbl-then">
+        <Slide as="section" {...part(3)} className="mt-8 flex flex-col" aria-labelledby="lbl-then">
           <SectionLabel id="lbl-then">THEN</SectionLabel>
+          {handed && view.first && (
+            // Before the hand-in, what is now DO FIRST was the first row here.
+            <BeforeOnly>
+              <Queue className={view.then.length > 0 ? "-mx-2 border-b border-solid border-line px-2" : undefined}>
+                <QueueRow
+                  position={2}
+                  title={view.first.title}
+                  course={view.first.course}
+                  dueAt={view.first.dueAt}
+                  estimateMin={view.first.estimateMin}
+                  status={view.first.status}
+                  action={
+                    <Button size="sm" href={view.first.href}>
+                      Start
+                    </Button>
+                  }
+                />
+              </Queue>
+            </BeforeOnly>
+          )}
+          <Slide className="flex flex-col">
           {view.then.length > 0 ? (
             <Queue>
               {view.then.map((a, i) => (
                 <QueueRow
                   key={a.id}
-                  position={i + 2}
+                  position={rolling(i + 2)}
                   title={a.title}
                   course={a.course}
                   dueAt={a.dueAt}
@@ -302,7 +387,9 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
               ))}
             </Queue>
           ) : (
-            <p className="py-3 text-[15px] text-ink-2">Nothing else is open.</p>
+            <AfterOnly>
+              <p className="py-3 text-[15px] text-ink-2">Nothing else is open.</p>
+            </AfterOnly>
           )}
           <Link
             href="/assignments"
@@ -313,21 +400,23 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
           >
             All assignments
           </Link>
-        </section>
+          </Slide>
+        </Slide>
 
         {view.exams.length > 0 && (
-          <section {...part(4)} className="mt-8" aria-labelledby="lbl-exams">
+          <Slide as="section" {...part(4)} className="mt-8" aria-labelledby="lbl-exams">
             <SectionLabel id="lbl-exams">EXAMS AND QUIZZES</SectionLabel>
             <ExamCards exams={view.exams} />
-          </section>
+          </Slide>
         )}
       </div>
 
       <aside className="mt-9 flex min-w-0 flex-col gap-4 @min-[960px]:mt-0 @min-[960px]:pt-0.5" aria-label="This week">
-        <div {...part(5)}>
+        <Slide {...part(5)}>
           <WeekCard week={view.week} />
-        </div>
+        </Slide>
       </aside>
+     </HandedIn>
     </Arrive>
   );
 }
