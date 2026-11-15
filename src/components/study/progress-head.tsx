@@ -22,7 +22,7 @@ export type ProgressHeadProps = {
   grade: number;
   /** Where a bite a day ends on exam day, 0..100, already rounded. */
   planEnd: number;
-  /** Exam weekday as the sentence says it, for example "Friday". */
+  /** Exam day as the sentence says it: "Friday" within six days, else "Mon 23 Nov". */
   dayName: string;
   /** Data for the chart under the headline. */
   chart: ForecastChartData;

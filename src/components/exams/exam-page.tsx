@@ -137,7 +137,7 @@ export type ExamPageProps = {
     grade: number;
     /** Where a bite a day ends on exam day, in percent. */
     planEnd: number;
-    /** Exam weekday, for example "Friday". */
+    /** The day the plan ends by: "Friday" within six days, else "Mon 23 Nov". */
     dayName: string;
     chart: ForecastChartData;
     /** Every concept, in the exam's order. */

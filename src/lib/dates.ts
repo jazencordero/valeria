@@ -202,3 +202,22 @@ export function dateLine(now: DateInput): string {
   const { day, month } = localParts(now);
   return `${weekdayOf(now)} ${day} ${MONTHS[month - 1]} · ${clock(now)}`;
 }
+
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const titleCase = (s: string) => s.charAt(0) + s.slice(1).toLowerCase();
+
+/** A day with its month, for a sentence: `Mon 23 Nov`. */
+export function dayMonth(at: DateInput): string {
+  const { day, month } = localParts(at);
+  return `${titleCase(weekdayOf(at))} ${day} ${titleCase(MONTHS[month - 1])}`;
+}
+
+/**
+ * The day in "by Friday": the weekday alone while `at` is within the next six calendar days
+ * (today included), where a bare weekday is clear; further out, or already past, the date with
+ * its month, `Mon 23 Nov`.
+ */
+export function byDay(at: DateInput, now: DateInput): string {
+  const days = daysBetween(now, at);
+  return days >= 0 && days <= 6 ? WEEKDAY_NAMES[WEEKDAYS.indexOf(weekdayOf(at))] : dayMonth(at);
+}

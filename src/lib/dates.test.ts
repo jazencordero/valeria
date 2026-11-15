@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  byDay,
   dateLine,
   daysBetween,
   dueLabel,
@@ -199,5 +200,29 @@ describe("startOfWeek", () => {
     expect(startOfWeek(d("2026-10-25T10:00:00Z")).toISOString()).toBe("2026-10-18T21:00:00.000Z");
     // Tuesday 27 October -> Monday 26 October, winter time.
     expect(startOfWeek(d("2026-10-27T10:00:00Z")).toISOString()).toBe("2026-10-25T22:00:00.000Z");
+  });
+});
+
+describe("byDay", () => {
+  // NOW is Saturday 14 Nov 2026, 15:48 in Helsinki.
+  it("names the weekday alone within the next six days, today included", () => {
+    expect(byDay(d("2026-11-14T20:00:00Z"), NOW)).toBe("Saturday");
+    expect(byDay(d("2026-11-16T07:00:00Z"), NOW)).toBe("Monday");
+    expect(byDay(d("2026-11-20T07:00:00Z"), NOW)).toBe("Friday");
+  });
+
+  it("gives the date with its month from seven days out, where a bare weekday would mean the wrong week", () => {
+    expect(byDay(d("2026-11-21T07:00:00Z"), NOW)).toBe("Sat 21 Nov");
+    expect(byDay(d("2026-11-23T07:00:00Z"), NOW)).toBe("Mon 23 Nov");
+    expect(byDay(d("2026-12-03T07:00:00Z"), NOW)).toBe("Thu 3 Dec");
+  });
+
+  it("gives the date for a day already past", () => {
+    expect(byDay(d("2026-11-13T07:00:00Z"), NOW)).toBe("Fri 13 Nov");
+  });
+
+  it("goes by the Helsinki day, not the UTC one", () => {
+    // 22:30 UTC on Friday 20 Nov is Saturday 21 Nov in Helsinki: seven days out.
+    expect(byDay(d("2026-11-20T22:30:00Z"), NOW)).toBe("Sat 21 Nov");
   });
 });

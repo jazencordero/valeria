@@ -43,7 +43,7 @@ import type { HeatDay } from "@/components/study/heatmap";
 import type { ReviewDay } from "@/components/study/next-reviews";
 import type { PracticeType } from "@/components/study/practice-tiles";
 import type { ProgressConcept } from "@/components/study/progress-sheet";
-import { TIME_ZONE } from "@/lib/dates";
+import { byDay, TIME_ZONE } from "@/lib/dates";
 import { biteMinutes } from "@/lib/study/bite";
 import { gradeFor } from "@/lib/study/forecast";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
@@ -148,7 +148,6 @@ function reviewDay(key: string, today: string): string {
 }
 
 const clockOf = new Intl.DateTimeFormat("en-GB", { timeZone: TIME_ZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-const weekdayOf = new Intl.DateTimeFormat("en-GB", { timeZone: TIME_ZONE, weekday: "long" });
 
 /** How many following review days the Practise tab lists after today. */
 const REVIEW_DAYS = 3;
@@ -309,7 +308,7 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
       progress={{
         grade: gradeFor(view.forecastShown),
         planEnd: view.planEnd,
-        dayName: weekdayOf.format(exam.at),
+        dayName: byDay(exam.at, now),
         chart: {
           history: view.history,
           forecast: view.forecast,
