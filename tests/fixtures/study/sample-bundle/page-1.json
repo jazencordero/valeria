@@ -1,12 +1,36 @@
 {
   "breath": "Forecasting turns past observations into a best guess about the next period, and an error measure tells you how good that guess was.",
   "minutes": 6,
+  "minutesWithHelp": 11,
+  "startHere": [
+    ["p", "This lecture is about guessing the next number in a series from the numbers before it, and checking how far off the guess was."],
+    ["p", "It matters because every later method in the course is compared with these simple forecasts."],
+    ["dl", [["Series", "Numbers recorded in order, one per period"], ["Forecast", "A guess about a period that has not happened yet"]]]
+  ],
   "sections": [
     {
       "heading": "Averaging the recent past",
+      "keyPoints": [
+        "A moving average forecasts the next value as the mean of the last few values.",
+        "The window is how many values you average.",
+        "A short window follows changes fast; a long one hides noise."
+      ],
       "blocks": [
         ["p", "A moving average forecasts the next value as the mean of the last few observations."],
         ["ul", ["Short windows react quickly", "Long windows smooth out noise"]]
+      ],
+      "fromScratch": [
+        ["p", "Say a kiosk sold 10, 12 and 14 coffees on the last three days. To guess tomorrow, add them and divide by three."],
+        ["ul", ["10 + 12 + 14 = 36", "36 / 3 = 12 coffees"]]
+      ],
+      "example": {
+        "title": "A 3-day moving average",
+        "steps": ["Take the last three values: 20, 26, 23.", "Add them: 20 + 26 + 23 = 69.", "Divide by the window: 69 / 3 = 23."],
+        "result": "The forecast for the next day is 23."
+      },
+      "stuck": [
+        { "q": "Which values go into the average?", "a": "Only the most recent ones, as many as the window says." },
+        { "q": "Why not average the whole series?", "a": "Old values may describe a situation that has changed." }
       ],
       "terms": ["moving average", "window"],
       "slides": "slides 2-5"

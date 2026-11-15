@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { contentHash, parseCard } from "@/lib/study/card-schema";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { courses } from "@/server/db/schema/courses";
-import { lectureConcepts, lectureContent, lectures } from "@/server/db/schema/learn";
+import { highlights, lectureConcepts, lectureContent, lectures, notes } from "@/server/db/schema/learn";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import { cardConcepts, cards, cardStates, concepts, examDocuments, exams } from "@/server/db/schema/study";
 import { users } from "@/server/db/schema/users";
@@ -19,8 +19,11 @@ import {
   ImportFailed,
   loadBundle,
   NO_EXAM_DATE,
+  pageHash,
+  PageSchema,
   planImport,
   planStudyOnly,
+  storedSections,
   STUDY_ONLY_NO_CODE,
   STUDY_ONLY_WITH_EXAM,
   type CourseBundle,
@@ -565,7 +568,7 @@ describe("applyImport", () => {
       expect(lectureRows).toMatchObject([{ courseId: herCourse, n: 1, title: "Why forecast at all" }]);
       const [content] = await t.db.select().from(lectureContent).where(eq(lectureContent.lectureId, lectureRows[0].id));
       expect(content.minutes).toBe(6);
-      expect(content.sections).toHaveLength(3);
+      expect(content.sections).toHaveLength(4); // the "start here" entry, then the three sections
       expect(content.slideTitles).toHaveLength(12);
       expect(content.sourceHash).toMatch(/^[0-9a-f]{64}$/);
 
@@ -925,6 +928,148 @@ describe("applyImport", () => {
     },
     T,
   );
+});
+
+describe("pages that teach from zero (M9-26)", () => {
+  /** The sample page with every M9-26 part taken out: what the fixture was before M9-26. */
+  async function plainPage(): Promise<Record<string, unknown>> {
+    const raw = JSON.parse(await readFile(path.join(FIXTURE, "page-1.json"), "utf8"));
+    delete raw.startHere;
+    delete raw.minutesWithHelp;
+    for (const s of raw.sections) for (const key of ["keyPoints", "fromScratch", "stuck", "example"]) delete s[key];
+    return raw;
+  }
+  const contentOf = async () => {
+    const [lecture] = await t.db.select().from(lectures).where(eq(lectures.userId, her));
+    const [content] = await t.db.select().from(lectureContent).where(eq(lectureContent.lectureId, lecture.id));
+    return { lecture, content };
+  };
+  const withPage = (page: unknown) => planImport({ ...course, pages: [{ lecture: 1, file: "page-1.json", page: PageSchema.parse(page) }] });
+
+  it("hashes and stores a plain page exactly as before", async () => {
+    const plain = PageSchema.parse(await plainPage());
+    // The hash this page had before M9-26. If it moves, every imported page is rewritten on the next run.
+    expect(pageHash(plain)).toBe("48553cc8f2218dbfad7c9014e88fb881792a8ec6bb18fb084137b7c570edc587");
+    expect(storedSections(plain)).toBe(plain.sections);
+    expect(Object.keys(plain).sort()).toEqual(["breath", "minutes", "sections", "slideTitles"]);
+    expect(Object.keys(plain.sections[0]).sort()).toEqual(["blocks", "heading", "slides", "terms"]);
+    // A new part changes the hash, so a rewritten page replaces the stored one.
+    expect(plan.lectures[0].pageHash).not.toBe(pageHash(plain));
+  });
+
+  it(
+    "a plain page still imports, and a second run skips it",
+    async () => {
+      const plain = withPage(await plainPage());
+      expect((await applyImport(t.db, her, plain, { now: NOW })).counts.pages).toEqual({ created: 1, skipped: 0, updated: 0 });
+      const { content } = await contentOf();
+      expect(content.sections).toHaveLength(3);
+      expect(JSON.stringify(content.sections)).not.toMatch(/startHere|keyPoints|fromScratch|stuck|example|minutesWithHelp/);
+      expect(content.sourceHash).toBe("48553cc8f2218dbfad7c9014e88fb881792a8ec6bb18fb084137b7c570edc587");
+      expect((await applyImport(t.db, her, plain, { now: NOW })).counts.pages).toEqual({ created: 0, skipped: 1, updated: 0 });
+    },
+    T,
+  );
+
+  it(
+    "keeps every new part through an import and a re-import",
+    async () => {
+      const raw = JSON.parse(await readFile(path.join(FIXTURE, "page-1.json"), "utf8"));
+      const stored = async () => (await contentOf()).content.sections as Record<string, unknown>[];
+      const check = (list: Record<string, unknown>[], source: typeof raw) => {
+        expect(list).toHaveLength(4);
+        expect(list[0]).toEqual({ kind: "startHere", blocks: source.startHere, minutesWithHelp: source.minutesWithHelp });
+        expect(list[1]).toMatchObject({
+          heading: "Averaging the recent past",
+          keyPoints: source.sections[0].keyPoints,
+          fromScratch: source.sections[0].fromScratch,
+          stuck: source.sections[0].stuck,
+          example: source.sections[0].example,
+          blocks: source.sections[0].blocks,
+        });
+        // The sections without the parts carry none of their keys.
+        for (const s of list.slice(2)) expect(Object.keys(s).sort()).toEqual(["blocks", "heading", "slides", "terms"]);
+      };
+
+      await applyImport(t.db, her, plan, { now: NOW });
+      check(await stored(), raw);
+      expect((await contentOf()).content.minutes).toBe(6);
+
+      // Unchanged: skipped, still there.
+      expect((await applyImport(t.db, her, plan, { now: NOW })).counts.pages).toEqual({ created: 0, skipped: 1, updated: 0 });
+      check(await stored(), raw);
+
+      // Rewritten: the same row is updated in place, and what is hers stays.
+      const before = await contentOf();
+      const readAt = new Date("2026-11-14T08:00:00Z");
+      await t.db.update(lectures).set({ readAt }).where(eq(lectures.id, before.lecture.id));
+      await t.db.insert(notes).values({ userId: her, body: "My note", quote: "the mean of the last few", attachKind: "lecture", lectureId: before.lecture.id, courseId: herCourse });
+      await t.db.insert(highlights).values({ userId: her, lectureId: before.lecture.id, text: "the mean of the last few" });
+      const next = structuredClone(raw);
+      next.minutesWithHelp = 12;
+      next.startHere.push(["p", "One more line to start from."]);
+      next.sections[0].keyPoints.push("A fourth point.");
+      next.sections[0].stuck.push({ q: "A new question?", a: "A new answer." });
+      next.sections[0].example.steps.push("Check it against the data.");
+      expect((await applyImport(t.db, her, withPage(next), { now: NOW })).counts.pages).toEqual({ created: 0, skipped: 0, updated: 1 });
+      const after = await contentOf();
+      check(after.content.sections as Record<string, unknown>[], next);
+      expect(after.content.id).toBe(before.content.id);
+      expect(after.lecture.id).toBe(before.lecture.id);
+      expect(after.lecture.readAt).toEqual(readAt);
+      expect(await t.db.select({ lectureId: notes.lectureId, body: notes.body }).from(notes)).toEqual([{ lectureId: before.lecture.id, body: "My note" }]);
+      expect(await t.db.select({ lectureId: highlights.lectureId }).from(highlights)).toEqual([{ lectureId: before.lecture.id }]);
+
+      // Back to a plain page: the parts and the first entry go.
+      await applyImport(t.db, her, withPage(await plainPage()), { now: NOW });
+      expect(await stored()).toHaveLength(3);
+    },
+    T,
+  );
+
+  it("stores minutesWithHelp on the first entry even without startHere, and ignores keys nobody named", async () => {
+    const raw = { ...(await plainPage()), minutesWithHelp: 9, lecture: "L1", somethingElse: { a: 1 } } as Record<string, unknown>;
+    (raw.sections as Record<string, unknown>[])[0].colour = "blue";
+    const page = PageSchema.parse(raw);
+    expect(storedSections(page)[0]).toEqual({ kind: "startHere", blocks: [], minutesWithHelp: 9 });
+    expect(JSON.stringify(page)).not.toMatch(/somethingElse|colour|L1/);
+    const only = PageSchema.parse({ ...(await plainPage()), startHere: [["p", "Start."]] });
+    expect(storedSections(only)[0]).toEqual({ kind: "startHere", blocks: [["p", "Start."]] });
+  });
+
+  it("refuses a malformed new part and says where it is", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "bundle-m926-"));
+    try {
+      await cp(FIXTURE, dir, { recursive: true });
+      const raw = JSON.parse(await readFile(path.join(FIXTURE, "page-1.json"), "utf8"));
+      raw.minutesWithHelp = "eleven";
+      raw.startHere = [["p", "fine"], ["table", []]];
+      raw.sections[0].keyPoints = ["fine", 3];
+      raw.sections[0].fromScratch = "start at the start";
+      raw.sections[0].stuck = [{ q: "A question?", a: "An answer." }, { q: "No answer?" }];
+      raw.sections[0].example = { title: "T", steps: ["one", { text: "two" }] };
+      raw.sections[1].example = "an example";
+      await write(path.join(dir, "page-1.json"), raw);
+      const err = await loadBundle(dir).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BundleInvalid);
+      const problems = (err as BundleInvalid).problems;
+      for (const at of [
+        "minutesWithHelp",
+        "startHere.1",
+        "sections.0.keyPoints.1",
+        "sections.0.fromScratch",
+        "sections.0.stuck.1.a",
+        "sections.0.example.steps.1",
+        "sections.0.example.result",
+        "sections.1.example",
+      ]) {
+        expect(problems.filter((p) => p.startsWith(`page-1.json (at ${at})`)), at).toHaveLength(1);
+      }
+      expect(problems.join(" ")).not.toContain("start at the start"); // never the page's text
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("CLI", () => {

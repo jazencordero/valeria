@@ -24,7 +24,15 @@
  *   `concepts` hold slugs from seed.json. An optional `id` is the card's stable id. `core`,
  *   `first` and cloze `accept` are part of the format; `beyondSlides`, `basis`, `quote` and
  *   `fromFigure` are copied into `cards.body` as given. Other unknown fields are dropped.
- * - one page per lecture in the M9-05 shape stored in `lecture_content`.
+ * - one page per lecture in the M9-05 shape stored in `lecture_content`. A page may carry the
+ *   M9-26 teaching parts, all optional: on the page `startHere` (blocks) and `minutesWithHelp`
+ *   (`minutes` is the main text only); on a section `keyPoints` (sentences), `fromScratch`
+ *   (blocks), `stuck` (`[{q, a}]`) and `example` (`{title, steps: [text], result}`). A part that
+ *   is there and has the wrong shape refuses the page, with its path; keys nobody named are
+ *   dropped and never fail a page. Stored without a schema change (`storedSections`): a
+ *   section's parts stay on its entry of `lecture_content.sections`, and `startHere` and
+ *   `minutesWithHelp` are one first entry `{kind: "startHere", blocks, minutesWithHelp?}`. A
+ *   page with none of them is stored, and hashed, exactly as before M9-26.
  * - optional `map.json` (named by `seed.map`): `prerequisites` (slug -> slugs), `threads`,
  *   `studyOrder` (lecture groups, then e.g. "Exam essentials").
  * - optional `exam/`: exam documents. Every Markdown file becomes an `exam_documents` row: slug
@@ -49,7 +57,9 @@
  *   weight and lecture when they differ (updated).
  * - Concept position: the order in `map.studyOrder` when there is one, else the seed's.
  * - Lectures: same course + same `n`. An existing lecture keeps its title and file.
- * - Page: `source_hash` = sha256 of the page's canonical JSON. Same: skipped. Different: replaced.
+ * - Page: `source_hash` = sha256 of the page's canonical JSON. Same: skipped. Different: the
+ *   `lecture_content` row is updated in place. The lecture row is not touched, so her read mark
+ *   (`lectures.read_at`), notes and highlights (both keyed on the lecture) stay.
  * - Lecture concepts: each concept whose `lecture` is one of the bundle's lectures is linked.
  * - Cards, in this order: (1) a card with the same stable `id` in this exam is the same card.
  *   The id is `cards.import_id`, or `body.importId` for a card imported before M3-53. Nothing
@@ -207,9 +217,25 @@ const Block = z.union(
   { error: "Each block must be ['p', text], ['ul', [items]] or ['dl', [[term, definition]]]." },
 );
 
+const blocks = (what: string) => z.array(Block, { error: `${what} must be a list of blocks.` });
+
+/**
+ * The M9-05 page, plus the optional M9-26 teaching parts. The new parts have no defaults on
+ * purpose: a page without them parses to the same object as before, so its `pageHash` (and with
+ * it every page already imported) does not change.
+ */
 export const PageSchema = z.object({
   breath: nonEmpty("breath"),
+  /** Reading time of the main text only. */
   minutes: z.number().int().positive({ error: "minutes must be a whole number above 0." }),
+  /** Reading time with every piece of help open. */
+  minutesWithHelp: z
+    .number({ error: "minutesWithHelp must be a whole number above 0." })
+    .int({ error: "minutesWithHelp must be a whole number above 0." })
+    .positive({ error: "minutesWithHelp must be a whole number above 0." })
+    .optional(),
+  /** What the lecture is about, why it matters, the few terms needed first. */
+  startHere: blocks("startHere").optional(),
   sections: z
     .array(
       z.object({
@@ -217,12 +243,50 @@ export const PageSchema = z.object({
         blocks: z.array(Block),
         terms: z.array(z.string()).default([]),
         slides: z.string().optional(),
+        keyPoints: z.array(nonEmpty("Each key point"), { error: "keyPoints must be a list of sentences." }).optional(),
+        fromScratch: blocks("fromScratch").optional(),
+        stuck: z
+          .array(
+            z.object(
+              { q: nonEmpty("Each stuck question (q)"), a: nonEmpty("Each stuck answer (a)") },
+              { error: "Each stuck entry must be {q, a}." },
+            ),
+            { error: "stuck must be a list of {q, a}." },
+          )
+          .optional(),
+        example: z
+          .object(
+            {
+              title: nonEmpty("An example's title"),
+              steps: z.array(nonEmpty("Each example step"), { error: "An example's steps must be a list of text." }),
+              result: nonEmpty("An example's result"),
+            },
+            { error: "example must be {title, steps, result}." },
+          )
+          .optional(),
       }),
     )
     .min(1, { error: "A page needs at least one section." }),
   slideTitles: z.array(z.string()).default([]),
 });
 export type Page = z.infer<typeof PageSchema>;
+
+/** The first entry of a stored page that has `startHere` or `minutesWithHelp` (M9-26). */
+export type StoredStartHere = { kind: "startHere"; blocks: NonNullable<Page["startHere"]>; minutesWithHelp?: number };
+
+/**
+ * What `lecture_content.sections` holds for a page: its sections as given, after one first
+ * entry `{kind: "startHere", blocks, minutesWithHelp?}` when the page has either. A page with
+ * neither is its sections and nothing else, as before M9-26. The marker has no `heading`:
+ * `sectionsOf` (src/server/data/lecture.ts), the only code that reads this column, takes it
+ * out before it counts sections.
+ */
+export function storedSections(page: Page): (Page["sections"][number] | StoredStartHere)[] {
+  if (page.startHere === undefined && page.minutesWithHelp === undefined) return page.sections;
+  const first: StoredStartHere = { kind: "startHere", blocks: page.startHere ?? [] };
+  if (page.minutesWithHelp !== undefined) first.minutesWithHelp = page.minutesWithHelp;
+  return [first, ...page.sections];
+}
 
 const slugList = z.array(nonEmpty("Each concept slug"));
 const StudyGroup = z.looseObject({
@@ -1167,7 +1231,7 @@ async function writeLectures(
     const values = {
       breath: l.page!.breath,
       minutes: l.page!.minutes,
-      sections: l.page!.sections,
+      sections: storedSections(l.page!),
       slideTitles: l.page!.slideTitles,
       sourceHash: l.pageHash!,
     };
