@@ -8,19 +8,30 @@
  * - This browser already holds someone's own data (a Moodle connection,
  *   courses or assignments): 409, nothing changes. Demo data never goes into
  *   a real account.
- * The rules live in `@/server/demo/seed`.
+ * - 20 demo users were already made in the past hour, in total (M2-25): 503,
+ *   "The demo is busy. Try again soon.", with Retry-After, and no demo user is
+ *   made. Only a browser that is not a demo yet is refused: one that already
+ *   holds a demo opens it, or resets it (a reset replaces its demo user, so
+ *   the total does not grow), as before.
+ * - Every allowed visit also schedules the day's cleanup of idle visitors
+ *   (`scheduleCleanup`, M2-25). If that fails the demo opens anyway.
+ * The rules live in `@/server/demo/seed` and `@/server/users/schedule`.
  */
 import { redirect } from "next/navigation";
 import { connection, type NextRequest } from "next/server";
 import { ensureSession } from "@/server/auth/session";
-import { demoAllowed, openDemo } from "@/server/demo/seed";
+import { demoAllowed, isDemo, openDemo } from "@/server/demo/seed";
+import { demoBusy, scheduleCleanup } from "@/server/users/schedule";
 
 // The sync behind the seed may wait on the fake for a few seconds at most;
 // same budget as POST /api/sync.
 export const maxDuration = 60;
 
-const text = (body: string, status: number) =>
-  new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+const text = (body: string, status: number, headers: Record<string, string> = {}) =>
+  new Response(body, {
+    status,
+    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers },
+  });
 
 export async function GET(request: NextRequest) {
   // Decided per request: without this the build would bake the answer (the 404
@@ -28,8 +39,14 @@ export async function GET(request: NextRequest) {
   await connection();
   if (!demoAllowed()) return text("The demo is not available here.", 404);
 
+  // The cheapest trigger for the daily cleanup. Never in the demo's way.
+  await scheduleCleanup().catch(() => undefined);
+
   const user = await ensureSession();
   const reset = request.nextUrl.searchParams.get("reset") === "1";
+  if (!isDemo(user) && (await demoBusy())) {
+    return text("The demo is busy. Try again soon.", 503, { "retry-after": "600" });
+  }
   const result = await openDemo(user, { reset });
   if (!result.ok) {
     return text("This browser already holds your own data, so the demo was not started. Open it in a private window.", 409);
