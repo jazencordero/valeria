@@ -38,13 +38,21 @@
  *   main) the rail is a 340 px second column next to a main of up to 720 px.
  *
  * Cut: grades card and Never miss one (M6-09, M7-04).
+ *
+ * M4-11: `/home?arrive=1` (the first visit after connecting) plays the build
+ * once: `Arrive` (a client component) is the grid, and each section carries
+ * `data-arrive-part` and its place in the order. Any other visit, and the
+ * test switch (?fast=1 or the READY_FAST cookie), renders the same markup at
+ * rest. Source: prototype main-flow.html JS 4042-4076.
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { connection } from "next/server";
-import { Suspense } from "react";
+import { Suspense, type CSSProperties } from "react";
 import { DoodleDefs } from "@/components/doodle";
 import { CONCEPT_ICON_NAMES, ConceptIcon, iconFor, type ConceptIconName } from "@/components/exams/concept-icons";
+import { Arrive } from "@/components/home/arrive";
 import { BiteRow, HomeExamCard } from "@/components/home/bite-row";
 import { Greeting } from "@/components/home/greeting";
 import { HeroCard } from "@/components/home/hero-card";
@@ -56,6 +64,7 @@ import { StickyHeader } from "@/components/ui/sticky-header";
 import { ThemeButton } from "@/components/ui/theme-button";
 import { lmsNameOf } from "@/lib/schools";
 import { dateLine, earlyBy, listDate, sameDay } from "@/lib/dates";
+import { FAST_COOKIE, FAST_PARAM } from "@/lib/motion/fast";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { readFlash } from "@/server/data/flash";
 import { getHomeView, type HomeBite, type HomeDone, type HomeExam, type HomeFirst } from "@/server/data/home";
@@ -63,6 +72,13 @@ import { syncNow } from "@/server/sync/run";
 
 /** The hero card turns urgent (due colour, time left) under this much time. */
 const URGENT_MS = 24 * 60 * 60 * 1000;
+
+type Search = Promise<{ [key: string]: string | string[] | undefined }>;
+
+/** Marks a section for `Arrive`: its place in the order; `bare` rises in without an outline. */
+function part(i: number, bare = false) {
+  return { "data-arrive-part": bare ? "bare" : "", style: { "--arrive-i": i } as CSSProperties };
+}
 
 async function signedInUser(): Promise<User> {
   try {
@@ -197,8 +213,16 @@ function ExamCards({ exams }: { exams: HomeExam[] }) {
   );
 }
 
-async function HomeBody() {
+const GRID =
+  "mx-auto grid max-w-[720px] grid-cols-[minmax(0,1fr)] gap-x-10 px-[var(--pad)] pb-4 " +
+  "pt-[max(16px,env(safe-area-inset-top,0px))] min-[700px]:px-10 min-[700px]:pt-8 min-[700px]:pb-6 " +
+  "min-[700px]:[--pad:40px] @min-[960px]:max-w-[1100px] @min-[960px]:grid-cols-[minmax(0,720px)_340px]";
+
+async function HomeBody({ searchParams }: { searchParams: Search }) {
   await connection();
+  const query = await searchParams;
+  const fast = query[FAST_PARAM] === "1" || (await cookies()).has(FAST_COOKIE);
+  const arrive = query.arrive === "1" && !fast;
   const user = await signedInUser();
   const lms = lmsNameOf(user);
   try {
@@ -213,9 +237,12 @@ async function HomeBody() {
   if (!view.connection) redirect("/connect");
 
   return (
-    <>
+    <Arrive play={arrive} className={GRID}>
       <div className="flex min-w-0 flex-col">
-        <StickyHeader className="-mx-[var(--pad)] -mt-1.5 flex min-h-11 items-center justify-between pr-[calc(var(--pad)-12px)] pl-[var(--pad)]">
+        <StickyHeader
+          {...part(0, true)}
+          className="-mx-[var(--pad)] -mt-1.5 flex min-h-11 items-center justify-between pr-[calc(var(--pad)-12px)] pl-[var(--pad)]"
+        >
           <p className="mono text-ink-3">{dateLine(now)}</p>
           <ThemeButton className="min-[700px]:hidden" />
         </StickyHeader>
@@ -232,11 +259,13 @@ async function HomeBody() {
           </Link>
         )}
 
-        <Greeting sentence={view.greeting} />
+        <div {...part(1)}>
+          <Greeting sentence={view.greeting} />
+        </div>
 
         <DoodleDefs />
 
-        <section className="mt-8" aria-labelledby="lbl-first">
+        <section {...part(2)} className="mt-8" aria-labelledby="lbl-first">
           <SectionLabel id="lbl-first">DO FIRST</SectionLabel>
           {view.biteFirst && view.bite ? (
             <>
@@ -251,7 +280,7 @@ async function HomeBody() {
           )}
         </section>
 
-        <section className="mt-8 flex flex-col" aria-labelledby="lbl-then">
+        <section {...part(3)} className="mt-8 flex flex-col" aria-labelledby="lbl-then">
           <SectionLabel id="lbl-then">THEN</SectionLabel>
           {view.then.length > 0 ? (
             <Queue>
@@ -287,7 +316,7 @@ async function HomeBody() {
         </section>
 
         {view.exams.length > 0 && (
-          <section className="mt-8" aria-labelledby="lbl-exams">
+          <section {...part(4)} className="mt-8" aria-labelledby="lbl-exams">
             <SectionLabel id="lbl-exams">EXAMS AND QUIZZES</SectionLabel>
             <ExamCards exams={view.exams} />
           </section>
@@ -295,24 +324,18 @@ async function HomeBody() {
       </div>
 
       <aside className="mt-9 flex min-w-0 flex-col gap-4 @min-[960px]:mt-0 @min-[960px]:pt-0.5" aria-label="This week">
-        <WeekCard week={view.week} />
+        <div {...part(5)}>
+          <WeekCard week={view.week} />
+        </div>
       </aside>
-    </>
+    </Arrive>
   );
 }
 
-export default function HomePage() {
+export default function HomePage({ searchParams }: { searchParams: Search }) {
   return (
-    <div
-      className={
-        "mx-auto grid max-w-[720px] grid-cols-[minmax(0,1fr)] gap-x-10 px-[var(--pad)] pb-4 " +
-        "pt-[max(16px,env(safe-area-inset-top,0px))] min-[700px]:px-10 min-[700px]:pt-8 min-[700px]:pb-6 " +
-        "min-[700px]:[--pad:40px] @min-[960px]:max-w-[1100px] @min-[960px]:grid-cols-[minmax(0,720px)_340px]"
-      }
-    >
-      <Suspense fallback={null}>
-        <HomeBody />
-      </Suspense>
-    </div>
+    <Suspense fallback={null}>
+      <HomeBody searchParams={searchParams} />
+    </Suspense>
   );
 }
