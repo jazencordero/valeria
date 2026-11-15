@@ -35,5 +35,12 @@ export default defineConfig({
     url: baseURL,
     reuseExistingServer: false,
     timeout: 120_000,
+    // The whole-flow tests run against the pretend Moodle. The fallback seal value is a
+    // test value for this throwaway local server, not a secret.
+    env: {
+      ...(process.env as Record<string, string>),
+      MOODLE_FAKE: "1",
+      KEY_SEAL_SECRET: process.env.KEY_SEAL_SECRET ?? "e2e-only-not-a-secret",
+    },
   },
 });
