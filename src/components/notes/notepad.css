@@ -97,6 +97,26 @@
 .np-tool[aria-pressed="true"] .np-pill { background: var(--butter); border-color: var(--ink-3); color: var(--ink); }
 .np-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
 
+/*
+ * With the tutor (M2-28): note on top, chat under it, a handle between them;
+ * from 700 px the panel's left edge is a second handle (width set inline).
+ */
+.np-split { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.np-top { flex: 0 0 auto; min-height: 0; display: flex; flex-direction: column; }
+.np-top .np-actions { margin-top: 8px; }
+.np-split-handle { flex: none; position: relative; height: 24px; display: flex; align-items: center; justify-content: center; cursor: row-resize; touch-action: none; user-select: none; }
+.np-split-handle::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--line); }
+.np-split-handle span { position: relative; width: 40px; height: 6px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
+.np-split-handle:hover span { background: var(--paper); border-color: var(--ink-3); }
+.np-split-handle:focus-visible { outline: none; }
+.np-split-handle:focus-visible span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.np-chat { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.np-edge { position: absolute; top: 0; bottom: 0; left: -8px; width: 16px; z-index: 1; cursor: col-resize; touch-action: none; user-select: none; }
+.np-edge::after { content: ""; position: absolute; left: 6px; top: 50%; width: 4px; height: 44px; margin-top: -22px; border-radius: 999px; background: var(--line); transition: background-color var(--t-quick) var(--e-out); }
+.np-edge:hover::after { background: var(--ink-3); }
+.np-edge:focus-visible { outline: none; }
+.np-edge:focus-visible::after { background: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
+
 @keyframes np-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes np-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 

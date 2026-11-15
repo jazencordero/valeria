@@ -365,3 +365,92 @@ describe("Notepad: Turn into cards", () => {
     expect(actions.addCards).toHaveBeenCalledWith(NOTE_ID, [{ front: "SLA", back: "service level" }], undefined);
   });
 });
+
+describe("Notepad with the tutor (M2-28)", () => {
+  function tutorApi() {
+    const calls: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const b = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push(b);
+      if (b.mode === "load") return Response.json({ messages: [], deeperAvailable: false });
+      const lines = [
+        { type: "start", messageMetadata: { model: "groq:openai/gpt-oss-120b", answerId: NOTE_ID, questionId: "q", deeper: false } },
+        { type: "text-start", id: "0" },
+        { type: "text-delta", id: "0", delta: "PV is today's worth." },
+        { type: "text-end", id: "0" },
+        { type: "finish" },
+      ];
+      return new Response(lines.map((l) => `data: ${JSON.stringify(l)}\n\n`).join(""), { status: 200 });
+    });
+    return { calls, api: { fetch: fetch as unknown as typeof globalThis.fetch, writeClipboard: vi.fn(async () => {}) } };
+  }
+
+  it("without the switch: no chat and no handles", async () => {
+    wide = true;
+    render(<NotepadView pathname="/home" actions={fakeActions()} />);
+    const pad = await openPad();
+    expect(pad.className).toBe("np");
+    expect(screen.queryByTestId("tutor-chat")).toBeNull();
+    expect(screen.queryAllByRole("separator")).toHaveLength(0);
+  });
+
+  it("with the switch on a phone: note on top, chat below, a split handle and no width handle", async () => {
+    const { api } = tutorApi();
+    render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api} />);
+    const pad = await openPad();
+    expect(pad.getAttribute("aria-modal")).toBe("true");
+    expect(pad.querySelector("#np-top")?.contains(body())).toBe(true);
+    expect(screen.getByTestId("tutor-chat")).toBeTruthy();
+    const split = screen.getByRole("separator", { name: "Resize the note and the tutor" });
+    expect(split.getAttribute("aria-valuenow")).toBe("45");
+    fireEvent.keyDown(split, { key: "ArrowDown" });
+    expect(split.getAttribute("aria-valuenow")).toBe("50");
+    fireEvent.keyDown(split, { key: "Home" });
+    expect(split.getAttribute("aria-valuenow")).toBe("20");
+    expect(screen.queryByTestId("notepad-edge")).toBeNull();
+  });
+
+  it("wide: the panel's edge sets the width, 360 px to 70% of the window, remembered", async () => {
+    wide = true;
+    vi.stubGlobal("innerWidth", 1200);
+    const { api } = tutorApi();
+    const { unmount } = render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api} />);
+    let pad = await openPad();
+    expect(pad.hasAttribute("aria-modal")).toBe(false);
+    const edge = screen.getByRole("separator", { name: "Resize the notes panel" });
+    expect(edge.getAttribute("aria-valuenow")).toBe("420");
+    expect(edge.getAttribute("aria-valuemax")).toBe("840");
+    fireEvent.keyDown(edge, { key: "ArrowLeft" });
+    expect(edge.getAttribute("aria-valuenow")).toBe("444");
+    expect(pad.style.width).toBe("444px");
+    fireEvent.keyDown(edge, { key: "End" });
+    expect(edge.getAttribute("aria-valuenow")).toBe("840");
+    fireEvent.keyDown(edge, { key: "Home" });
+    fireEvent.keyDown(edge, { key: "ArrowRight" });
+    expect(edge.getAttribute("aria-valuenow")).toBe("360");
+    fireEvent.keyDown(edge, { key: "ArrowLeft" });
+    expect(localStorage.getItem("ready-notes-width")).toBe("384");
+    unmount();
+
+    render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api} />);
+    pad = await openPad();
+    expect(pad.style.width).toBe("384px");
+  });
+
+  it("a highlight opens the chat with the starters; Save to note appends the answer to the note and saves it", async () => {
+    const { api, calls } = tutorApi();
+    const actions = fakeActions();
+    render(<NotepadView pathname="/home" actions={actions} tutor tutorApi={api} />);
+    act(() => openNotepad({ quote: "PV = FV / (1 + r)^t" }));
+    await flush(20);
+    fireEvent.change(body(), { target: { value: "My line" } });
+    fireEvent.click(screen.getByRole("button", { name: "Explain this simply" }));
+    await flush(SAVE_PAUSE_MS);
+    await flush(20);
+    expect(calls[1]).toEqual({ text: "Explain this simply", where: { kind: "other" }, noteId: NOTE_ID, quote: "PV = FV / (1 + r)^t" });
+    fireEvent.click(screen.getByRole("button", { name: "Save to note" }));
+    expect((body() as HTMLTextAreaElement).value).toBe("My line\n\nPV is today's worth.");
+    await flush(SAVE_PAUSE_MS);
+    expect(actions.save).toHaveBeenLastCalledWith(expect.objectContaining({ id: NOTE_ID, body: "My line\n\nPV is today's worth." }));
+  });
+});
