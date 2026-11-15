@@ -6,7 +6,13 @@
  *
  * Wordmark with the tiny cap, the main links, her courses and a user chip
  * that opens Settings. Current page gets `aria-current="page"`.
- * Cut (M4, M9-13): the moving indicator, badges, the theme button and Notes.
+ * Cut (M4, M9-13): badges, the theme button and Notes.
+ *
+ * A 3 px rose marker sits at the left of the main links and springs to the
+ * current one (M4-02, main-flow.html JS 3968-3979: bounce 0.2, 250 ms).
+ * Instant on first paint, with reduced motion and under the fast test switch.
+ * The main links also say which way a tab switch travels (`transitionTypes`,
+ * see `page-transition.tsx`).
  *
  * Folds to a 72 px icon rail (M4-01, main-flow.html CSS 387-420): the button
  * in the head toggles it, state and animation live in `use-side.ts`. Width
@@ -18,10 +24,12 @@
  * `SideNav` reads the path itself; `SideNavView` takes it as a prop so the
  * layout can render it as a Suspense fallback and previews can pin a path.
  */
+import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
 import { Vitonen } from "@/components/vitonen";
+import { useMotionMode } from "@/lib/motion/use-calm";
 import {
   SETTINGS_HREF,
   SIDE_ITEMS,
@@ -30,6 +38,7 @@ import {
   sideCurrent,
   type IconShape,
 } from "./nav-items";
+import { tabTransitionTypes } from "./page-transition";
 import { useSide } from "./use-side";
 
 export type CourseColor = "butter" | "mint" | "sky" | "blush";
@@ -88,6 +97,13 @@ const ROW =
   "[@media(hover:hover)]:hover:bg-surface [@media(hover:hover)]:hover:text-ink " +
   "aria-[current=page]:bg-surface aria-[current=page]:text-ink aria-[current=page]:font-semibold";
 
+/** Main links are 44 px rows (h-11) with a 2 px gap (gap-0.5). */
+const ROW_PITCH = 46;
+/** Centres the 20 px marker in a 44 px row. */
+const MARKER_INSET = 12;
+const MARKER_SPRING = { type: "spring", bounce: 0.2, duration: 0.25 } as const;
+const MARKER_INSTANT = { duration: 0 } as const;
+
 export function SideNav(props: SideNavProps) {
   const pathname = usePathname();
   return <SideNavView {...props} pathname={pathname} />;
@@ -103,6 +119,8 @@ export function SideNavView({
   const initial = user?.firstName?.charAt(0).toUpperCase() ?? "";
   const sideRef = useRef<HTMLElement>(null);
   const { collapsed, toggle } = useSide(sideRef);
+  const mode = useMotionMode();
+  const markerRow = SIDE_ITEMS.findIndex((item) => item.id === current);
   /** Tooltip for a link whose label is folded away. */
   const tip = (label: string) => (collapsed ? label : undefined);
 
@@ -138,11 +156,14 @@ export function SideNavView({
         </button>
       </div>
 
-      <nav aria-label="Main" className="grid gap-0.5">
+      <nav aria-label="Main" className="relative grid gap-0.5">
         {SIDE_ITEMS.map((item) => (
           <Link
             key={item.id}
             href={item.href}
+            transitionTypes={
+              mode === "instant" ? undefined : tabTransitionTypes(pathname, item.href)
+            }
             aria-current={current === item.id ? "page" : undefined}
             title={tip(item.label)}
             className={`${ROW} px-3.5 text-[15px] font-medium`}
@@ -151,6 +172,17 @@ export function SideNavView({
             <span className={FADE}>{item.label}</span>
           </Link>
         ))}
+        {/* Mounted only on a main page, so it appears in place and only springs between items. */}
+        {markerRow >= 0 ? (
+          <motion.span
+            aria-hidden="true"
+            data-testid="nav-marker"
+            className="pointer-events-none absolute top-0 left-0 h-5 w-[3px] rounded-full bg-accent"
+            initial={false}
+            animate={{ y: markerRow * ROW_PITCH + MARKER_INSET }}
+            transition={mode === "full" ? MARKER_SPRING : MARKER_INSTANT}
+          />
+        ) : null}
       </nav>
 
       {courses.length > 0 ? (

@@ -19,12 +19,18 @@
  * The grid turns that and the width into `--side-c` (1 folded, 0 open), which
  * sizes the side nav in plain CSS: no jump on reload, no hydration mismatch.
  *
+ * The page sits inside `PageTransition` (M4-02): switching between sidebar
+ * tabs fades the old page out and lifts the new one in, and focus moves to
+ * the new heading. The demo line has its own view-transition name so it stays
+ * put, above the pages, while they change.
+ *
  * A demo user (M1-37, `users.settings.demo`) gets a thin "Demo data" line at
  * the top of the page area, with "Restart demo" (GET /demo?reset=1).
  */
 import { asc, and, eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
+import { PageTransition } from "@/components/shell/page-transition";
 import { SideNav, SideNavView, type SideCourse, type SideUser } from "@/components/shell/side-nav";
 import { TabBar, TabBarView } from "@/components/shell/tab-bar";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
@@ -65,7 +71,10 @@ async function DemoBanner() {
   // Same check as `isDemo` in @/server/demo/seed, written out so the shell does not load the seed code.
   if (user.settings?.demo !== true) return null;
   return (
-    <p className="sticky top-0 z-10 m-0 flex items-center justify-center gap-3 border-b border-line bg-butter px-4 py-1 text-[12px] font-medium text-ink">
+    <p
+      className="sticky top-0 z-10 m-0 flex items-center justify-center gap-3 border-b border-line bg-butter px-4 py-1 text-[12px] font-medium text-ink"
+      style={{ viewTransitionName: "demo-banner" }}
+    >
       <span>Demo data</span>
       {/* A route handler, not a page: a plain link, so no prefetch runs the reset. */}
       <a href="/demo?reset=1" className="text-ink-2 underline underline-offset-2">
@@ -101,7 +110,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <Suspense fallback={null}>
             <DemoBanner />
           </Suspense>
-          {children}
+          <PageTransition>{children}</PageTransition>
         </main>
         <Suspense fallback={<TabBarView pathname={null} />}>
           <TabBar />
