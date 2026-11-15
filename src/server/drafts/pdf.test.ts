@@ -214,7 +214,7 @@ describe("GET /api/drafts/[assignmentId]/pdf", () => {
   async function assignmentFor(userId: string) {
     const [course] = await t.db
       .insert(courses)
-      .values({ userId, moodleId: ++refs, name: "Plant Biology", aiPolicy: "allowed" })
+      .values({ userId, moodleId: ++refs, name: "Plant Biology", aiAssignments: "allowed" })
       .returning();
     const [assignment] = await t.db
       .insert(assignments)
