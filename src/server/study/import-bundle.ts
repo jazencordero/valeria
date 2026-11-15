@@ -68,7 +68,10 @@
  *   `body.importId` gone; (2) else the same `content_hash` anywhere in her account (the schema's
  *   unique key) -> skipped; (3) else created with `origin 'manual'`, `import_id`,
  *   `card_concepts` links and a fresh `card_states` row due at max(now, `startNewOn` 00:00
- *   Helsinki). Sessions hold new cards back until that day (`./start-date`).
+ *   Helsinki). Sessions hold new cards back until that day (`./start-date`). New cards are
+ *   stamped (`created_at`) in the bundle's order, lecture by lecture and card by card, so the
+ *   deck order sessions read (`loadDeck`: creation order) is the bundle's. Cards that are
+ *   already there keep their stamp.
  * - Exam documents: same exam + same slug. Same title, text and position -> skipped; else
  *   updated. A document no longer in the bundle is left.
  * - AI rules (M2-27, `aiRuleFor`): account.json `aiAllowed` (or a list entry's `allowed`) true -> both allowed; false + scope "assignments" ->
@@ -1512,10 +1515,15 @@ export async function applyImport(
     }
 
     const fresh = newCard(dueAt);
+    // Deck order is creation order (`loadDeck`). One insert gives every row the same
+    // `created_at`, which left the order to the random ids: each card is stamped a
+    // microsecond after the one before it, so the deck is in the bundle's order.
+    let nth = 0;
+    const createdNth = () => sql<Date>`now() + interval '${sql.raw(String(nth++))} microseconds'`;
     for (const part of chunks(toInsert)) {
       const rows = await tx
         .insert(cards)
-        .values(part.map((p) => ({ userId, examId, origin: "manual" as const, ...cardColumns(p) })))
+        .values(part.map((p) => ({ userId, examId, origin: "manual" as const, ...cardColumns(p), createdAt: createdNth() })))
         .returning({ id: cards.id, hash: cards.contentHash });
       const idOf = new Map(rows.map((r) => [r.hash, r.id]));
       await tx

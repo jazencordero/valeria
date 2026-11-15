@@ -11,6 +11,7 @@ import { highlights, lectureConcepts, lectureContent, lectures, notes } from "@/
 import { moodleConnections } from "@/server/db/schema/moodle";
 import { cardConcepts, cards, cardStates, concepts, examDocuments, exams } from "@/server/db/schema/study";
 import { users } from "@/server/db/schema/users";
+import { loadDeck } from "@/server/study/store";
 import { parseArgs, run } from "../../../scripts/study/import-bundle";
 import {
   applyImport,
@@ -649,6 +650,45 @@ describe("applyImport", () => {
         aiPolicy: { created: 0, skipped: 0, updated: 0 },
       });
       expect(await rowCounts()).toEqual(before);
+    },
+    T,
+  );
+
+  it(
+    "the deck sessions read is in the bundle's order: lecture by lecture, card by card",
+    async () => {
+      // Two lectures of twelve invented cards each. The ids are written so that neither the
+      // random row ids nor the import ids' alphabet give this order by chance.
+      const card = (lecture: number, i: number) => ({
+        id: `${lecture === 1 ? "zz" : "aa"}-${String(13 - i).padStart(2, "0")}`,
+        type: "basic",
+        concept: i % 2 ? "moving-average" : "error-measures",
+        q: `Invented question ${lecture}.${i}?`,
+        a: `Invented answer ${lecture}.${i}.`,
+        why: "Invented.",
+        source: `Lecture ${lecture}, slide ${i}`,
+      });
+      const numbers = Array.from({ length: 12 }, (_, i) => i + 1);
+      const two: CourseBundle = {
+        ...course,
+        seed: { ...course.seed, lectures: [1, 2].map((n) => ({ ...course.seed.lectures[0], n, title: `Invented lecture ${n}`, deck: `deck-${n}.json` })) },
+        decks: [1, 2].map((n) => ({ lecture: n, file: `deck-${n}.json`, cards: numbers.map((i) => card(n, i)) })),
+      };
+      const twoPlan = planImport(two);
+      const wanted = twoPlan.cards.map((c) => c.importId);
+      expect(wanted).toEqual([...numbers.map((i) => card(1, i).id), ...numbers.map((i) => card(2, i).id)]);
+
+      const result = await applyImport(t.db, her, twoPlan, { now: NOW });
+      expect(result.counts.cards.created).toBe(24);
+      expect((await loadDeck(her, result.examId, t.db)).cards.map((c) => c.importId)).toEqual(wanted);
+
+      // A second run leaves the order (and every stamp) as it is.
+      const stamps = () => t.db.select({ id: cards.id, at: sql<string>`${cards.createdAt}::text` }).from(cards).orderBy(cards.id);
+      const before = await stamps();
+      expect(new Set(before.map((r) => r.at)).size).toBe(24);
+      await applyImport(t.db, her, planImport(two), { now: new Date(NOW.getTime() + 60_000) });
+      expect(await stamps()).toEqual(before);
+      expect((await loadDeck(her, result.examId, t.db)).cards.map((c) => c.importId)).toEqual(wanted);
     },
     T,
   );
