@@ -28,8 +28,9 @@
 
 .cpath .cp-lbl{ position: absolute; right: 0; transform: translateY(-50%); cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
 .cpath .cp-lbl > .mono{ color: var(--ink-3); }
-.cpath .cp-lbl-t{ margin-top: 2px; font-family: var(--display); font-weight: 600; font-size: 17px; line-height: 1.25; font-variation-settings: "SOFT" 100; }
-.cpath .cp-lbl-c{ margin-top: 2px; font-size: 13px; color: var(--ink-2); }
+.cpath .cp-lbl-t{ margin-top: 2px; font-family: var(--display); font-weight: 600; font-size: 17px; line-height: 1.25; font-variation-settings: "SOFT" 100; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* One line, as the ticket says: a long summary would run into the next stop's label (labels are centred on their stops). */
+.cpath .cp-lbl-c{ margin-top: 2px; font-size: 13px; color: var(--ink-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; line-clamp: 1; overflow: hidden; overflow-wrap: normal; }
 .cpath .cp-lbl .cp-lbl-m{ margin-top: 4px; color: var(--ink-3); }
 .cpath .cp-lbl:hover .cp-lbl-t{ text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 4px; }
 .cpath .cp-here{ position: relative; display: inline-block; margin-bottom: 6px; padding: 3px 10px; border-radius: 999px; background: var(--btn); color: var(--btn-ink); font-size: 12px; font-weight: 600; }

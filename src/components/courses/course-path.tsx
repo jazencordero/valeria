@@ -502,7 +502,11 @@ export function CoursePath({
               {lec.state === "cur" && <span className="cp-here">You are here</span>}
               <p className="mono">LECTURE {lec.n}</p>
               <p className="cp-lbl-t">{titleOf(lec)}</p>
-              {lec.line && <p className="cp-lbl-c">{lec.line}</p>}
+              {lec.line && (
+                <p className="cp-lbl-c" title={lec.line}>
+                  {lec.line}
+                </p>
+              )}
               {meta && <p className="mono cp-lbl-m">{meta}</p>}
             </div>
           </Fragment>
