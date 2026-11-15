@@ -19,6 +19,7 @@ import {
   QUESTION_CLASS,
   RevealedAnswer,
   SourceChip,
+  WhyLine,
   useOnce,
   useSpaceToReveal,
   type SessionCardProps,
@@ -26,7 +27,7 @@ import {
 
 export const SHOW_ANSWER = "Show answer";
 
-export type CardBasicProps = SessionCardProps & { card: Pick<BasicCard, "q" | "a" | "source"> };
+export type CardBasicProps = SessionCardProps & { card: Pick<BasicCard, "q" | "a" | "source" | "why"> };
 
 export function CardBasic({
   card,
@@ -61,7 +62,8 @@ export function CardBasic({
         <h2 className={QUESTION_CLASS}>{card.q}</h2>
         {revealed ? (
           <RevealedAnswer>
-            <p className="text-[17px] leading-[1.5]">{card.a}</p>
+            <p className="text-[17px] leading-[1.5] whitespace-pre-line [overflow-wrap:anywhere]">{card.a}</p>
+            <WhyLine why={card.why} />
             <SourceChip source={card.source} />
           </RevealedAnswer>
         ) : null}

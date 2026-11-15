@@ -12,8 +12,8 @@ import type { SectionKind } from "@/lib/study/bite";
 
 // Made-up sample content.
 type Sample =
-  | { id: string; title: string; type: "basic"; section: SectionKind; names: string[]; rung: number; q: string; a: string; source: string }
-  | { id: string; title: string; type: "cloze"; section: SectionKind; names: string[]; rung: number; q: string; source: string };
+  | { id: string; title: string; type: "basic"; section: SectionKind; names: string[]; rung: number; q: string; a: string; source: string; why?: string }
+  | { id: string; title: string; type: "cloze"; section: SectionKind; names: string[]; rung: number; q: string; source: string; why?: string };
 
 const SAMPLES: Sample[] = [
   {
@@ -69,6 +69,29 @@ const SAMPLES: Sample[] = [
     q: "The cost of making one more unit is called the {{marginal cost}}.",
     source: "Lecture 5, slide 2",
   },
+  {
+    id: "basic-model",
+    title: "Recall, multi-line answer with a why",
+    type: "basic",
+    section: "learn",
+    names: ["Linear programming"],
+    rung: 2,
+    q: "Write the model for the bakery: bread earns 3, cake earns 2, the oven has 4 hours, the mixer 6.",
+    a: "max z = 3x + 2y\nsubject to x + y \u2264 4 (oven)\nx + 3y \u2264 6 (mixer)\nx \u2264 3 (flour)\nx \u2265 0\ny \u2265 0",
+    why: "The objective adds up what each product earns.\nEach resource gives one constraint.\nThe last two rule out negative amounts.",
+    source: "Lecture 6, slide 8",
+  },
+  {
+    id: "cloze-why",
+    title: "Fill the gap, with a why",
+    type: "cloze",
+    section: "learn",
+    names: ["Linear programming"],
+    rung: 1,
+    q: "A constraint that holds with equality at the optimum is called {{binding}}.",
+    why: "Its resource is used up completely.\nLoosening it would improve the objective.",
+    source: "Lecture 6, slide 12",
+  },
 ];
 
 function setTheme(theme: "light" | "dark" | "system") {
@@ -100,9 +123,9 @@ function SampleCard({
     onRevealed,
   };
   return s.type === "basic" ? (
-    <CardBasic card={{ q: s.q, a: s.a, source: s.source }} {...common} />
+    <CardBasic card={{ q: s.q, a: s.a, source: s.source, why: s.why }} {...common} />
   ) : (
-    <CardCloze card={{ q: s.q, source: s.source }} {...common} />
+    <CardCloze card={{ q: s.q, source: s.source, why: s.why }} {...common} />
   );
 }
 

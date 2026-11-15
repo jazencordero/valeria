@@ -219,3 +219,44 @@ describe("revealHint", () => {
     expect(revealHint(true)).toBe("Space to reveal · 1 or 2 to grade");
   });
 });
+
+describe("line breaks and why (M3-55)", () => {
+  const SIX = "max z = 3x + 2y\ns.t. x + y <= 4\nx + 3y <= 6\nx <= 3\nx >= 0\ny >= 0";
+  const WHY = "Each line is one constraint.\nThe last two keep it feasible.\nSo the model is complete.";
+
+  it("a six-line basic answer keeps its six lines", async () => {
+    const { user } = basic({ card: { ...BASIC, a: SIX } });
+    await user.click(screen.getByRole("button", { name: SHOW_ANSWER }));
+    const answer = screen.getByText((_, el) => el?.tagName === "P" && el.textContent === SIX);
+    expect(answer.textContent!.split("\n")).toHaveLength(6);
+    expect(answer.className).toContain("whitespace-pre-line");
+  });
+
+  it("shows the why on a basic card after reveal, with its line breaks", async () => {
+    const { user } = basic({ card: { ...BASIC, why: WHY } });
+    expect(screen.queryByTestId("sc-why")).toBeNull();
+    await user.click(screen.getByRole("button", { name: SHOW_ANSWER }));
+    const why = screen.getByTestId("sc-why");
+    expect(why.textContent).toBe(`Why. ${WHY}`);
+    expect(why.className).toContain("whitespace-pre-line");
+  });
+
+  it("shows no why line on a basic card without one", async () => {
+    const { user } = basic();
+    await user.click(screen.getByRole("button", { name: SHOW_ANSWER }));
+    expect(screen.queryByTestId("sc-why")).toBeNull();
+  });
+
+  it("shows the why on a fill-the-gap card once every blank is open", async () => {
+    const { user } = cloze({ card: { ...CLOZE, why: WHY } });
+    expect(screen.queryByTestId("sc-why")).toBeNull();
+    for (let i = 0; i < 3; i++) await user.click(screen.getByRole("button", { name: SHOW_NEXT_WORD }));
+    expect(screen.getByTestId("sc-why").textContent).toBe(`Why. ${WHY}`);
+  });
+
+  it("shows no why line on a fill-the-gap card without one", async () => {
+    const { user } = cloze();
+    for (let i = 0; i < 3; i++) await user.click(screen.getByRole("button", { name: SHOW_NEXT_WORD }));
+    expect(screen.queryByTestId("sc-why")).toBeNull();
+  });
+});

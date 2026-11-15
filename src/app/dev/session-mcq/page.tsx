@@ -61,6 +61,22 @@ const BOSS: Demo = {
   },
 };
 
+const MODEL: Demo = {
+  section: "learn",
+  concept: "Linear programming",
+  boss: false,
+  card: {
+    q: "Which constraint is binding at the optimum x = 3, y = 1?",
+    opts: [
+      ["x + y \u2264 4", true],
+      ["x + 3y \u2264 9", false],
+      ["y \u2264 5", false],
+    ],
+    why: "x + y = 3 + 1 = 4, so it holds with equality.\nx + 3y = 6 is below 9, so it has slack.\ny = 1 is far below 5.",
+    source: "Lecture 6, slide 12",
+  },
+};
+
 const DECK = [SURPLUS, ELASTIC, BOSS];
 
 function Head({ demo }: { demo: Demo }) {
@@ -227,6 +243,7 @@ export default function SessionMcqPage() {
         <Panel title="Right" demo={ELASTIC} pick={1} grade={3} />
         <Panel title="Wrong" demo={ELASTIC} pick={2} grade={1} />
         <Panel title="Boss" demo={BOSS} pick={0} grade={3} />
+        <Panel title="Three options, multi-line why" demo={MODEL} pick={0} grade={3} />
       </div>
 
       <Live />

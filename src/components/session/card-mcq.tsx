@@ -242,7 +242,7 @@ export function CardMcq({ card, head, onResult, keys = true, initialPick, classN
             transition={full ? { duration: 0.24, delay: 0.2, ease: ease.out } : fade}
           >
             {card.why ? (
-              <p className="text-[15px] leading-normal">
+              <p className="text-[15px] leading-normal whitespace-pre-line [overflow-wrap:anywhere]">
                 <b className="font-semibold">{WHY_LABEL}</b> {card.why}
               </p>
             ) : null}

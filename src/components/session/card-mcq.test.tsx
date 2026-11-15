@@ -217,3 +217,13 @@ describe("FeedbackStrip", () => {
     vi.useRealTimers();
   });
 });
+
+describe("multi-line why (M3-55)", () => {
+  it("keeps the why's line breaks after a pick", () => {
+    const why = "First line.\nSecond line.\nThird line.";
+    render(<CardMcq card={{ ...CARD, why }} initialPick={0} />);
+    const p = screen.getByTestId("mcq-why").querySelector("p")!;
+    expect(p.textContent).toContain(why);
+    expect(p.className).toContain("whitespace-pre-line");
+  });
+});

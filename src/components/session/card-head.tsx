@@ -157,6 +157,19 @@ export function RevealedAnswer({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * The card's "why", shown after the answer: "Why." then the text, quiet, with
+ * her line breaks kept. Nothing when the card has none.
+ */
+export function WhyLine({ why }: { why?: string | null }) {
+  if (!why || why.trim() === "") return null;
+  return (
+    <p className="mt-4 text-[15px] leading-normal whitespace-pre-line [overflow-wrap:anywhere]" data-testid="sc-why">
+      <b className="font-semibold">Why.</b> {why}
+    </p>
+  );
+}
+
 function isOtherControl(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (target.closest("button, a[href], input, textarea, select, summary, [role='button'], [role='menuitem']")) return true;

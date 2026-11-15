@@ -26,6 +26,7 @@ import {
   QUESTION_CLASS,
   RevealedAnswer,
   SourceChip,
+  WhyLine,
   useOnce,
   useSpaceToReveal,
   type SessionCardProps,
@@ -52,7 +53,7 @@ export function clozeParts(q: string): ClozePart[] {
   return parts;
 }
 
-export type CardClozeProps = SessionCardProps & { card: Pick<ClozeCard, "q" | "source"> };
+export type CardClozeProps = SessionCardProps & { card: Pick<ClozeCard, "q" | "source" | "why"> };
 
 export function CardCloze({
   card,
@@ -130,6 +131,7 @@ export function CardCloze({
         </p>
         {done ? (
           <RevealedAnswer>
+            <WhyLine why={card.why} />
             <SourceChip source={card.source} />
           </RevealedAnswer>
         ) : null}
