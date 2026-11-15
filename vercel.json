@@ -4,5 +4,12 @@
   "regions": [
     "fra1"
   ],
-  "buildCommand": "if [ -n \"$DATABASE_URL\" ]; then DATABASE_URL=\"${DATABASE_URL_UNPOOLED:-$DATABASE_URL}\" npx drizzle-kit migrate || exit 1; fi; npm run build"
+  "buildCommand": "if [ -n \"$DATABASE_URL\" ]; then DATABASE_URL=\"${DATABASE_URL_UNPOOLED:-$DATABASE_URL}\" npx drizzle-kit migrate || exit 1; fi; npm run build",
+  "git": {
+    "deploymentEnabled": {
+      "claude/**": false,
+      "feat/**": false,
+      "scratch/**": false
+    }
+  }
 }

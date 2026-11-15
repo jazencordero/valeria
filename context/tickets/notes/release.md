@@ -10,9 +10,10 @@ Free hosting gives a limited number of builds, so most pushes do not build.
 |---|---|
 | `main` | Builds. This is production. |
 | `preview/<name>` | Builds. This is a preview link for testers. |
-| anything else (`claude/*`, `feat/*`, `scratch/*`) | Skips. No build is used. |
+| `claude/**`, `feat/**`, `scratch/**` | No deployment at all (`git.deploymentEnabled` set to false for these patterns). |
+| anything else | Created but cancelled by `ignoreCommand` (a second guard). |
 
-Vercel's rule: the command exiting 1 means build, exiting 0 means skip. A deploy started by hand with the Vercel CLI has no branch, so it is skipped too; use a `preview/*` push instead.
+Why both: on the free plan a deployment that `ignoreCommand` cancels still counts toward the daily deployment limit (learned 2026-11-15: a day of trunk pushes used it up and the live deploy was refused for 24 hours). `git.deploymentEnabled` stops Vercel creating the deployment at all, so build branches cost nothing. Never push build work to a branch outside those patterns. Vercel's rule for `ignoreCommand`: exiting 1 means build, exiting 0 means skip. A deploy started by hand with the Vercel CLI has no branch, so it is skipped too; use a `preview/*` push instead.
 
 ## How work moves
 
