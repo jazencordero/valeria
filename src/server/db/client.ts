@@ -4,8 +4,14 @@
  * - DATABASE_URL set: Neon serverless driver (WebSocket Pool, so transactions
  *   behave the same as on PGlite). Migrations are not run from here; they
  *   are applied to Neon with `npm run db:migrate`.
- * - DATABASE_URL unset: PGlite stored in `.data/pglite`. The migrations in
- *   `./drizzle` are applied on first use; every query waits for them.
+ * - DATABASE_URL unset: PGlite stored outside the project (`localDbDir`):
+ *   `PGLITE_DIR` if set, else `~/.cache/ready/pglite-<hash of the project path>`,
+ *   so each checkout and worktree has its own. The migrations in `./drizzle`
+ *   are applied on first use; every query waits for them.
+ *   Why outside (M1-51): PGlite writes its files on every query. Inside the
+ *   project (`.data/pglite`, where it used to be) the dev server's file watcher
+ *   saw each write and recompiled, and every open page reloaded in a loop
+ *   (measured: 199 loads of /home in 20 s).
  *
  * Nothing is opened at import time. The driver is created the first time
  * `db` is touched, so `next build` can import this module with no database.
@@ -22,7 +28,9 @@
  *   file next to the data folder, `.data/pglite.lock`, holding the owner's
  *   process id. A lock whose owner is no longer running is taken over.
  */
-import { linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { Pool } from "@neondatabase/serverless";
@@ -61,7 +69,27 @@ export type Schema = typeof schema;
 export type Db = PgDatabase<PgQueryResultHKT, Schema>;
 
 export const MIGRATIONS_FOLDER = path.join(process.cwd(), "drizzle");
-const PGLITE_DIR = path.join(process.cwd(), ".data", "pglite");
+
+/**
+ * Where the local PGlite database of a project lives: `PGLITE_DIR` when set,
+ * otherwise `<home>/.cache/ready/pglite-<12 hex of sha-256 of the project's
+ * absolute path>`. Never inside the project unless `PGLITE_DIR` points there.
+ */
+export function localDbDir(
+  projectRoot: string = process.cwd(),
+  env: Record<string, string | undefined> = process.env,
+  home: string = homedir(),
+): string {
+  const chosen = env.PGLITE_DIR?.trim();
+  if (chosen) return path.resolve(projectRoot, chosen);
+  const id = createHash("sha256").update(path.resolve(projectRoot)).digest("hex").slice(0, 12);
+  return path.join(home, ".cache", "ready", `pglite-${id}`);
+}
+
+/** Where the local database was before M1-51. Only looked at to say that it moved. */
+export function oldLocalDbDir(projectRoot: string = process.cwd()): string {
+  return path.join(projectRoot, ".data", "pglite");
+}
 
 /**
  * Wraps a PGlite client so every query first waits for `ready`. The migrator
@@ -177,7 +205,7 @@ function takeLock(dataDir: string): () => void {
  * other than this one holds the lock.
  */
 export function openLocalDb(
-  dataDir: string = PGLITE_DIR,
+  dataDir: string = localDbDir(),
   migrationsFolder: string = MIGRATIONS_FOLDER,
 ): LocalDb {
   const open = slot[LOCAL_DB];
@@ -188,6 +216,11 @@ export function openLocalDb(
     return open;
   }
 
+  // The old in-project folder is not copied (demo and test data only): say once where it went.
+  const old = oldLocalDbDir();
+  if (!existsSync(dataDir) && old !== dataDir && existsSync(old)) {
+    console.log(`The local database now lives in ${dataDir} and starts empty. The old ${old} is no longer used; delete it when you like.`);
+  }
   mkdirSync(dataDir, { recursive: true });
   const release = takeLock(dataDir);
   let client: PGlite;

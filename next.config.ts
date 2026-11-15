@@ -77,6 +77,11 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
+    // This checkout only. Without it Turbopack picks the nearest folder above with a
+    // lockfile; for a git worktree under .claude/worktrees that is the main checkout,
+    // so it watched every worktree and each file another session wrote made every
+    // open dev page rebuild and reload (199 loads of /home in 20 s, M1-51).
+    root: __dirname,
     rules: {
       "*.css": {
         loaders: ["@tailwindcss/turbopack"],

@@ -22,19 +22,22 @@ const REPO = process.cwd();
 const SLOT = Symbol.for("ready.server.db.local");
 const slot = globalThis as { [SLOT]?: LocalDb };
 
-// A stand-in project root in the temp folder: `.data/pglite` is created there,
-// never in the repository. `drizzle` points at the real migrations.
+// A stand-in project root in the temp folder, with PGLITE_DIR pointing into it, so nothing
+// is created in the repository or in the real cache folder. `drizzle` points at the real migrations.
 let root: string;
 let dataDir: string;
 let lockPath: string;
 let savedUrl: string | undefined;
+let savedDir: string | undefined;
 const children: ChildProcess[] = [];
 
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), "ready-db-client-"));
   symlinkSync(path.join(REPO, "drizzle"), path.join(root, "drizzle"), "dir");
-  dataDir = path.join(root, ".data", "pglite");
+  dataDir = path.join(root, "db", "pglite");
   lockPath = `${dataDir}.lock`;
+  savedDir = process.env.PGLITE_DIR;
+  process.env.PGLITE_DIR = dataDir;
   vi.spyOn(process, "cwd").mockReturnValue(root);
   savedUrl = process.env.DATABASE_URL;
   delete process.env.DATABASE_URL;
@@ -47,6 +50,8 @@ afterEach(async () => {
   for (const child of children.splice(0)) child.kill("SIGKILL");
   vi.restoreAllMocks();
   if (savedUrl !== undefined) process.env.DATABASE_URL = savedUrl;
+  if (savedDir !== undefined) process.env.PGLITE_DIR = savedDir;
+  else delete process.env.PGLITE_DIR;
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -144,5 +149,50 @@ describe("local database: one PGlite per process", () => {
     await local.close();
     expect(existsSync(lockPath)).toBe(false);
     expect(slot[SLOT]).toBeUndefined();
+  });
+});
+
+describe("localDbDir", () => {
+  const HOME = "/Users/someone";
+
+  it("is outside the project root, under the home cache folder", async () => {
+    const { localDbDir } = await import("./client");
+    const project = "/work/ready";
+    const dir = localDbDir(project, {}, HOME);
+    expect(dir).toMatch(/^\/Users\/someone\/\.cache\/ready\/pglite-[0-9a-f]{12}$/);
+    expect(path.relative(project, dir).startsWith("..")).toBe(true);
+  });
+
+  it("lets PGLITE_DIR win, and reads a relative one from the project root", async () => {
+    const { localDbDir } = await import("./client");
+    expect(localDbDir("/work/ready", { PGLITE_DIR: "/tmp/elsewhere/db" }, HOME)).toBe("/tmp/elsewhere/db");
+    expect(localDbDir("/work/ready", { PGLITE_DIR: "  ../db  " }, HOME)).toBe("/work/db");
+    // Empty or blank counts as not set.
+    expect(localDbDir("/work/ready", { PGLITE_DIR: "  " }, HOME)).toBe(localDbDir("/work/ready", {}, HOME));
+  });
+
+  it("gives two project paths two folders, and one path the same folder every time", async () => {
+    const { localDbDir } = await import("./client");
+    const main = localDbDir("/work/ready", {}, HOME);
+    const worktree = localDbDir("/work/ready/.claude/worktrees/one", {}, HOME);
+    expect(main).not.toBe(worktree);
+    expect(localDbDir("/work/ready/", {}, HOME)).toBe(main);
+  });
+
+  it("opens the database where PGLITE_DIR says, and says once that the old in-project one is not used", async () => {
+    mkdirSync(path.join(root, ".data", "pglite"), { recursive: true });
+    const said = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { openLocalDb } = await import("./client");
+    const local = openLocalDb();
+    await local.ready;
+    expect(local.dataDir).toBe(dataDir);
+    expect(existsSync(path.join(dataDir, "PG_VERSION"))).toBe(true);
+    expect(existsSync(path.join(root, ".data", "pglite", "PG_VERSION"))).toBe(false);
+    expect(said).toHaveBeenCalledTimes(1);
+    expect(String(said.mock.calls[0][0])).toContain(dataDir);
+    // Open again (the folder exists now): nothing more is said.
+    await local.close();
+    await openLocalDb().ready;
+    expect(said).toHaveBeenCalledTimes(1);
   });
 });
