@@ -1,0 +1,42 @@
+{
+  "exam": {
+    "courseCode": "TST-E0001",
+    "title": "Intro to Forecasting final exam",
+    "kind": "exam",
+    "at": "2026-12-10T09:00:00+02:00",
+    "gradeTarget": 4
+  },
+  "concepts": [
+    {
+      "slug": "moving-average",
+      "name": "Moving averages",
+      "lecture": 1,
+      "position": 1,
+      "weight": 2
+    },
+    {
+      "slug": "trend-season",
+      "name": "Trend and seasonality",
+      "lecture": 1,
+      "position": 2,
+      "weight": 1
+    },
+    {
+      "slug": "error-measures",
+      "name": "Forecast error measures",
+      "lecture": 1,
+      "position": 3,
+      "weight": 1
+    }
+  ],
+  "lectures": [
+    {
+      "n": 1,
+      "title": "Why forecast at all",
+      "file": "lecture-1.pdf",
+      "deck": "deck-1.json",
+      "page": "page-1.json"
+    }
+  ],
+  "startNewOn": "2026-11-24"
+}

@@ -1,0 +1,43 @@
+{
+  "breath": "Forecasting turns past observations into a best guess about the next period, and an error measure tells you how good that guess was.",
+  "minutes": 6,
+  "sections": [
+    {
+      "heading": "Averaging the recent past",
+      "blocks": [
+        ["p", "A moving average forecasts the next value as the mean of the last few observations."],
+        ["ul", ["Short windows react quickly", "Long windows smooth out noise"]]
+      ],
+      "terms": ["moving average", "window"],
+      "slides": "slides 2-5"
+    },
+    {
+      "heading": "Patterns in a series",
+      "blocks": [
+        ["dl", [["Trend", "The long-run direction of the series"], ["Seasonality", "A pattern with a fixed period"]]]
+      ],
+      "terms": ["trend", "seasonality"],
+      "slides": "slides 6-8"
+    },
+    {
+      "heading": "Measuring forecast error",
+      "blocks": [["p", "MAE averages the absolute errors; MAPE expresses them as a percentage of the actual values."]],
+      "terms": ["MAE", "MAPE"],
+      "slides": "slides 9-11"
+    }
+  ],
+  "slideTitles": [
+    "Why forecast at all",
+    "Naive forecasts",
+    "Moving averages",
+    "Choosing a window",
+    "Window trade-offs",
+    "Trend",
+    "Seasonality",
+    "Decomposition",
+    "Forecast errors",
+    "MAE",
+    "MAPE",
+    "Smoothing preview"
+  ]
+}
