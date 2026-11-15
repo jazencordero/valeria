@@ -18,6 +18,31 @@
  *   the course cannot be computed and every course-level function returns
  *   `NEEDS_WEIGHTS` (the verdict returns `{ kind: "needs_weights" }`), so the
  *   screen can ask for weights instead of showing a wrong number.
+ *
+ * Point-based courses (`unit: "points"`):
+ * - Some courses grade by a total of points, not by shares. Every function
+ *   takes an optional last argument `{ unit }` (a `GradeCourse` carries it as
+ *   `unit`, which `overall` passes on). The default, `"share"`, is the
+ *   behaviour above, unchanged bit for bit.
+ * - In `"points"` mode an item's `weight` is its maximum points (exam 80,
+ *   project 20, ...). Weights are not normalised (110 points stay 110). An
+ *   item is worth `score / 100 · weight` points, the course total is the sum,
+ *   and the grade is `gradeFromPct(total)`: the point total goes straight
+ *   onto the scale (50 points is a 1, 90 is a 5), it is not a percentage of
+ *   the maximum. Scores, fills, what-ifs and "needed" stay percentages of the
+ *   item's own maximum, so `needed` is the % of the remaining items needed.
+ *   The same `NEEDS_WEIGHTS` rules apply (a missing maximum needs weights).
+ * - Pass rule: an item may set `minPoints`, the points it must reach for the
+ *   course to pass at all (exam at least 40 of 80). Below it the course grade
+ *   is 0, whatever the total. Decision: the rule sits on the item (not a
+ *   course-level list keyed by id) so it cannot point at a missing item, and
+ *   it is only read in `"points"` mode (share courses ignore it).
+ *   How each function honours it is in its JSDoc.
+ *
+ * Implementation note: internally a points course is turned into a share-like
+ * one by using `weight / 100` per item. Then `Σ w · score` is the point total
+ * and every prototype formula (`needed`, the verdict's best, swings) carries
+ * over unchanged, with points where it had percentages.
  */
 
 import { gradeFromPct, gradeStep } from "./scale";
@@ -29,13 +54,31 @@ export type GradeItem = {
   weight: number | null;
   /** The real score in percent, or `null` while it is not graded. */
   score: number | null;
+  /**
+   * Pass rule, `"points"` courses only: the points this item must reach or
+   * the whole course is a 0. Ignored in `"share"` courses, and when missing,
+   * not finite or not above 0.
+   */
+  minPoints?: number;
 };
+
+/**
+ * How a course counts: `"share"` (default) means weights are fractions of the
+ * course grade; `"points"` means weights are maximum points and the grade
+ * comes from the point total.
+ */
+export type GradeUnit = "share" | "points";
+
+/** Optional last argument of every course function. */
+export type GradeOptions = { unit?: GradeUnit };
 
 /** A course as the grades screen needs it. */
 export type GradeCourse<T extends GradeItem = GradeItem> = {
   items: T[];
   /** What-if scores by item id; missing means "none set". */
   whatIfs?: WhatIfs;
+  /** How the course counts; default `"share"`. */
+  unit?: GradeUnit;
 };
 
 /** What-if scores in percent, keyed by item id. `null` means "not set". */
@@ -48,8 +91,17 @@ export type NeedsWeights = typeof NEEDS_WEIGHTS;
 /** An item whose weight is known and normalised. */
 type Weighted<T extends GradeItem> = T & { weight: number };
 
+/**
+ * An item as the internal helpers see it: in a points course its weight is
+ * `maxPoints / 100` and `minPct` is its pass rule as a percentage of its own
+ * maximum (`null` when it has none; always `null` in a share course).
+ */
+type Inner = Weighted<GradeItem> & { minPct: number | null };
+
 /** Float slack used where the prototype uses it (ties, sums that should be 1). */
 const EPS = 1e-9;
+
+const unitOf = (opts?: GradeOptions): GradeUnit => opts?.unit ?? "share";
 
 /**
  * The items with weights that add up to 1, or `NEEDS_WEIGHTS`.
@@ -64,9 +116,12 @@ const EPS = 1e-9;
  *   floating point) gives the prototype's numbers bit for bit. Otherwise each
  *   weight is divided by the sum, so 10/10/80 means 0.1/0.1/0.8.
  * - Item order is kept; it is the chart's x order.
+ * - In a `"points"` course the same checks apply but the weights (maximum
+ *   points) are returned exactly as given, not scaled.
  */
 export function normaliseWeights<T extends GradeItem>(
   items: readonly T[],
+  opts?: GradeOptions,
 ): Weighted<T>[] | NeedsWeights {
   let sum = 0;
   for (const it of items) {
@@ -75,14 +130,39 @@ export function normaliseWeights<T extends GradeItem>(
     sum += w;
   }
   if (!(sum > 0)) return NEEDS_WEIGHTS;
-  const scale = Math.abs(sum - 1) <= EPS ? 1 : 1 / sum;
+  const scale = unitOf(opts) === "points" || Math.abs(sum - 1) <= EPS ? 1 : 1 / sum;
   return items.map((it) => ({ ...it, weight: (it.weight as number) * scale }));
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers on already-normalised items (prototype names in brackets).
+/** The pass rule of a points item as a % of its maximum, or null. */
+function minPctOf(maxPoints: number, minPoints: number | undefined): number | null {
+  if (minPoints == null || !Number.isFinite(minPoints) || minPoints <= 0) return null;
+  // A rule on an item worth 0 points can never be met.
+  return maxPoints > 0 ? (minPoints / maxPoints) * 100 : Infinity;
+}
 
-function soFarN(items: readonly Weighted<GradeItem>[]): number | null {
+/** The items as the internal helpers use them, or `NEEDS_WEIGHTS`. */
+function prepare(items: readonly GradeItem[], opts?: GradeOptions): Inner[] | NeedsWeights {
+  const n = normaliseWeights(items, opts);
+  if (n === NEEDS_WEIGHTS) return n;
+  if (unitOf(opts) === "share") return n.map((k) => ({ ...k, minPct: null }));
+  return n.map((k) => ({ ...k, weight: k.weight / 100, minPct: minPctOf(k.weight, k.minPoints) }));
+}
+
+/** True when the value `v` (percent) on item `k` breaks its pass rule. */
+function failsRule(k: Inner, v: number): boolean {
+  return k.minPct != null && v < k.minPct - EPS;
+}
+
+/** True when a graded item already breaks its pass rule. */
+function gradedFailN(items: readonly Inner[]): boolean {
+  return items.some((k) => k.score != null && failsRule(k, k.score));
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers on prepared items (prototype names in brackets).
+
+function soFarN(items: readonly Inner[]): number | null {
   let w = 0;
   let ws = 0;
   for (const k of items) {
@@ -96,7 +176,7 @@ function soFarN(items: readonly Weighted<GradeItem>[]): number | null {
 
 function fillForN(
   item: GradeItem,
-  items: readonly Weighted<GradeItem>[],
+  items: readonly Inner[],
   whatIfs: WhatIfs,
 ): number | null {
   const own = whatIfs[item.id];
@@ -109,45 +189,50 @@ function fillForN(
   return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
 }
 
-/** [trajectoryPct] Σ w · (score or fill), or null when any fill is missing. */
-function trajectoryPctN(
-  items: readonly Weighted<GradeItem>[],
+/**
+ * [trajectory] `gradeFromPct(Σ w · (score or fill))`, or null when any fill
+ * is missing; 0 when any value used breaks a pass rule.
+ */
+function trajectoryN(
+  items: readonly Inner[],
   whatIfs: WhatIfs,
 ): number | null {
   let t = 0;
+  let failed = false;
   for (const k of items) {
     const v = k.score != null ? k.score : fillForN(k, items, whatIfs);
     if (v == null) return null;
+    if (failsRule(k, v)) failed = true;
     t += k.weight * v;
   }
-  return t;
+  return failed ? 0 : gradeFromPct(t);
 }
 
-function trajectoryN(
-  items: readonly Weighted<GradeItem>[],
-  whatIfs: WhatIfs,
-): number | null {
-  const p = trajectoryPctN(items, whatIfs);
-  return p == null ? null : gradeFromPct(p);
-}
-
-function gradedSumN(items: readonly Weighted<GradeItem>[]): number {
+function gradedSumN(items: readonly Inner[]): number {
   return items.reduce((a, k) => a + (k.score != null ? k.weight * k.score : 0), 0);
 }
 
-function ungradedWeightN(items: readonly Weighted<GradeItem>[]): number {
+function ungradedWeightN(items: readonly Inner[]): number {
   return items.reduce((a, k) => a + (k.score == null ? k.weight : 0), 0);
 }
 
-function neededN(items: readonly Weighted<GradeItem>[], target: number): number | null {
+function neededN(items: readonly Inner[], target: number): number | null {
   const uw = ungradedWeightN(items);
   if (uw <= 0) return null;
-  return (40 + 10 * target - gradedSumN(items)) / uw;
+  // Pass rules only matter for a grade above 0.
+  if (target > 0 && gradedFailN(items)) return Infinity;
+  let need = (40 + 10 * target - gradedSumN(items)) / uw;
+  if (target > 0) {
+    for (const k of items) {
+      if (k.score == null && k.minPct != null && k.minPct > need) need = k.minPct;
+    }
+  }
+  return need;
 }
 
 function swingN(
   item: GradeItem,
-  items: readonly Weighted<GradeItem>[],
+  items: readonly Inner[],
   whatIfs: WhatIfs,
 ): Swing | null {
   const sf = soFarN(items);
@@ -172,8 +257,11 @@ function swingN(
  * [soFar] Weighted average percentage of the graded items: Σ(w·s) / Σw over
  * graded items only. `null` when nothing is graded yet.
  */
-export function soFar(items: readonly GradeItem[]): number | null | NeedsWeights {
-  const n = normaliseWeights(items);
+export function soFar(
+  items: readonly GradeItem[],
+  opts?: GradeOptions,
+): number | null | NeedsWeights {
+  const n = prepare(items, opts);
   return n === NEEDS_WEIGHTS ? n : soFarN(n);
 }
 
@@ -185,13 +273,15 @@ export function soFar(items: readonly GradeItem[]): number | null | NeedsWeights
  * As in the prototype it does not look at `item.score`; callers use the real
  * score for graded items and the fill only for ungraded ones. The mean of
  * what-ifs counts every set value in `whatIfs`, as the prototype does.
+ * In a points course the average is weighted by maximum points.
  */
 export function fillFor(
   item: GradeItem,
   items: readonly GradeItem[],
   whatIfs: WhatIfs = {},
+  opts?: GradeOptions,
 ): number | null | NeedsWeights {
-  const n = normaliseWeights(items);
+  const n = prepare(items, opts);
   return n === NEEDS_WEIGHTS ? n : fillForN(item, n, whatIfs);
 }
 
@@ -199,12 +289,17 @@ export function fillFor(
  * [trajectory] The grade 0..5 the course is heading for:
  * `gradeFromPct(Σ w · (score, or fill when ungraded))`. `null` when any
  * ungraded item has no fill (nothing graded and no what-if set).
+ *
+ * Points course: `gradeFromPct(Σ points)`, and 0 when any item's value (its
+ * real score, or for an ungraded item the what-if or fill it is assumed to
+ * get) is below its `minPoints`, whatever the total.
  */
 export function trajectory(
   items: readonly GradeItem[],
   whatIfs: WhatIfs = {},
+  opts?: GradeOptions,
 ): number | null | NeedsWeights {
-  const n = normaliseWeights(items);
+  const n = prepare(items, opts);
   return n === NEEDS_WEIGHTS ? n : trajectoryN(n, whatIfs);
 }
 
@@ -214,12 +309,20 @@ export function trajectory(
  * `40 + 10 · target` is the course percentage for that grade. It can be
  * below 0 (target already secured) or above 100 (out of reach); it is not
  * clamped. `null` when nothing is left to grade.
+ *
+ * Points course: the same formula with points (`40 + 10 · target` points
+ * needed, `ungradedWeight` = remaining maximum / 100), so it is the % of the
+ * remaining items needed. For a target above 0 the pass rules also count:
+ * the result is at least the `minPoints` % of every ungraded rule item
+ * (the same % on everything left must also pass), and it is `Infinity`
+ * when a graded item has already broken its rule (no grade above 0 is left).
  */
 export function needed(
   items: readonly GradeItem[],
   target: number,
+  opts?: GradeOptions,
 ): number | null | NeedsWeights {
-  const n = normaliseWeights(items);
+  const n = prepare(items, opts);
   return n === NEEDS_WEIGHTS ? n : neededN(n, target);
 }
 
@@ -259,14 +362,19 @@ export type Verdict =
  * `whatIfs` is accepted so every course function takes the same inputs, but
  * it does not change the verdict: as in the prototype, the verdict is about
  * real grades only (what is needed from here), never about what-ifs.
+ *
+ * Points course: `need` is `needed` (pass rules included), and `best` is 0
+ * (with `nextGrade` 0) when even 100% on everything left breaks a pass rule,
+ * for example a graded exam already under its minimum.
  */
 export function verdict(
   items: readonly GradeItem[],
   target: number,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- see JSDoc: the prototype's verdict ignores what-ifs.
   whatIfs: WhatIfs = {},
+  opts?: GradeOptions,
 ): Verdict {
-  const n = normaliseWeights(items);
+  const n = prepare(items, opts);
   if (n === NEEDS_WEIGHTS) return { kind: "needs_weights" };
   const need = neededN(n, target);
   if (need == null) return { kind: "all_graded" };
@@ -274,8 +382,9 @@ export function verdict(
   if (sf != null && need <= sf + 2) return { kind: "on", need };
   if (need <= 100) return { kind: "within", need };
   const bestPct = gradedSumN(n) + ungradedWeightN(n) * 100;
-  const best = gradeFromPct(bestPct);
-  const nextGrade = gradeStep(bestPct);
+  const bestFails = n.some((k) => failsRule(k, k.score ?? 100));
+  const best = bestFails ? 0 : gradeFromPct(bestPct);
+  const nextGrade = bestFails ? 0 : gradeStep(bestPct);
   return {
     kind: "out",
     need,
@@ -298,13 +407,17 @@ export type Swing = { lo: number; hi: number; size: number };
  * back to the mean of the what-ifs. Kept as is. The item's own what-if is
  * replaced by 50 and 100. Meant for ungraded items; for a graded item the
  * real score wins and the size is 0.
+ *
+ * Points course: the grades are point-total grades with pass rules, so an
+ * item whose 50% breaks its rule has `lo` 0.
  */
 export function swing(
   item: GradeItem,
   items: readonly GradeItem[],
   whatIfs: WhatIfs = {},
+  opts?: GradeOptions,
 ): Swing | null | NeedsWeights {
-  const n = normaliseWeights(items);
+  const n = prepare(items, opts);
   return n === NEEDS_WEIGHTS ? n : swingN(item, n, whatIfs);
 }
 
@@ -315,12 +428,14 @@ export function swing(
  * graded and no what-ifs every swing is null, so the heaviest item wins).
  * Ties go to the earlier item (a later one must beat it by more than 1e-9).
  * `null` when nothing is left to grade.
+ * Points course: the stand-in weight is maximum points / 100.
  */
 export function mattersMost<T extends GradeItem>(
   items: readonly T[],
   whatIfs: WhatIfs = {},
+  opts?: GradeOptions,
 ): T | null | NeedsWeights {
-  const n = normaliseWeights(items);
+  const n = prepare(items, opts);
   if (n === NEEDS_WEIGHTS) return n;
   let best: T | null = null;
   let size = -1;
@@ -341,11 +456,12 @@ export function mattersMost<T extends GradeItem>(
  * `null` when no course has. Decision: a course that needs weights is left
  * out (it cannot be computed), and so is any course whose trajectory is
  * `null` (cannot happen once something is graded, but kept safe).
+ * Each course counts in its own `unit`.
  */
 export function overall(courses: readonly GradeCourse[]): number | null {
   const vals: number[] = [];
   for (const c of courses) {
-    const n = normaliseWeights(c.items);
+    const n = prepare(c.items, { unit: c.unit });
     if (n === NEEDS_WEIGHTS || soFarN(n) == null) continue;
     const t = trajectoryN(n, c.whatIfs ?? {});
     if (t != null) vals.push(t);
@@ -388,17 +504,32 @@ export type ChartSeries = {
  * band for the trajectory chart, without any pixels. Mirrors the prototype
  * step by step, including that a graded item after an ungraded one adds to
  * a running sum that already holds that item's fill.
+ *
+ * Points course: a running point is the grade the course would end on if
+ * everything kept the average so far, `gradeFromPct(cs / cw · total)` with
+ * `total` the course maximum / 100 (in a share course `total` is 1, the
+ * prototype's formula). So the last projection point is the point-total
+ * trajectory, and the band's end runs from "all remaining at 50%" to "all
+ * remaining at 100%" in points. A point is 0 once a value it includes breaks
+ * a pass rule (the band's `lo` uses 50% for ungraded items, `hi` 100%).
  */
 export function chartSeries(
   items: readonly GradeItem[],
   whatIfs: WhatIfs = {},
+  opts?: GradeOptions,
 ): ChartSeries | NeedsWeights {
-  const n = normaliseWeights(items);
+  const n = prepare(items, opts);
   if (n === NEEDS_WEIGHTS) return n;
+  const total = unitOf(opts) === "points" ? n.reduce((a, k) => a + k.weight, 0) : 1;
+  const at = (sum: number, w: number, failed: boolean) =>
+    failed ? 0 : gradeFromPct((sum / w) * total);
   let cw = 0;
   let cs = 0;
   let cl = 0;
   let ch = 0;
+  let fs = false;
+  let fl = false;
+  let fh = false;
   let lastG = -1;
   let canProject = true;
   const running: ChartPoint[] = [];
@@ -408,22 +539,31 @@ export function chartSeries(
   n.forEach((k, i) => {
     cw += k.weight;
     if (k.score != null) {
+      const f = failsRule(k, k.score);
+      fs ||= f;
+      fl ||= f;
+      fh ||= f;
       cs += k.weight * k.score;
       cl += k.weight * k.score;
       ch += k.weight * k.score;
       lastG = i;
-      running.push({ index: i, grade: gradeFromPct(cs / cw) });
+      running.push({ index: i, grade: at(cs, cw, fs) });
     } else {
+      fl ||= failsRule(k, 50);
+      fh ||= failsRule(k, 100);
       cl += k.weight * 50;
       ch += k.weight * 100;
       const f = fillForN(k, n, whatIfs);
       if (f == null) canProject = false;
-      else cs += k.weight * f;
-      if (canProject) dash.push({ index: i, grade: gradeFromPct(cs / cw) });
+      else {
+        fs ||= failsRule(k, f);
+        cs += k.weight * f;
+      }
+      if (canProject) dash.push({ index: i, grade: at(cs, cw, fs) });
     }
     // cw is 0 only while every item so far has weight 0; draw those at 0.
-    lo.push(cw > 0 ? gradeFromPct(cl / cw) : 0);
-    hi.push(cw > 0 ? gradeFromPct(ch / cw) : 0);
+    lo.push(cw > 0 ? at(cl, cw, fl) : 0);
+    hi.push(cw > 0 ? at(ch, cw, fh) : 0);
   });
   const showProjection = dash.length > 0 && canProject;
   const projection = showProjection

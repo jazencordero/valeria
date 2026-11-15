@@ -13,6 +13,7 @@ import {
   verdict,
   type ChartSeries,
   type GradeItem,
+  type GradeOptions,
   type Swing,
 } from "./model";
 
@@ -292,6 +293,139 @@ describe("chartSeries", () => {
     expect(s.projection).toEqual([]);
     expect(s.end).toBeNull();
     expect(s.band).toEqual([{ index: 1, lo: 4, hi: 4 }]);
+  });
+});
+
+describe("a point-based course (unit: points)", () => {
+  // Exam 0-80 (at least 40 to pass), project work 0-20, additional
+  // assignments 0-10: 110 points in all, graded by the point total.
+  const PTS: GradeOptions = { unit: "points" };
+  const course = (exam: number | null, project: number | null, extra: number | null): Item[] => [
+    { ...g("pw", "Project", 20, project) },
+    { ...g("aa", "Additional", 10, extra) },
+    { ...g("ex", "Exam", 80, exam), minPoints: 40 },
+  ];
+  const pct = (points: number, max: number) => (points / max) * 100;
+  const full = (exam: number | null) => course(exam, 100, 100); // 30 points from project + additional
+
+  it("grades the point total: exam 60/80 + 30 is a 5", () => {
+    expect(trajectory(full(pct(60, 80)), {}, PTS)).toBe(5); // 90 points
+    expect(trajectory(full(pct(50, 80)), {}, PTS)).toBeCloseTo(4, 9); // 80
+    expect(trajectory(full(pct(40, 80)), {}, PTS)).toBeCloseTo(3, 9); // 70, exactly the pass mark
+  });
+
+  it("is 0 when the exam is under 40/80, although the total is 69", () => {
+    expect(trajectory(full(pct(39, 80)), {}, PTS)).toBe(0);
+    // a what-if under the pass mark on the exam fails the projection too
+    expect(trajectory(full(null), { ex: pct(36, 80) }, PTS)).toBe(0);
+  });
+
+  it("does not normalise the maximum points (110 in all)", () => {
+    const n = normaliseWeights(course(50, 50, 50), PTS);
+    if (n === NEEDS_WEIGHTS) throw new Error("expected weights");
+    expect(n.map((i) => i.weight)).toEqual([20, 10, 80]);
+    // 50% everywhere is 55 points, a 1.5 (a share course would be 50%, a 1)
+    expect(trajectory(course(50, 50, 50), {}, PTS)).toBeCloseTo(1.5, 9);
+    expect(trajectory(course(50, 50, 50))).toBeCloseTo(1, 9);
+    expect(trajectory(full(100), {}, PTS)).toBe(5); // 110 caps at 5
+  });
+
+  it("needs 75% / 62.5% / 50% of the exam for a 5 / 4 / 3 with 30 points graded", () => {
+    expect(needed(full(null), 5, PTS)).toBeCloseTo(75, 9); // 60 exam points
+    expect(needed(full(null), 4, PTS)).toBeCloseTo(62.5, 9); // 50
+    expect(needed(full(null), 3, PTS)).toBeCloseTo(50, 9); // 40, also the pass mark
+  });
+
+  it("still needs the pass mark when the total alone would need less", () => {
+    expect(needed(full(null), 2, PTS)).toBeCloseTo(50, 9); // total alone: 30 points, 37.5%
+    expect(needed(full(null), 1, PTS)).toBeCloseTo(50, 9); // total alone: 25%
+    // target 3 with 30 points: 40 exam points either way
+    expect(needed(full(null), 3, PTS)).toBeCloseTo(50, 9);
+  });
+
+  it("needs Infinity once a graded exam is under the pass mark", () => {
+    expect(needed(course(pct(30, 80), null, null), 1, PTS)).toBe(Infinity);
+  });
+
+  it("gives the verdict kinds", () => {
+    // average so far 100%, need 75%
+    expect(verdict(full(null), 5, {}, PTS)).toEqual({ kind: "on", need: 75 });
+    // 15 points so far (50%), a 4 needs (80 − 15) / 0.8 = 81.25%
+    const w = verdict(course(null, 50, 50), 4, {}, PTS);
+    expect(w.kind).toBe("within");
+    expect(w.kind === "within" && w.need).toBeCloseTo(81.25, 9);
+    // 0 points so far: a 5 needs 112.5%; the best is 80 points, a 4, which needs 100%
+    const o = verdict(course(null, 0, 0), 5, {}, PTS);
+    expect(o.kind).toBe("out");
+    if (o.kind !== "out") return;
+    expect(o.need).toBeCloseTo(112.5, 9);
+    expect(o.best).toBeCloseTo(4, 9);
+    expect(o.nextGrade).toBe(4);
+    expect(o.nextGradeNeed).toBeCloseTo(100, 9);
+    expect(verdict(full(60), 5, {}, PTS)).toEqual({ kind: "all_graded" });
+  });
+
+  it("verdict 'out' honours the pass rule: a failed exam leaves no grade", () => {
+    const v = verdict(course(pct(30, 80), null, null), 3, {}, PTS);
+    expect(v).toEqual({ kind: "out", need: Infinity, best: 0, nextGrade: 0, nextGradeNeed: null });
+  });
+
+  it("swing and mattersMost work in points", () => {
+    const items = full(null);
+    const s = asSwing(swing(byId(items, "ex"), items, {}, PTS));
+    expect(s.lo).toBeCloseTo(3, 9); // 30 + 40
+    expect(s.hi).toBe(5); // 30 + 80
+    expect(s.size).toBeCloseTo(2, 9);
+    expect(mattersMost(items, {}, PTS)).toBe(byId(items, "ex"));
+    // with nothing graded the largest maximum wins
+    const none = course(null, null, null);
+    expect(mattersMost(none, {}, PTS)).toBe(byId(none, "ex"));
+  });
+
+  it("a swing whose 50% breaks the pass rule starts at 0", () => {
+    const strict: Item[] = [g("pw", "Project", 20, 100), { ...g("ex", "Exam", 80, null), minPoints: 48 }];
+    const s = asSwing(swing(strict[1], strict, {}, PTS));
+    expect(s.lo).toBe(0); // 40 exam points is under 48
+    expect(s.hi).toBe(5);
+  });
+
+  it("chartSeries draws point-total grades and ends on the trajectory", () => {
+    const items = full(null);
+    const c = asSeries(chartSeries(items, {}, PTS));
+    expect(c.running.map((p) => p.grade)).toEqual([5, 5]); // 100% so far, 110 points if kept
+    expect(c.end).toBeCloseTo(trajectory(items, {}, PTS) as number, 9);
+    expect(c.band.map((b) => b.index)).toEqual([1, 2]);
+    expect(c.band[1].lo).toBeCloseTo(3, 9); // 30 + 40 (50% of the exam is the pass mark)
+    expect(c.band[1].hi).toBe(5);
+    // an exam what-if under the pass mark ends the projection at 0, as the trajectory
+    const f = asSeries(chartSeries(items, { ex: pct(36, 80) }, PTS));
+    expect(f.end).toBe(0);
+    expect(trajectory(items, { ex: pct(36, 80) }, PTS)).toBe(0);
+  });
+
+  it("needs weights when a maximum is missing", () => {
+    const missing: Item[] = [g("pw", "Project", 20, 100), g("ex", "Exam", null, null)];
+    expect(normaliseWeights(missing, PTS)).toBe(NEEDS_WEIGHTS);
+    expect(trajectory(missing, {}, PTS)).toBe(NEEDS_WEIGHTS);
+    expect(verdict(missing, 3, {}, PTS)).toEqual({ kind: "needs_weights" });
+  });
+
+  it("overall uses each course's unit", () => {
+    // FM 4.5 and the point course at 90 points (5)
+    expect(overall([{ items: FM }, { items: full(pct(60, 80)), unit: "points" }])).toBeCloseTo(4.75, 9);
+  });
+
+  it("leaves share courses unaffected, minPoints included", () => {
+    const share: GradeOptions = { unit: "share" };
+    for (const items of [FM, SIT, SCA]) {
+      expect(trajectory(items, {}, share)).toBe(trajectory(items));
+      expect(verdict(items, 5, {}, share)).toEqual(verdict(items, 5));
+      expect(chartSeries(items, {}, share)).toEqual(chartSeries(items));
+    }
+    // a pass rule on a share course is ignored
+    const withRule: Item[] = [g("a", "A", 0.5, 100), { ...g("b", "B", 0.5, 10), minPoints: 40 }];
+    expect(trajectory(withRule)).toBeCloseTo(1.5, 9); // 55%
+    expect(needed([withRule[0], { ...withRule[1], score: null }], 1)).toBeCloseTo(0, 9);
   });
 });
 
