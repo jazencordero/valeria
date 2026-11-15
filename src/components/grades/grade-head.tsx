@@ -105,6 +105,8 @@ export type GradeHeadProps = {
   transcript: number | null;
   /** model.ts `verdict` at `target`. */
   verdict: Verdict;
+  /** False hides the verdict line, for a page that states the verdict itself just below (M6-08's Overview). */
+  showVerdict?: boolean;
   /** The grade she is aiming for, 1..5. */
   target: number;
   /** Back to the grades list. */
@@ -135,6 +137,7 @@ export function GradeHead({
   target,
   onBack,
   backHref,
+  showVerdict = true,
   className = "",
 }: GradeHeadProps) {
   const copy = verdictCopy(verdict, target);
@@ -186,7 +189,7 @@ export function GradeHead({
         </div>
       </div>
 
-      {copy && (
+      {copy && showVerdict && (
         <p className="mt-2.5 text-[14px] text-ink-2" data-testid="grade-head-verdict">
           {copy.lead}
           <VerdictParts parts={copy.rest} />

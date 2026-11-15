@@ -51,3 +51,21 @@ describe("GradePage for a course marked in points (weights only)", () => {
     expect(document.body.textContent ?? "").toMatch(/you need about/i);
   });
 });
+
+describe("GradePage verdict, said once", () => {
+  it("leaves the head's verdict line out under Overview, which says it in full", async () => {
+    localStorage.clear();
+    render(<GradePage {...props} />);
+    expect(screen.queryByTestId("grade-head-verdict")).toBeNull();
+    // The Overview still says it.
+    expect(document.body.textContent ?? "").toMatch(/Within reach/);
+  });
+
+  it("shows the head's verdict line on the other tabs", async () => {
+    localStorage.clear();
+    render(<GradePage {...props} />);
+    screen.getByRole("tab", { name: /Graded/ }).click();
+    expect(await screen.findByTestId("grade-head-verdict")).toBeDefined();
+  });
+});
+

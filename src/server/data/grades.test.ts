@@ -34,7 +34,8 @@ describe("statusOf", () => {
   ];
   it.each([
     ["no items", [], 5, "early"],
-    ["nothing graded", it3(null, null), 5, "early"],
+    // Nothing graded still has a verdict: about 90% is needed on everything for a 5.
+    ["nothing graded", it3(null, null), 5, "within"],
     ["a weight missing", it3(80, null, null), 5, "needs_weights"],
     ["on track", it3(90, null), 5, "on"],
     ["everything graded", it3(90, 70), 5, "on"],
@@ -87,7 +88,7 @@ describe("grades data", () => {
     3102: [item(7201, "Case 1", { score: 18, weight: 0.5 }), item(7202, "Exam", { kind: "manual", max: 100, weight: 0.5 })],
     // Supply Chain: 75% on 40%, so 100% is needed on the rest: within reach.
     3103: [item(7301, "Assignment 1", { score: 15, weight: 0.4 }), item(7302, "Exam", { kind: "manual", max: 100, weight: 0.6 })],
-    // Digital Service Design: nothing graded yet: too early.
+    // Digital Service Design: nothing graded yet: within reach (90% needed on all of it), no number yet.
     3104: [item(7401, "Service blueprint", { weight: 0.5 }), item(7402, "Final concept", { weight: 0.5 })],
   };
 
@@ -133,7 +134,7 @@ describe("grades data", () => {
     // As synced, the sample course misses a weight: it says so and stays out of the overall.
     let list = await getGradesList(userId, t.db);
     expect(list.courses.map((c) => [c.name, c.status, c.target, c.trajectory])).toEqual([
-      ["Digital Service Design", "early", 5, null],
+      ["Digital Service Design", "within", 5, null],
       ["Forecasting Methods", "needs_weights", 5, null],
       ["Strategic IT Management", "on", 5, 5],
       ["Supply Chain Analytics", "within", 5, 3.5],
@@ -148,7 +149,7 @@ describe("grades data", () => {
     expect(fc.status).toBe("out");
     expect(fc.trajectory).toBeCloseTo(3.1833, 3);
     expect(list.overall).toBeCloseTo((3.18333333 + 5 + 3.5) / 3, 6);
-    expect(list.courses.map((c) => c.status)).toEqual(["early", "out", "on", "within"]);
+    expect(list.courses.map((c) => c.status)).toEqual(["within", "out", "on", "within"]);
   }, SLOW);
 
   it("loads one course's items in report order, scores as percents, hidden items left out", async () => {

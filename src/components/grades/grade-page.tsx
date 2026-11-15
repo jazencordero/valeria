@@ -182,7 +182,16 @@ export function GradePage({
   const onShown = useCallback((id: string) => {
     if (id === "whatif") setChartShown(true);
   }, []);
-  const onTabChange = useCallback((id: string) => writeTab(course.id, id), [course.id]);
+  // The tab she is on: the head's verdict line is left out under Overview, which says it in full.
+  const [shownTab, setShownTab] = useState<string | null>(null);
+  const tab = shownTab ?? rememberedTab ?? "overview";
+  const onTabChange = useCallback(
+    (id: string) => {
+      setShownTab(id);
+      writeTab(course.id, id);
+    },
+    [course.id],
+  );
 
   const sf = soFar(items);
   const traj = trajectory(items, whatIfs);
@@ -204,6 +213,7 @@ export function GradePage({
       verdict={v}
       target={target}
       backHref={backHref}
+      showVerdict={needsWeights || tab !== "overview"}
     />
   );
 

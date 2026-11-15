@@ -630,7 +630,7 @@ describe("getHomeView: grades card", () => {
     // Forecasting: half graded at 80%, the rest assumed the same: heading for a 4, aiming for 5.
     await item(u.id, fm.id, "Assignment 1", { weight: 0.5, score: 80, position: 0 });
     await item(u.id, fm.id, "Exam", { weight: 0.5, position: 1 });
-    // Supply chain: nothing graded yet.
+    // Supply chain: nothing graded yet, aiming for 4: about 80% needed on all of it (within reach), no number yet.
     await item(u.id, sca.id, "Case memo 1", { weight: 1 });
     await item(u.id, hidden.id, "Old exam", { weight: 1, score: 90 });
 
@@ -648,7 +648,7 @@ describe("getHomeView: grades card", () => {
     expect(view.grades[1]).toMatchObject({
       id: sca.id,
       href: `/grades/${sca.id}`,
-      status: "early",
+      status: "within",
       target: 4,
       trajectory: null,
     });

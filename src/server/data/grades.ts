@@ -97,7 +97,9 @@ export function percentOf(score: number | null, max: number): number | null {
 export function statusOf(items: readonly GradeItem[], target: number): GradeStatus {
   if (items.length === 0) return "early";
   if (normaliseWeights(items) === NEEDS_WEIGHTS) return "needs_weights";
-  if (soFar(items) == null) return "early";
+  // Nothing graded yet still has a verdict ("need about 90% on what is left"): the list says
+  // the same as the course page, which shows that verdict (QA 2026-11-15). Only the
+  // trajectory number waits for a first grade (listTrajectory).
   const v = verdict(items, target);
   switch (v.kind) {
     case "on":
@@ -114,7 +116,7 @@ export function statusOf(items: readonly GradeItem[], target: number): GradeStat
 
 /** The list's trajectory for a course with this status, no what-ifs. */
 function listTrajectory(items: readonly GradeItem[], status: GradeStatus): number | null {
-  if (status === "early" || status === "needs_weights") return null;
+  if (status === "early" || status === "needs_weights" || soFar(items) == null) return null;
   const t = trajectory(items);
   return t === NEEDS_WEIGHTS ? null : t;
 }
