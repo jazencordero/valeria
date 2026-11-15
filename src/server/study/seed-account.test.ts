@@ -7,9 +7,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { events } from "@/server/db/schema/calendar";
 import { courses } from "@/server/db/schema/courses";
 import { gradeItems } from "@/server/db/schema/grades";
-import { lectureContent, lectures } from "@/server/db/schema/learn";
+import { lectureConcepts, lectureContent, lectures } from "@/server/db/schema/learn";
 import { moodleConnections } from "@/server/db/schema/moodle";
-import { cards, cardStates, concepts, exams } from "@/server/db/schema/study";
+import { cardConcepts, cards, cardStates, concepts, examDocuments, exams } from "@/server/db/schema/study";
 import { confirmCodes, sessions, users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
@@ -18,14 +18,25 @@ import { getAssignmentPage } from "@/server/data/assignment";
 import { syncNow } from "@/server/sync/run";
 import type { ImportResult } from "./import-bundle";
 import {
+  applyAccountPart,
+  applyBundlePart,
   applySeed,
   assignmentMoodleId,
+  bundlePartsOf,
+  combineAnswers,
   courseMoodleId,
   loadSeed,
   planSeed,
+  readSeedPart,
   redeemOpenCode,
   SeedInvalid,
   SeedRefused,
+  seedPartsOf,
+  serialisePart,
+  UPLOAD_PART_BYTES,
+  type ExamBundlePart,
+  type SeedAnswer,
+  type SeedInput,
   type SeedResult,
 } from "./seed-account";
 
@@ -564,6 +575,274 @@ describe("CLI", () => {
       expect(opened).not.toBeNull();
       expect(await redeemOpenCode(t.db, fresh)).toBeNull();
       expect(await t.db.select().from(sessions).where(eq(sessions.userId, opened!.userId))).toHaveLength(1);
+    },
+    T,
+  );
+});
+
+describe("upload: the same seed sent in parts (M3-58)", () => {
+  /** A size that makes the sample course folder take several requests. */
+  const SMALL = 4_000;
+
+  /** The sample bundles, with cards a plan leaves out: one not valid, one repeated, one reusing an id. */
+  async function trickyBundles(): Promise<string> {
+    const dir = path.join(tmp, "tricky-bundles");
+    await rm(dir, { recursive: true, force: true });
+    await cp(bundles, dir, { recursive: true });
+    const deckFile = path.join(dir, "TST-E0001", "deck-1.json");
+    const deck = JSON.parse(await readFile(deckFile, "utf8")) as Record<string, unknown>[];
+    deck.splice(2, 0, { type: "basic", concept: "moving-average" }); // not a card
+    for (let i = 1; i <= 60; i++) deck.push({ id: `more-${i}`, type: "basic", concept: "moving-average", q: `Invented question ${i}?`, a: `Invented answer ${i}.`, source: "Lecture 1, slide 9" });
+    deck.push({ ...deck[0], id: "tf-copy" }); // the first card again
+    deck.push({ id: deck[1].id, type: "basic", concept: "moving-average", q: "An invented question?", a: "An invented answer.", source: "Lecture 1, slide 9" }); // an id used twice
+    await write(deckFile, deck);
+    return dir;
+  }
+
+  const newUser = async (db = t.db) => (await db.insert(users).values({}).returning({ id: users.id }))[0].id;
+
+  /** Sends every part as the route would get it: through JSON, then `readSeedPart`. */
+  async function upload(userId: string, input: SeedInput, maxBytes = UPLOAD_PART_BYTES, db = t.db): Promise<SeedAnswer[]> {
+    const answers: SeedAnswer[] = [];
+    for (const sent of seedPartsOf(input, maxBytes)) {
+      const part = readSeedPart(JSON.parse(serialisePart(sent)));
+      answers.push(part.part === "account" ? await applyAccountPart(db, userId, part, { now: NOW }) : await applyBundlePart(db, userId, part, { now: NOW }));
+    }
+    return answers;
+  }
+
+  /** Every row the seed writes for one user, without ids and creation times. */
+  async function snapshot(db: TestDb["db"], userId: string) {
+    const sorted = <R>(rows: R[]) => rows.map((r) => JSON.stringify(r)).sort();
+    const mine = await db.select().from(courses).where(eq(courses.userId, userId));
+    const codeOf = new Map(mine.map((c) => [c.id, c.code]));
+    const a = await db.select().from(assignments).where(eq(assignments.userId, userId));
+    const e = await db.select().from(events).where(eq(events.userId, userId));
+    const g = await db.select().from(gradeItems).where(eq(gradeItems.userId, userId));
+    const x = await db.select().from(exams).where(eq(exams.userId, userId));
+    const c = await db.select().from(concepts).where(eq(concepts.userId, userId));
+    const l = await db.select().from(lectures).where(eq(lectures.userId, userId));
+    const lc = await db.select().from(lectureContent);
+    const k = await db.select().from(cards).where(eq(cards.userId, userId));
+    const ks = await db.select().from(cardStates);
+    const d = await db.select().from(examDocuments).where(eq(examDocuments.userId, userId));
+    return {
+      courses: sorted(mine.map((r) => [r.code, r.name, r.moodleId, r.color, r.aiAssignments, r.aiStudy])),
+      assignments: sorted(a.map((r) => [codeOf.get(r.courseId), r.moodleId, r.cmid, r.name, r.dueAt, r.cutoffAt, r.opensAt, r.state, r.submittedAt, r.needsSubmitButton])),
+      events: sorted(e.map((r) => [codeOf.get(r.courseId ?? ""), r.moodleRef, r.source, r.kind, r.title, r.startsAt])),
+      gradeItems: sorted(g.map((r) => [codeOf.get(r.courseId), r.moodleRef, r.name, r.weight, r.weightSource, r.max, r.position])),
+      exams: sorted(x.map((r) => [codeOf.get(r.courseId), r.title, r.kind, r.at, r.targetPct, r.studyMap, r.startNewOn, r.gradeTarget])),
+      concepts: sorted(c.map((r) => [r.slug, r.name, r.lecture, r.position, r.weight])),
+      lectures: sorted(l.map((r) => [codeOf.get(r.courseId), r.n, r.title])),
+      pages: sorted(lc.map((r) => [r.sourceHash, r.breath, r.minutes, r.sections, r.slideTitles])),
+      cards: sorted(k.map((r) => [r.contentHash, r.importId, r.type, r.rung, r.boss, r.body, r.why, r.source, r.origin])),
+      cardStates: sorted(ks.map((r) => [r.dueAt, r.lapses])),
+      cardConcepts: (await db.select().from(cardConcepts)).length,
+      lectureConcepts: (await db.select().from(lectureConcepts)).length,
+      documents: sorted(d.map((r) => [r.slug, r.title, r.bodyMd, r.position])),
+    };
+  }
+
+  /** What `printResult` prints of a result, without the user line (an upload never makes a user). */
+  const printed = (r: Pick<SeedResult, "counts" | "skipped" | "notStored" | "notes"> & { imports: object[] }) => ({
+    counts: { ...r.counts, user: null },
+    imports: r.imports.map((i) => {
+      const { courseId: _c, examId: _e, dryRun: _d, ...rest } = i as Record<string, unknown>;
+      void [_c, _e, _d];
+      return rest;
+    }),
+    skipped: r.skipped,
+    notStored: r.notStored,
+    notes: r.notes,
+  });
+
+  it(
+    "splits a course folder into batches under the size, account first, with only the cards the plan keeps",
+    async () => {
+      const input = await loadSeed(ACCOUNT, await trickyBundles());
+      const one = seedPartsOf(input);
+      expect(one.map((p) => (p.part === "account" ? "account" : `${p.kind} ${p.courseCode} ${p.batch.n}/${p.batch.of}`))).toEqual([
+        "account",
+        "exam TST-E0001 1/1",
+        "studyOnly TST-E0003 1/1",
+      ]);
+
+      const exam = input.bundles.find((b) => b.kind === "exam")!;
+      const batches = bundlePartsOf(exam, SMALL) as ExamBundlePart[];
+      expect(batches.length).toBeGreaterThanOrEqual(3);
+      expect(batches.map((b) => b.batch)).toEqual(batches.map((_, i) => ({ n: i + 1, of: batches.length })));
+      for (const b of batches) expect(Buffer.byteLength(serialisePart(b))).toBeLessThanOrEqual(SMALL);
+      // Every batch carries what concepts are planned from; the exam documents go once.
+      for (const b of batches) expect([b.seed, b.map]).toEqual([batches[0].seed, batches[0].map]);
+      expect(batches.map((b) => b.documents.length)).toEqual([1, ...batches.slice(1).map(() => 0)]);
+      expect(batches.flatMap((b) => b.pages.map((p) => p.lecture))).toEqual([1]);
+      // The cards: each kept one once, by its place in the deck file; the bad, the repeated and the reused-id one never.
+      const sent = batches.flatMap((b) => b.decks.flatMap((d) => d.indexes));
+      expect(sent).toEqual(exam.kind === "exam" ? exam.plan.cards.map((c) => c.index) : []);
+      expect(sent).toEqual([1, 2, 4, 5, 6, ...Array.from({ length: 60 }, (_, i) => i + 9)]);
+      expect(exam.plan.problems.filter((p) => p.index !== undefined).map((p) => p.index)).toEqual([3, 7, 8, 69, 70]);
+      expect(batches.filter((b) => b.decks.length).length).toBeGreaterThanOrEqual(2);
+
+      // A part survives the trip through JSON and the server's schemas.
+      for (const p of seedPartsOf(input, SMALL)) expect(() => readSeedPart(JSON.parse(serialisePart(p)))).not.toThrow();
+      // One card that cannot fit is said so, by file and place, never by its text.
+      const err = (() => {
+        try {
+          return bundlePartsOf(exam, 1_200);
+        } catch (e) {
+          return e;
+        }
+      })();
+      expect(err).toBeInstanceOf(SeedInvalid);
+      expect((err as SeedInvalid).message).toMatch(/TST-E0001\): .* does not fit in one request \(1200 bytes\)/);
+    },
+    T,
+  );
+
+  it(
+    "an upload in several batches gives the rows and the summary of one direct run, and a second upload changes nothing",
+    async () => {
+      const input = await loadSeed(ACCOUNT, await trickyBundles());
+      const plan = planSeed(input);
+      const direct = await applySeed(t.db, plan, { now: NOW });
+
+      const other = await createTestDb();
+      try {
+        const userId = await newUser(other.db);
+        const answers = await upload(userId, input, SMALL, other.db);
+        expect(answers.length).toBeGreaterThanOrEqual(5);
+        expect(await snapshot(other.db, userId)).toEqual(await snapshot(t.db, direct.userId));
+
+        const summary = combineAnswers(plan, answers);
+        expect(printed(summary)).toEqual(printed(direct));
+        expect(summary.counts.user).toEqual({ created: 0, skipped: 0, updated: 1 });
+        // The account is marked as filled from files (Home stays), with no key a direct run could find it by.
+        const [user] = await other.db.select().from(users).where(eq(users.id, userId));
+        const marker = user.settings.seededFrom as Record<string, unknown>;
+        expect(marker.key).toBeUndefined();
+        expect(marker.pulledAt).toBe("2026-11-15T08:00:00.000Z");
+        expect(await other.db.select().from(users)).toHaveLength(1);
+
+        const before = await snapshot(other.db, userId);
+        const again = combineAnswers(plan, await upload(userId, input, SMALL, other.db));
+        expect(await snapshot(other.db, userId)).toEqual(before);
+        const rerun = await applySeed(t.db, plan, { now: NOW });
+        expect(printed(again)).toEqual(printed(rerun));
+        expect([...Object.values(again.counts), ...again.imports.flatMap((i) => Object.values(i.counts))].reduce((s, c) => s + c.created + c.updated, 0)).toBe(0);
+      } finally {
+        await other.close();
+      }
+    },
+    T,
+  );
+
+  it(
+    "writes only into the account it is given, and takes no user or key from a part",
+    async () => {
+      const input = await loadSeed(ACCOUNT, bundles);
+      const [mine, hers] = [await newUser(), await newUser()];
+      await upload(mine, input);
+      expect(await t.db.select().from(courses).where(eq(courses.userId, hers))).toHaveLength(0);
+      expect((await t.db.select().from(courses).where(eq(courses.userId, mine))).length).toBe(3);
+
+      const part = JSON.parse(serialisePart(seedPartsOf(input)[0])) as Record<string, unknown>;
+      for (const extra of [{ userId: hers }, { user_id: hers }, { user: { id: hers } }, { key: "0".repeat(64) }, { seededFrom: { key: "k" } }]) {
+        expect(() => readSeedPart({ ...part, ...extra })).toThrow(SeedInvalid);
+      }
+      // A direct run of the same files does not take the uploaded account for its own.
+      const direct = await applySeed(t.db, planSeed(input), { now: NOW });
+      expect(direct.userId).not.toBe(mine);
+      expect(direct.counts.user.created).toBe(1);
+    },
+    T,
+  );
+
+  it(
+    "names the path of what does not fit, and never the value",
+    async () => {
+      const input = await loadSeed(ACCOUNT, bundles);
+      const [account, exam] = seedPartsOf(input).map((p) => JSON.parse(serialisePart(p)) as Record<string, never>);
+      (account.account as { courses: { assignments: { dueAt: string }[] }[] }).courses[0].assignments[0].dueAt = "a secret day";
+      (exam.seed as { concepts: { slug: string }[] }).concepts[1].slug = (exam.seed as { concepts: { slug: string }[] }).concepts[0].slug;
+      (exam.pages as { page: { breath: number } }[])[0].page.breath = 7;
+      const problemsOf = (body: unknown) => {
+        try {
+          readSeedPart(body);
+          return [];
+        } catch (e) {
+          return (e as SeedInvalid).problems;
+        }
+      };
+      expect(problemsOf(account).join("\n")).toContain("account.courses.0.assignments.0.dueAt: must be a date and time");
+      const text = problemsOf(exam).join("\n");
+      expect(text).toContain("pages.0.page.breath: breath must be text.");
+      expect(text).toContain('Concept slug "…" is used twice.');
+      expect(`${problemsOf(account).join("\n")}\n${text}`).not.toMatch(/a secret day|moving-average/);
+      expect(problemsOf({ part: "plan" })[0]).toMatch(/^part: must be/);
+      expect(problemsOf([1])[0]).toMatch(/^The body must be one part/);
+      expect(problemsOf({ ...exam, courseCode: "TST-E0002", seed: undefined })[0]).toMatch(/^seed/);
+    },
+    T,
+  );
+
+  it(
+    "once she has connected MyCourses: the account part is refused, a course folder still goes in",
+    async () => {
+      const input = await loadSeed(ACCOUNT, bundles);
+      const userId = await newUser();
+      await t.db.insert(moodleConnections).values({ userId, siteUrl: "https://moodle.example.test", moodleUserId: 1, tokenSealed: "not-a-real-sealed-key" });
+      // A course as the sync writes it: a real, positive Moodle id.
+      await t.db.insert(courses).values({ userId, moodleId: 4401, code: "TST-E0001", name: "Intro to Forecasting" });
+      const [account, exam, study] = seedPartsOf(input).map((p) => readSeedPart(JSON.parse(serialisePart(p))));
+      if (account.part !== "account" || exam.part !== "bundle" || study.part !== "bundle") throw new Error("unexpected parts");
+
+      await expect(applyAccountPart(t.db, userId, account, { now: NOW })).rejects.toBeInstanceOf(SeedRefused);
+      expect(await t.db.select().from(assignments)).toHaveLength(0);
+      expect((await t.db.select().from(users).where(eq(users.id, userId)))[0].settings.seededFrom).toBeUndefined();
+
+      const went = await applyBundlePart(t.db, userId, exam, { now: NOW });
+      expect(went).toMatchObject({ imported: true, counts: { exam: { created: 1 }, cards: { created: 5 } } });
+      // A folder whose course she does not have is said so, and nothing of it is written.
+      const not = await applyBundlePart(t.db, userId, study, { now: NOW });
+      expect(not).toMatchObject({ imported: false, courseCode: "TST-E0003" });
+      expect(combineAnswers(planSeed(input), [went, not]).skipped.join("\n")).toContain("Bundle folder TST-E0003 (TST-E0003): not imported. No course with code TST-E0003");
+    },
+    T,
+  );
+
+  it(
+    "a second upload removes the past-due rows the first one wrote, and never a row a sync wrote",
+    async () => {
+      const dir = path.join(tmp, "upload-past");
+      await cp(ACCOUNT, dir, { recursive: true });
+      const raw = JSON.parse(await readFile(path.join(dir, "account.json"), "utf8"));
+      raw.courses[0].assignments = [
+        { id: 700001, name: "Old essay", due: "2026-10-01 23:59" },
+        { id: 700002, name: "Synced old task", due: "2026-10-05 23:59" },
+        { name: "Old lab", due: "2026-10-20 23:59" },
+        { id: 700003, name: "Coming essay", due: "2026-11-25 23:59" },
+      ];
+      // First as pulled long ago (nothing is past yet), without the task only the sync knows.
+      const early = structuredClone(raw);
+      early.pulledAt = "2026-01-01T00:00:00.000Z";
+      early.courses[0].assignments.splice(1, 1);
+      await write(path.join(dir, "account.json"), early);
+      const userId = await newUser();
+      await upload(userId, await loadSeed(dir, bundles));
+      const names = async () => (await t.db.select().from(assignments).where(eq(assignments.userId, userId))).map((a) => a.name).sort();
+      expect(await names()).toEqual(expect.arrayContaining(["Old essay", "Old lab", "Coming essay"]));
+      // The same Moodle id as a past-due entry of the files, but written by a sync, not by the seed.
+      const [course] = await t.db.select().from(courses).where(eq(courses.userId, userId)).limit(1);
+      await t.db.insert(assignments).values({ userId, courseId: course.id, moodleId: 700002, name: "Synced old task", dueAt: new Date("2026-10-05T10:00:00Z") });
+
+      await write(path.join(dir, "account.json"), raw);
+      const [answer] = await upload(userId, await loadSeed(dir, bundles));
+      const left = await names();
+      expect(left).not.toContain("Old essay");
+      expect(left).not.toContain("Old lab");
+      expect(left).toContain("Synced old task");
+      expect(left).toContain("Coming essay");
+      expect(answer.part === "account" ? answer.notes.join("\n") : "").toContain("Removed 2 past-due assignments an earlier run created");
     },
     T,
   );

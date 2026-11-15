@@ -77,14 +77,26 @@ import {
   applyImport,
   applyStudyOnly,
   BundleInvalid,
+  DeckFileSchema,
   examKindOf,
   ImportFailed,
   loadBundle,
+  MapSchema,
+  PageSchema,
   planImport,
   planStudyOnly,
+  SeedSchema,
+  StudySeedSchema,
+  studyOnlySummary,
+  type BundlePage,
   type Count,
+  type CourseBundle,
+  type ImportCounts,
   type ImportPlan,
+  type ImportProblem,
   type ImportResult,
+  type StudyOnlyCounts,
+  type StudyOnlyCourse,
   type StudyOnlyPlan,
   type StudyOnlyResult,
 } from "@/server/study/import-bundle";
@@ -329,8 +341,9 @@ export function seedKeyFor(raw: unknown, accountDirReal: string): string {
 // ---------------------------------------------------------------------------
 
 export type BundleCourse =
-  | { kind: "exam"; courseCode: string; folder: string; plan: ImportPlan }
-  | { kind: "studyOnly"; courseCode: string; folder: string; plan: StudyOnlyPlan };
+  | { kind: "exam"; courseCode: string; folder: string; plan: ImportPlan; source?: CourseBundle }
+  | { kind: "studyOnly"; courseCode: string; folder: string; plan: StudyOnlyPlan; source?: StudyOnlyCourse };
+// `source` (M3-58): the validated files the plan was made from. `loadSeed` sets it; an upload sends it.
 
 /**
  * One per-course status file as `scripts/moodle/account-status.mjs` (M0-16) writes it:
@@ -448,8 +461,8 @@ export async function loadSeed(accountDir: string, bundlesDir: string): Promise<
     }
     try {
       const bundle = await loadBundle(bundlesDir, { courses: [code] });
-      for (const c of bundle.courses) bundles.push({ kind: "exam", courseCode: normCode(c.seed.exam.courseCode), folder, plan: planImport(c) });
-      for (const c of bundle.studyOnly) bundles.push({ kind: "studyOnly", courseCode: normCode(c.courseCode), folder, plan: planStudyOnly(c) });
+      for (const c of bundle.courses) bundles.push({ kind: "exam", courseCode: normCode(c.seed.exam.courseCode), folder, plan: planImport(c), source: c });
+      for (const c of bundle.studyOnly) bundles.push({ kind: "studyOnly", courseCode: normCode(c.courseCode), folder, plan: planStudyOnly(c), source: c });
     } catch (err) {
       if (!(err instanceof BundleInvalid)) throw err;
       bundleProblems.push({ folder, problems: err.problems });
@@ -773,10 +786,34 @@ export async function findSeededUser(database: Db, key: string): Promise<{ id: s
 
 const sameTime = (a: Date | null, b: Date | null) => (a?.getTime() ?? null) === (b?.getTime() ?? null);
 
+/**
+ * One course folder into `userId`'s account: the step a direct run and an upload (M3-58) share.
+ * Its own transaction, or a savepoint inside one.
+ */
+export async function applyBundle(database: Db, userId: string, b: BundleCourse, now: Date): Promise<ImportResult | StudyOnlyResult> {
+  return b.kind === "exam" ? applyImport(database, userId, b.plan, { now }) : applyStudyOnly(database, userId, b.plan);
+}
+
+/** The account an upload writes into (M3-58): its row, locked until the transaction ends. */
+async function accountForUpload(tx: Db, userId: string): Promise<NonNullable<Awaited<ReturnType<typeof findSeededUser>>>> {
+  const [row] = await tx
+    .select({ id: users.id, displayName: users.displayName, settings: users.settings })
+    .from(users)
+    .where(eq(users.id, userId))
+    .for("update");
+  if (!row) throw new SeedRefused("This account does not exist any more. Nothing was written.");
+  return row;
+}
+
+/**
+ * `into` (M3-58, see `applyAccountPart`): write into this existing account instead of the user
+ * found or made from `plan.key`. Everything after the user is the same code for both.
+ */
 export async function applySeed(
   database: Db,
   plan: SeedPlan,
   options: { dryRun?: boolean; name?: string; now?: Date } = {},
+  into?: { userId: string },
 ): Promise<SeedResult> {
   const dryRun = options.dryRun ?? false;
   const now = options.now ?? new Date();
@@ -799,9 +836,12 @@ export async function applySeed(
       // back its own rows and nothing else.
       const seededIds = plan.courses.flatMap((c) => c.assignments.map((a) => a.moodleId)).sort((a, b) => a - b);
       const seededBefore = new Set<number>();
-      const seededFrom = { key: plan.key, pulledAt: plan.pulledAt, assignmentIds: seededIds };
       const name = options.name?.trim() || null;
-      const found = await findSeededUser(tx, plan.key);
+      const found = into ? await accountForUpload(tx, into.userId) : await findSeededUser(tx, plan.key);
+      // An upload never names a key: the account keeps the one a direct run gave it, or has none.
+      const keptKey = (found?.settings.seededFrom as { key?: unknown } | undefined)?.key;
+      const key = into ? (typeof keptKey === "string" ? { key: keptKey } : {}) : { key: plan.key };
+      const seededFrom = { ...key, pulledAt: plan.pulledAt, assignmentIds: seededIds };
       let userId: string;
       if (!found) {
         const [row] = await tx.insert(users).values({ displayName: name, settings: { seededFrom } }).returning({ id: users.id });
@@ -966,8 +1006,7 @@ export async function applySeed(
       const imports: SeedResult["imports"] = [];
       for (const b of plan.bundles) {
         try {
-          if (b.kind === "exam") imports.push(await applyImport(tx, userId, b.plan, { now }));
-          else imports.push(await applyStudyOnly(tx, userId, b.plan));
+          imports.push(await applyBundle(tx, userId, b, now));
         } catch (err) {
           if (!(err instanceof ImportFailed)) throw err;
           skipped.push(`Bundle folder ${b.folder} (${b.courseCode}): not imported. ${err.message}`);
@@ -1051,4 +1090,419 @@ export async function redeemOpenCode(
     await tx.insert(sessions).values({ userId: row.userId, tokenHash: hashToken(token), userAgent: opts.userAgent ?? null });
     return { userId: row.userId, token };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Upload (M3-58): the same seed, sent to POST /api/seed one part at a time
+// ---------------------------------------------------------------------------
+//
+// The tool has the files and no database address; the app has the database. So the tool sends
+// what `loadSeed` read and validated (never a finished plan), and the app validates it again
+// with the same schemas and runs `planSeed` / `planImport` and the apply code above itself.
+// Dates, content hashes and page hashes are therefore always computed by the server, by the
+// code a direct run uses, and a caller can never hand in a hash or a key of its own.
+//
+//   const input = await loadSeed(accountDir, bundlesDir);
+//   const parts = seedPartsOf(input);                 // account first, then each bundle's batches
+//   for (const p of parts) answers.push(await post(serialisePart(p)));   // POST /api/seed
+//   const summary = combineAnswers(planSeed(input), answers);            // what a direct run prints
+//
+// The parts (JSON):
+// - `{ part: "account", account, bundlesAccount, statuses, seeds }`: <account-dir>/account.json
+//   and <bundles-dir>/account.json as validated, the hand-in statuses of the status files, and
+//   each exam bundle's seed.json (so its exam is matched to account.json's as in a direct run).
+// - `{ part: "bundle", kind: "exam", courseCode, batch: {n, of}, seed, map, account, pages,
+//   decks: [{lecture, file, cards, indexes}], documents: [{file, text}] }`: one course folder.
+//   `seed`, `map` and `account` (its AI rule) go in every batch, because concepts, their order
+//   and the study start are planned from them. Batch 1 also carries every Markdown file of
+//   `exam/`; pages and cards fill batches up to the size limit. `cards` are the deck's cards as
+//   written, `indexes` their 1-based places in the deck file. Only cards the local plan keeps are
+//   sent, so a card repeated in another batch can never be taken for an edit of the first.
+// - `{ part: "bundle", kind: "studyOnly", courseCode, batch, seed, account, pages }`.
+// Things that only shape the printed report (problem lines, what is not stored, folder names)
+// stay on the tool's side: `combineAnswers` takes them from the local plan.
+//
+// Whose account: the caller's, always. `applyAccountPart` and `applyBundlePart` take the user id
+// from the session; the parts have no place for one. The marker (`settings.seededFrom`) of an
+// uploaded account has no `key` (a key is what lets a direct run find "its" user, and must
+// never come from a request); it keeps `pulledAt` and the assignment ids the seed wrote, so
+// the removal rule for past-due rows works as in a direct run.
+//
+// MyCourses: the account part is refused once the account has a Moodle connection (the sync
+// owns courses, assignments, calendar and grades then, exactly as for a direct run, and the
+// removal rule can therefore never meet a row a sync wrote). Bundle parts are study content
+// and go into a connected account too, onto the course the sync made.
+
+/** The most one request body may be. */
+export const UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
+/** What the splitter fills a request to: under the limit, with room to spare. */
+export const UPLOAD_PART_BYTES = 3_500_000;
+
+const wholeNumber = (what: string) => z.number({ error: `${what} must be a whole number.` }).int({ error: `${what} must be a whole number.` });
+
+/** A file name inside a course folder (only ever used in messages). */
+const relFile = z
+  .string({ error: "file must be text." })
+  .trim()
+  .min(1, { error: "file is empty." })
+  .max(300, { error: "file is too long." })
+  .refine((f) => !path.isAbsolute(f) && !f.split(/[\\/]/).includes(".."), { error: "file must be inside the course folder." });
+
+const BatchSchema = z
+  .object({ n: wholeNumber("batch.n").min(1), of: wholeNumber("batch.of").min(1) }, { error: "batch must be {n, of}." })
+  .refine((b) => b.n <= b.of, { error: "batch.n is above batch.of." });
+
+const AiRuleSchema = z
+  .object({ aiAllowed: z.union([z.boolean(), z.literal("unknown")], { error: 'aiAllowed must be true, false or "unknown".' }).optional(), scope: z.string().optional() })
+  .nullable()
+  .default(null);
+
+const PagesSchema = z
+  .array(z.object({ lecture: wholeNumber("lecture"), file: relFile, page: PageSchema }), { error: "pages must be a list." })
+  .default([]);
+
+const KnownStatusSchema = z.object({
+  courseText: z.string(),
+  id: wholeNumber("id").nullable(),
+  name: z.string(),
+  state: z.enum(ASSIGNMENT_STATES, { error: `state must be one of ${ASSIGNMENT_STATES.join(", ")}.` }),
+  submittedAt: When,
+});
+
+const AccountPartSchema = z.object({
+  part: z.literal("account"),
+  account: SeedAccountSchema,
+  bundlesAccount: BundlesAccountSchema.nullable().default(null),
+  statuses: z.array(KnownStatusSchema, { error: "statuses must be a list." }).default([]),
+  seeds: z.array(z.object({ courseCode: nonEmpty("courseCode"), seed: SeedSchema }), { error: "seeds must be a list." }).default([]),
+});
+export type AccountPart = z.infer<typeof AccountPartSchema>;
+
+const ExamBundlePartSchema = z.object({
+  part: z.literal("bundle"),
+  kind: z.literal("exam"),
+  courseCode: nonEmpty("courseCode"),
+  batch: BatchSchema,
+  seed: SeedSchema,
+  map: MapSchema.nullable().default(null),
+  account: AiRuleSchema,
+  pages: PagesSchema,
+  decks: z
+    .array(
+      z
+        .object({ lecture: wholeNumber("lecture"), file: relFile, cards: DeckFileSchema, indexes: z.array(wholeNumber("Each index").min(1), { error: "indexes must be a list." }) })
+        .refine((d) => d.cards.length === d.indexes.length, { error: "cards and indexes must be the same length." }),
+      { error: "decks must be a list." },
+    )
+    .default([]),
+  documents: z.array(z.object({ file: relFile, text: z.string({ error: "text must be text." }) }), { error: "documents must be a list." }).default([]),
+});
+export type ExamBundlePart = z.infer<typeof ExamBundlePartSchema>;
+
+const StudyBundlePartSchema = z.object({
+  part: z.literal("bundle"),
+  kind: z.literal("studyOnly"),
+  courseCode: nonEmpty("courseCode"),
+  batch: BatchSchema,
+  seed: StudySeedSchema,
+  account: AiRuleSchema,
+  pages: PagesSchema,
+});
+export type StudyBundlePart = z.infer<typeof StudyBundlePartSchema>;
+
+export type BundlePart = ExamBundlePart | StudyBundlePart;
+export type SeedPart = AccountPart | BundlePart;
+
+/** A request body: Dates become ISO text, which the same schemas read back to the same instants. */
+export function serialisePart(part: SeedPart): string {
+  return JSON.stringify(part);
+}
+
+const jsonBytes = (v: unknown) => Buffer.byteLength(JSON.stringify(v));
+
+/** `<account-dir>` and `<bundles-dir>/account.json` as one part. Pure. */
+export function accountPartOf(input: SeedInput): AccountPart {
+  return {
+    part: "account",
+    account: input.account,
+    bundlesAccount: input.bundlesAccount,
+    statuses: input.statuses ?? [],
+    seeds: input.bundles.flatMap((b) => (b.kind === "exam" && b.source ? [{ courseCode: b.courseCode, seed: b.source.seed }] : [])),
+  };
+}
+
+/**
+ * One course folder as requests of at most `maxBytes` each. Pure; `b.source` is what `loadSeed`
+ * read. Applying the batches in order gives the rows one direct run gives. Throws `SeedInvalid`
+ * when something cannot be sent at all (one page or card larger than a request).
+ */
+export function bundlePartsOf(b: BundleCourse, maxBytes: number = UPLOAD_PART_BYTES): BundlePart[] {
+  const source = b.source;
+  if (!source) throw new SeedInvalid([`Bundle folder ${b.folder} (${b.courseCode}): its files were not kept, so it cannot be sent.`]);
+  const tooBig = (what: string) => new SeedInvalid([`Bundle folder ${b.folder} (${b.courseCode}): ${what} does not fit in one request (${maxBytes} bytes).`]);
+  const rule = source.account ? { aiAllowed: source.account.aiAllowed, scope: source.account.scope } : null;
+  const widest = { n: 9999, of: 9999 };
+
+  if (b.kind === "studyOnly") {
+    const base = { part: "bundle" as const, kind: "studyOnly" as const, courseCode: b.courseCode, seed: (source as StudyOnlyCourse).seed, account: rule };
+    const room = maxBytes - jsonBytes({ ...base, batch: widest, pages: [] });
+    if (room < 0) throw tooBig("its seed.json");
+    const groups: BundlePage[][] = [[]];
+    let used = 0;
+    for (const page of source.pages) {
+      const cost = jsonBytes(page) + 1;
+      if (cost > room) throw tooBig(page.file);
+      if (used + cost > room) {
+        groups.push([]);
+        used = 0;
+      }
+      groups[groups.length - 1].push(page);
+      used += cost;
+    }
+    return groups.map((pages, i) => ({ ...base, batch: { n: i + 1, of: groups.length }, pages }));
+  }
+
+  const course = source as CourseBundle;
+  const base = { part: "bundle" as const, kind: "exam" as const, courseCode: b.courseCode, seed: course.seed, map: course.map, account: rule };
+  const documents = course.examDocs.flatMap((d) => (d.text !== undefined ? [{ file: d.file, text: d.text }] : []));
+  const room = maxBytes - jsonBytes({ ...base, batch: widest, pages: [], decks: [], documents: [] });
+  if (room < 0) throw tooBig("its seed.json and map");
+
+  type Batch = { pages: BundlePage[]; decks: ExamBundlePart["decks"]; documents: ExamBundlePart["documents"] };
+  const batches: Batch[] = [{ pages: [], decks: [], documents }];
+  let used = documents.reduce((s, d) => s + jsonBytes(d) + 1, 0);
+  if (used > room) throw tooBig("its seed.json, map and exam documents together");
+  const next = () => {
+    batches.push({ pages: [], decks: [], documents: [] });
+    used = 0;
+  };
+  for (const page of course.pages) {
+    const cost = jsonBytes(page) + 1;
+    if (cost > room) throw tooBig(page.file);
+    if (used + cost > room) next();
+    batches[batches.length - 1].pages.push(page);
+    used += cost;
+  }
+  // Only the cards the plan keeps (valid, and the first of any repeated id or content).
+  for (const p of b.plan.cards) {
+    const raw = course.decks.find((d) => d.lecture === p.lecture && d.file === p.file)?.cards[p.index - 1];
+    if (raw === undefined) continue;
+    const wrap = jsonBytes({ lecture: p.lecture, file: p.file, cards: [], indexes: [] }) + 1;
+    const cost = jsonBytes(raw) + 1 + String(p.index).length + 1;
+    if (cost + wrap > room) throw tooBig(`${p.file} card ${p.index}`);
+    const fits = (batch: Batch) => used + cost + (batch.decks.some((d) => d.lecture === p.lecture && d.file === p.file) ? 0 : wrap) <= room;
+    if (!fits(batches[batches.length - 1])) next();
+    const batch = batches[batches.length - 1];
+    let deck = batch.decks.find((d) => d.lecture === p.lecture && d.file === p.file);
+    if (!deck) {
+      deck = { lecture: p.lecture, file: p.file, cards: [], indexes: [] };
+      batch.decks.push(deck);
+      used += wrap;
+    }
+    deck.cards.push(raw);
+    deck.indexes.push(p.index);
+    used += cost;
+  }
+  return batches.map((batch, i) => ({ ...base, batch: { n: i + 1, of: batches.length }, ...batch }));
+}
+
+/** Every request of an upload, in the order to send them: the account, then each course folder. Pure. */
+export function seedPartsOf(input: SeedInput, maxBytes: number = UPLOAD_PART_BYTES): SeedPart[] {
+  const account = accountPartOf(input);
+  if (Buffer.byteLength(serialisePart(account)) > maxBytes) {
+    throw new SeedInvalid([`The account files are larger than one request may be (${maxBytes} bytes).`]);
+  }
+  return [account, ...input.bundles.flatMap((b) => bundlePartsOf(b, maxBytes))];
+}
+
+/** Top-level keys a part must not carry: whose account it is comes from the session alone. */
+const NOT_FROM_THE_BODY = ["userId", "user_id", "user", "key", "seededFrom"];
+
+/** Path-named problems of a request body. Quoted values are left out, so no file text is echoed. */
+function partIssues(error: z.ZodError, prefix: string[] = []): string[] {
+  return error.issues.map((i) => {
+    const at = [...prefix, ...i.path.map(String)].join(".");
+    return `${at ? `${at}: ` : ""}${i.message.replace(/"[^"]*"/g, '"…"')}`;
+  });
+}
+
+/**
+ * A request body (parsed JSON) as a part, validated with the schemas `loadSeed` and
+ * `loadBundle` use. Throws `SeedInvalid` with one path-named line per problem.
+ */
+export function readSeedPart(body: unknown): SeedPart {
+  if (!isRecord(body)) throw new SeedInvalid(['The body must be one part: {"part": "account", ...} or {"part": "bundle", ...}.']);
+  const named = NOT_FROM_THE_BODY.filter((k) => k in body);
+  if (named.length) throw new SeedInvalid([`${named.join(", ")}: a part cannot say whose account it is for; it goes into the signed-in one.`]);
+  const schema =
+    body.part === "account"
+      ? AccountPartSchema
+      : body.part === "bundle" && body.kind === "exam"
+        ? ExamBundlePartSchema
+        : body.part === "bundle" && body.kind === "studyOnly"
+          ? StudyBundlePartSchema
+          : null;
+  if (!schema) throw new SeedInvalid(['part: must be "account", or "bundle" with kind "exam" or "studyOnly".']);
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new SeedInvalid(partIssues(parsed.error));
+  const part = parsed.data;
+  const problems: string[] = [];
+  if (part.part === "account") {
+    const codes = part.account.courses.map((c) => normCode(c.code));
+    codes.forEach((c, i) => {
+      if (codes.indexOf(c) !== i) problems.push(`account.courses.${i}.code: this course is listed twice.`);
+    });
+    const rules = AccountSchema.safeParse(part.bundlesAccount ?? {});
+    if (!rules.success) problems.push(...partIssues(rules.error, ["bundlesAccount"]));
+  } else if (part.kind === "exam" && normCode(part.seed.exam.courseCode) !== normCode(part.courseCode)) {
+    problems.push("courseCode: is not the course of seed.exam.courseCode.");
+  }
+  if (problems.length) throw new SeedInvalid(problems);
+  return part;
+}
+
+/** What the server answers for one part. */
+export type SeedAnswer =
+  | { part: "account"; counts: SeedCounts; skipped: string[]; notStored: string[]; notes: string[] }
+  | { part: "bundle"; kind: "exam"; courseCode: string; batch: { n: number; of: number }; imported: true; counts: ImportCounts; problems: ImportProblem[] }
+  | { part: "bundle"; kind: "studyOnly"; courseCode: string; batch: { n: number; of: number }; imported: true; counts: StudyOnlyCounts }
+  | { part: "bundle"; kind: "exam" | "studyOnly"; courseCode: string; batch: { n: number; of: number }; imported: false; reason: string };
+
+/**
+ * The account part into `userId`'s account: planned here by `planSeed`, applied by `applySeed`'s
+ * own code. Throws `SeedInvalid` (the files do not fit) or `SeedRefused` (she has connected
+ * MyCourses); nothing is written then.
+ */
+export async function applyAccountPart(database: Db, userId: string, part: AccountPart, options: { now?: Date } = {}): Promise<SeedAnswer> {
+  const now = options.now ?? new Date();
+  const rules = AccountSchema.safeParse(part.bundlesAccount ?? {});
+  if (!rules.success) throw new SeedInvalid(partIssues(rules.error, ["bundlesAccount"]));
+  const aiRules: SeedInput["aiRules"] = new Map();
+  if (part.bundlesAccount) for (const [code, rule] of Object.entries(rules.data.courses)) aiRules.set(normCode(code), { aiAllowed: rule.aiAllowed, scope: rule.scope });
+  // Each exam bundle's exam (title, target), planned from its seed alone, as `planSeed` needs it.
+  const bundles: BundleCourse[] = part.seeds.map(({ seed }) => ({
+    kind: "exam",
+    courseCode: normCode(seed.exam.courseCode),
+    folder: "",
+    plan: planImport({ dir: "", seed, map: null, decks: [], pages: [], examDocs: [], examDocProblems: [], account: null }),
+  }));
+  const plan = planSeed({ key: "", statuses: part.statuses, account: part.account, bundlesAccount: part.bundlesAccount, aiRules, bundles, bundleProblems: [] }, now);
+  const result = await applySeed(database, { ...plan, bundles: [] }, { now }, { userId });
+  return { part: "account", counts: result.counts, skipped: result.skipped, notStored: result.notStored, notes: result.notes };
+}
+
+/**
+ * One batch of one course folder into `userId`'s account: planned here by `planImport` /
+ * `planStudyOnly`, applied by `applyBundle`. A later batch (`batch.n` above 1) repeats the seed
+ * and the map, so of the things batch 1 already wrote it reports only what it changed itself.
+ */
+export async function applyBundlePart(database: Db, userId: string, part: BundlePart, options: { now?: Date } = {}): Promise<SeedAnswer> {
+  const now = options.now ?? new Date();
+  const head = { part: "bundle" as const, courseCode: normCode(part.courseCode), batch: part.batch };
+  const account = part.account ? { ...part.account, other: [] } : null;
+  const later = (counts: Record<string, Count>, own: string[]) => {
+    if (part.batch.n > 1) for (const [name, c] of Object.entries(counts)) if (!own.includes(name)) c.skipped = 0;
+  };
+  try {
+    if (part.kind === "studyOnly") {
+      const plan = planStudyOnly({ dir: "", courseCode: head.courseCode, seed: part.seed, pages: part.pages, decks: [], deckProblems: [], examFiles: 0, map: null, account });
+      const result = (await applyBundle(database, userId, { kind: "studyOnly", courseCode: head.courseCode, folder: "", plan }, now)) as StudyOnlyResult;
+      later(result.counts, ["pages"]);
+      return { ...head, kind: "studyOnly", imported: true, counts: result.counts };
+    }
+    const plan = planImport({
+      dir: "",
+      seed: part.seed,
+      map: part.map,
+      decks: part.decks.map((d) => ({ lecture: d.lecture, file: d.file, cards: d.cards })),
+      pages: part.pages,
+      examDocs: part.documents.map((d) => ({ file: d.file, kind: "text" as const, bytes: Buffer.byteLength(d.text), text: d.text })),
+      examDocProblems: [],
+      account,
+    });
+    // A card's place in its deck file, not in this batch.
+    for (const p of plan.cards) p.index = part.decks.find((d) => d.lecture === p.lecture && d.file === p.file)?.indexes[p.index - 1] ?? p.index;
+    const result = (await applyBundle(database, userId, { kind: "exam", courseCode: head.courseCode, folder: "", plan }, now)) as ImportResult;
+    later(result.counts, ["pages", "cards"]);
+    // What was found while writing; the plan's own lines are the tool's to print.
+    return { ...head, kind: "exam", imported: true, counts: result.counts, problems: result.problems.slice(plan.problems.length) };
+  } catch (err) {
+    if (!(err instanceof ImportFailed)) throw err;
+    return { ...head, kind: part.kind, imported: false, reason: err.message };
+  }
+}
+
+/** What an upload gave, in the shape a direct run's `SeedResult` has (no ids: they stay on the server). */
+export type UploadSummary = Omit<SeedResult, "userId" | "imports"> & {
+  imports: (Omit<ImportResult, "courseId" | "examId"> | Omit<StudyOnlyResult, "courseId">)[];
+};
+
+/**
+ * The answers of one upload as one summary, from the local plan (`planSeed(input)`) and what
+ * the server said. Counts are the server's, added up over a course folder's batches; problem
+ * lines, what is not stored and notes are the local plan's plus what the server found while
+ * writing. Pure.
+ */
+export function combineAnswers(plan: SeedPlan, answers: SeedAnswer[]): UploadSummary {
+  const account = answers.find((a) => a.part === "account");
+  const counts: SeedCounts =
+    account?.part === "account"
+      ? account.counts
+      : { user: zero(), courses: zero(), assignments: zero(), events: zero(), gradeWeights: zero(), exams: zero(), aiPolicy: zero() };
+  const extra = (mine: string[], theirs: string[] | undefined) => [...mine, ...(theirs ?? []).filter((l) => !mine.includes(l))];
+  const skipped = extra(plan.skipped, account?.part === "account" ? account.skipped : []);
+  const notes = extra(plan.notes, account?.part === "account" ? account.notes : []);
+  const add = <C extends Record<string, Count>>(into: C, more: Record<string, Count>): C => {
+    for (const [name, c] of Object.entries(more)) {
+      const mine = into[name];
+      if (!mine) continue;
+      mine.created += c.created;
+      mine.skipped += c.skipped;
+      mine.updated += c.updated;
+    }
+    return into;
+  };
+
+  const imports: UploadSummary["imports"] = [];
+  for (const b of plan.bundles) {
+    const mine = answers.filter((a) => a.part === "bundle" && a.kind === b.kind && normCode(a.courseCode) === b.courseCode);
+    if (!mine.length) continue;
+    const refused = mine.find((a) => a.part === "bundle" && !a.imported);
+    if (refused?.part === "bundle" && !refused.imported) {
+      skipped.push(`Bundle folder ${b.folder} (${b.courseCode}): not imported. ${refused.reason}`);
+      continue;
+    }
+    if (b.kind === "studyOnly") {
+      const sum: StudyOnlyCounts = { lectures: zero(), pages: zero(), aiPolicy: zero() };
+      for (const a of mine) if (a.part === "bundle" && a.imported) add(sum, a.counts);
+      imports.push({
+        studyOnly: true,
+        dryRun: false,
+        courseCode: b.plan.courseCode,
+        counts: sum,
+        cardsNotImported: b.plan.cardsNotImported,
+        summary: studyOnlySummary(sum.pages.created + sum.pages.updated, b.plan.cardsNotImported),
+        problems: [...b.plan.problems],
+        notStored: b.plan.notStored,
+        notes: b.plan.notes,
+      });
+      continue;
+    }
+    const sum: ImportCounts = { exam: zero(), concepts: zero(), lectures: zero(), pages: zero(), lectureConcepts: zero(), cards: zero(), documents: zero(), aiPolicy: zero() };
+    const problems = [...b.plan.problems];
+    const seen = new Set<string>();
+    for (const a of mine) {
+      if (a.part !== "bundle" || !a.imported) continue;
+      add(sum, a.counts);
+      // A line every batch repeats (the exam's date differs) is one line.
+      for (const p of a.kind === "exam" ? a.problems : []) {
+        const id = JSON.stringify([p.file, p.lecture, p.index, p.reason]);
+        if (!seen.has(id)) problems.push(p);
+        seen.add(id);
+      }
+    }
+    imports.push({ dryRun: false, courseCode: b.plan.exam.courseCode, counts: sum, problems, notStored: b.plan.notStored, notes: b.plan.notes });
+  }
+  if (plan.bundles.some((b) => b.kind === "exam")) notes.push("Where a bundle's seed gives another exam date than account.json, account.json's date is kept.");
+  return { dryRun: false, counts, imports, skipped, notStored: plan.notStored, notes };
 }
