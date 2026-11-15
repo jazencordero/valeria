@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { KIND_PATTERN, dueKinds } from "@/server/jobs/queue";
+import { KIND_PATTERN, dueKinds, enqueue } from "@/server/jobs/queue";
 import { scheduleSyncs } from "@/server/sync/schedule";
 
 // The hourly tick (M2-06). GitHub Actions calls it once an hour
@@ -10,10 +10,12 @@ import { scheduleSyncs } from "@/server/sync/schedule";
 // own route under `src/app/api/cron/<kind>/route.ts`, which checks the secret
 // again and drains its queue; nothing here lists the kinds.
 //
-// Before that it queues background syncs (M7-05, `scheduleSyncs`); see below.
+// Before that it queues background syncs (M7-05, `scheduleSyncs`) and the
+// next hour's reminder pass (M7-07, `queueRemind`); see below.
 //
 // Answer: { ok, kinds: [{ kind, status, ok }], skipped: [kind] }, plus
-// `scheduleFailed: true` when queueing the background syncs threw. `status` is
+// `scheduleFailed: true` when queueing the background syncs threw, and
+// `remindFailed: true` when queueing the reminder pass threw. `status` is
 // what the kind's route answered (0 = it could not be reached). The tick itself
 // answers 200 even when a kind's route fails: the jobs stay queued and the next
 // tick tries again. `skipped` holds kinds whose name is not a-z and dashes;
@@ -40,6 +42,23 @@ function authorized(request: Request): boolean {
   return timingSafeEqual(digest(header), digest(`Bearer ${secret}`));
 }
 
+/** The job kind src/app/api/cron/remind/route.ts drains. */
+const REMIND_KIND = "remind";
+const HOUR_MS = 60 * 60_000;
+
+/**
+ * Queues one `remind` job for the start of the next UTC hour, deduped by that
+ * hour (`remind:2026-11-15T17`), so ticks in the same hour add one job. The
+ * job is due from the next hour's tick, which runs it: one reminder pass an
+ * hour, each at the first tick of its hour. (Due on a later tick, not this
+ * one, so this tick's answer lists the same kinds as before.) The pass itself
+ * never sends a reminder twice (`reminder_log`), so an extra job is harmless.
+ */
+async function queueRemind(now: Date): Promise<void> {
+  const nextHour = new Date(Math.floor(now.getTime() / HOUR_MS) * HOUR_MS + HOUR_MS);
+  await enqueue(REMIND_KIND, {}, { runAfter: nextHour, dedupeKey: `remind:${nextHour.toISOString().slice(0, 13)}` });
+}
+
 async function tick(request: Request): Promise<Response> {
   if (!authorized(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
 
@@ -59,6 +78,15 @@ async function tick(request: Request): Promise<Response> {
     await scheduleSyncs();
   } catch {
     scheduleFailed = true;
+  }
+
+  // Then the reminder pass for the next hour (M7-07). Same rule: a failure
+  // only shows as `remindFailed: true`; the next tick queues again.
+  let remindFailed = false;
+  try {
+    await queueRemind(new Date());
+  } catch {
+    remindFailed = true;
   }
 
   for (const kind of await dueKinds()) {
@@ -81,7 +109,13 @@ async function tick(request: Request): Promise<Response> {
     }
   }
 
-  return Response.json({ ok: kinds.every((k) => k.ok), kinds, skipped, ...(scheduleFailed ? { scheduleFailed } : {}) });
+  return Response.json({
+    ok: kinds.every((k) => k.ok),
+    kinds,
+    skipped,
+    ...(scheduleFailed ? { scheduleFailed } : {}),
+    ...(remindFailed ? { remindFailed } : {}),
+  });
 }
 
 export const GET = tick;
