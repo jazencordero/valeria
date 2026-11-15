@@ -49,7 +49,7 @@ import { gradeFor } from "@/lib/study/forecast";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { shortNameOf } from "@/server/data/courses";
 import { getExamTabs } from "@/server/data/exam-tabs";
-import { getExamsView } from "@/server/data/exams";
+import { getExamsView, targetGradeOf } from "@/server/data/exams";
 import { db } from "@/server/db/client";
 import { AI_STUDY, courses } from "@/server/db/schema/courses";
 import { exams } from "@/server/db/schema/study";
@@ -279,6 +279,11 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
     .from(courses)
     .where(and(eq(courses.id, view.exam.courseId), eq(courses.userId, user.id)));
   if (!course || course.hidden) notFound();
+  // What `examView` does not carry: the grade her bundle aims for.
+  const [stored] = await db
+    .select({ gradeTarget: exams.gradeTarget })
+    .from(exams)
+    .where(and(eq(exams.id, view.exam.id), eq(exams.userId, user.id)));
 
   const { exam } = view;
   const today = dayKey(now);
@@ -310,6 +315,7 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
           forecast: view.forecast,
           daysLeft: view.daysLeft,
           target: exam.targetPct,
+          targetGrade: targetGradeOf(stored?.gradeTarget),
           examDay: `${at.month} ${at.day}`.toUpperCase(),
         },
         concepts: progressConcepts(view, deck),

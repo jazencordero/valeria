@@ -8,7 +8,7 @@
  *
  * Top: the title as a button (opens the exam), course, when, and a 48 px
  * ring. Then "64% forecast" with the sparkline, "If it were today. A 4 needs
- * 80%.", the verdict, and a "Concepts" disclosure listing each concept with
+ * 80%." (or "The target is 80%." when no grade is known), the verdict, and a "Concepts" disclosure listing each concept with
  * its icon, rung pips and rung name, plus the foot line. Exams (not quizzes)
  * end with "Today's bite · 5 min", or "Open the exam" when there is no bite.
  *
@@ -116,8 +116,8 @@ export type ExamCardProps = Omit<
   spark: ExamCardSpark;
   /** Target percent for the aimed grade. */
   target: number;
-  /** The grade the target earns ("A 4 needs 80%"). */
-  grade: number | string;
+  /** The grade she aims for ("A 4 needs 80%"); null when none is known: "The target is 80%." */
+  grade: number | string | null;
   verdict: ExamCardVerdict;
   concepts: readonly ExamCardConcept[];
   /** Minutes of today's bite; null or undefined shows "Open the exam". Exams only. */
@@ -219,7 +219,7 @@ export function ExamCard({
             />
           </div>
           <p className="mt-0.5 text-[13px] text-ink-2">
-            If it were today. A {grade} needs {target}%.
+            If it were today. {grade == null ? `The target is ${target}%.` : `A ${grade} needs ${target}%.`}
           </p>
           <p
             className={

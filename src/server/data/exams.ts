@@ -32,6 +32,7 @@ import { exams } from "@/server/db/schema/study";
 import { jobs } from "@/server/db/schema/system";
 import { examView, type ExamView } from "@/server/study/actions";
 import { CONCEPTS_KIND } from "@/server/study/exams";
+import { gradeOfTarget } from "@/server/study/import-bundle";
 import { StudyNotFound } from "@/server/study/store";
 import { shortNameOf } from "./courses";
 
@@ -54,6 +55,8 @@ export type ExamsTabExam = {
   spark: { history: number[]; forecast: number; daysLeft: number };
   /** The percent her target grade needs. */
   target: number;
+  /** The grade she aims for, as her bundle gave it (`exams.grade_target`); null when it gave none. */
+  grade: number | null;
   concepts: { id: string; name: string; rung: number }[];
   counts: { new: number; learning: number; due: number };
   /** Set while the cards are still being made from this many lectures. */
@@ -80,6 +83,13 @@ export function inDays(daysLeft: number): string {
 /** "FRI 20 NOV · 09:00 · in 6 days". */
 export function examWhen(at: Date, now: Date): string {
   return `${dateLine(at)} · ${inDays(daysBetween(now, at))}`;
+}
+
+/** The grade 1..5 inside a stored `exams.grade_target` (a number, or an object carrying `grade`); else null. */
+export function targetGradeOf(stored: unknown): number | null {
+  const inner = typeof stored === "object" && stored !== null ? (stored as { grade?: unknown }).grade : stored;
+  const grade = typeof inner === "number" ? gradeOfTarget(inner) : null;
+  return grade !== null && Number.isInteger(grade) && grade >= 1 && grade <= 5 ? grade : null;
 }
 
 const examHref = (examId: string) => `/exams/${encodeURIComponent(examId)}`;
@@ -127,6 +137,7 @@ export async function getExamsView(
         kind: exams.kind,
         at: exams.at,
         targetPct: exams.targetPct,
+        gradeTarget: exams.gradeTarget,
         course: courses.name,
       })
       .from(exams)
@@ -173,6 +184,7 @@ export async function getExamsView(
         forecast: v.forecastShown,
         spark: { history: v.history, forecast: v.forecast, daysLeft: v.daysLeft },
         target: row.targetPct,
+        grade: targetGradeOf(row.gradeTarget),
         concepts: v.concepts.map((c) => ({ id: c.id, name: c.name, rung: c.rung })),
         counts: v.counts,
         ...(v.concepts.length === 0 && lectureCount > 0 ? { making: { lectures: lectureCount } } : {}),

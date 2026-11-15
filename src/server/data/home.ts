@@ -18,8 +18,9 @@
  *   out. They are the Exams tab's list (`getExamsView`, M3-41), so Home,
  *   /exams and /exams/<id> show the same forecast, phase and counts: every
  *   number comes from M3-18's `examView`, read once per exam. Home adds what
- *   its card shows on top: the grade the target earns, the verdict, the
- *   concept icons and today's bite minutes.
+ *   its card shows on top: the verdict, the concept icons and today's bite
+ *   minutes. The grade on the card ("A 4 needs 85%") is the one her bundle
+ *   names (`exams.grade_target`), never one worked out from the percent.
  * - `bite`: which exam the row is for. The soonest upcoming exam whose
  *   `examView` has a bite today (it has cards and today's plan is not done)
  *   gets "Or a 5-minute bite for Friday's exam". With none, the soonest exam
@@ -83,7 +84,6 @@ import { TIME_ZONE } from "@/lib/dates";
 import { greeting, type GreetingAssignment, type JustHandedIn, type JustStudied, type NextExam } from "@/lib/home/greeting";
 import { WEEK_DAYS, weekModel, type WeekItem, type WeekModel } from "@/lib/home/week";
 import { DONE_WINDOW_MS, type Queue } from "@/lib/queue";
-import { gradeFor } from "@/lib/study/forecast";
 import { FEED_PROVIDERS, itemsForUser, type FeedProvider } from "@/server/calendar/feed";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courseView, listCourses, type CourseLecture } from "@/server/courses/store";
@@ -114,8 +114,6 @@ export type HomeDone = DoneAssignment & {
 };
 
 export type HomeExam = Omit<ExamsTabExam, "concepts"> & {
-  /** The whole grade her target earns: "A 4 needs 80%". */
-  grade: number;
   verdict: { text: string; ok: boolean };
   /** `examView`'s concept icon name, or null (the page picks one by name). */
   concepts: { id: string; name: string; rung: number; icon: string | null }[];
@@ -258,7 +256,6 @@ function homeExam(card: ExamsTabExam, v: ExamView): HomeExam {
   const icons = new Map(v.concepts.map((c) => [c.id, c.icon]));
   return {
     ...card,
-    grade: gradeFor(card.target),
     verdict: { text: v.verdict.text, ok: v.verdict.ok },
     concepts: card.concepts.map((c) => ({ ...c, icon: icons.get(c.id) ?? null })),
     biteMinutes: v.bite?.minutes ?? null,

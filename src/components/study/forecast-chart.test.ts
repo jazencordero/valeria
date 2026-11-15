@@ -19,3 +19,11 @@ describe("forecastChartLayout: bottom axis", () => {
     expect(g.axis.todayX).toBeGreaterThan(g.L + 40);
   });
 });
+
+describe("forecastChartLayout: the target label", () => {
+  it("names the grade only when one is given", () => {
+    expect(forecastChartLayout({ ...base, history: [], targetGrade: 4 }, 340).targetText).toBe("target 85% · a 4");
+    expect(forecastChartLayout({ ...base, history: [], targetGrade: null }, 340).targetText).toBe("target 85%");
+    expect(forecastChartLayout({ ...base, history: [] }, 340).targetText).toBe("target 85%");
+  });
+});

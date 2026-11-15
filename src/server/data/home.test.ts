@@ -236,12 +236,12 @@ async function exam(
   courseId: string,
   title: string,
   at: Date,
-  opts: { kind?: "exam" | "quiz"; cards?: boolean; startNewOn?: string } = {},
+  opts: { kind?: "exam" | "quiz"; cards?: boolean; startNewOn?: string; extra?: Partial<typeof exams.$inferInsert> } = {},
 ) {
-  const { kind = "exam", cards: withCards = true, startNewOn } = opts;
+  const { kind = "exam", cards: withCards = true, startNewOn, extra = {} } = opts;
   const [e] = await t.db
     .insert(exams)
-    .values({ userId, courseId, title, kind, at, ...(startNewOn ? { startNewOn } : {}) })
+    .values({ userId, courseId, title, kind, at, ...(startNewOn ? { startNewOn } : {}), ...extra })
     .returning();
   if (!withCards) return e;
   const made = await t.db
@@ -317,7 +317,7 @@ describe("getHomeView: bite row and exam cards", () => {
       // An assignment is open, so the bite stays under DO FIRST.
       expect(view.biteFirst).toBe(false);
       expect(view.exams.map((e) => e.id)).toEqual([soon.id, later.id]);
-      expect(view.exams[0]).toMatchObject({ biteMinutes: bite.minutes, grade: 4, href: `/exams/${soon.id}` });
+      expect(view.exams[0]).toMatchObject({ biteMinutes: bite.minutes, grade: null, href: `/exams/${soon.id}` });
     },
     DB_TIMEOUT,
   );
@@ -403,8 +403,32 @@ describe("getHomeView: bite row and exam cards", () => {
       const view = await getHomeView(u.id, { now: NOW }, t.db);
 
       expect(view.exams.map((e) => e.title)).toEqual(["Friday exam", "Later quiz"]);
-      expect(view.exams[1]).toMatchObject({ kind: "quiz", course: "Forecasting Methods", target: 80, grade: 4 });
+      expect(view.exams[1]).toMatchObject({ kind: "quiz", course: "Forecasting Methods", target: 80, grade: null });
       expect(view.exams[0].when).toBe("FRI 20 NOV · 09:00 · in 6 days");
+    },
+    DB_TIMEOUT,
+  );
+
+  it(
+    "names the grade her bundle aims for, never one worked out from the target percent",
+    async () => {
+      const u = await user();
+      signedIn.userId = u.id;
+      const fm = await course(u.id, "Forecasting Methods");
+      // 62% is a 2 on the generic 50/60/70/80/90 scale; this bundle says it is what a 4 needs.
+      await exam(u.id, fm.id, "As an object", FRIDAY, { cards: false, extra: { targetPct: 62, gradeTarget: { grade: 4, points: 31 } } });
+      await exam(u.id, fm.id, "As a number", DEC_3, { cards: false, extra: { targetPct: 62, gradeTarget: 5 } });
+      await exam(u.id, fm.id, "No grade given", new Date("2026-12-10T09:00:00+02:00"), { cards: false, extra: { targetPct: 62 } });
+      await exam(u.id, fm.id, "Not a grade", new Date("2026-12-11T09:00:00+02:00"), { cards: false, extra: { gradeTarget: { grade: 9 } } });
+
+      const view = await getHomeView(u.id, { now: NOW }, t.db);
+
+      expect(view.exams.map((e) => [e.title, e.target, e.grade])).toEqual([
+        ["As an object", 62, 4],
+        ["As a number", 62, 5],
+        ["No grade given", 62, null],
+        ["Not a grade", 80, null],
+      ]);
     },
     DB_TIMEOUT,
   );

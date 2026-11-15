@@ -4,7 +4,7 @@
  * Forecast chart on the exam page: 13 days of history (solid), then two
  * futures to exam day: "a bite a day" (dashed accent) and "if you stop"
  * (fainter, thinner). Grid at 0, 50, 100; the target line labelled
- * "target 80% · a 4"; axis labels "2 WEEKS AGO", "TODAY" and the exam day; a
+ * "target 80% · a 4" (the grade only when her bundle names one); axis labels "2 WEEKS AGO", "TODAY" and the exam day; a
  * flag at the exam; a now dot with a halo; end labels on both futures.
  * No band between the futures, no legend, no hover read-out.
  *
@@ -16,7 +16,7 @@
  */
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { motion } from "motion/react";
-import { gradeFor, planCurve, stopCurve } from "@/lib/study/forecast";
+import { planCurve, stopCurve } from "@/lib/study/forecast";
 import { useMotionMode } from "@/lib/motion/use-calm";
 import { ease } from "@/lib/motion/tokens";
 
@@ -29,6 +29,8 @@ export type ForecastChartData = {
   daysLeft: number;
   /** Target percent, 0..100. */
   target: number;
+  /** The grade she aims for, when one is known: "target 85% · a 4". Without it the percent stands alone. */
+  targetGrade?: number | null;
   /** Exam day as the axis shows it, for example "DEC 12". */
   examDay: string;
 };
@@ -101,7 +103,7 @@ export function forecastChartLayout(data: ForecastChartData, width: number) {
   const nowBox: Box = { x0: nowX - textW(nowText, 13), x1: nowX, y0: nowY - 10, y1: nowY + 2 };
 
   // Target label above its line, or below it when it would hit the now label.
-  const targetText = `target ${Math.round(data.target)}% · a ${gradeFor(data.target)}`;
+  const targetText = `target ${Math.round(data.target)}%${data.targetGrade == null ? "" : ` · a ${data.targetGrade}`}`;
   const tlX = L + 4;
   const tlW = textW(targetText, 10, 0.02);
   const boxAt = (y: number): Box => ({ x0: tlX, x1: tlX + tlW, y0: y - 8, y1: y + 2 });
@@ -209,12 +211,13 @@ export function ForecastChart({
   forecast,
   daysLeft,
   target,
+  targetGrade,
   examDay,
   className = "",
   style,
   ...rest
 }: ForecastChartProps) {
-  const data = { history, forecast, daysLeft, target, examDay };
+  const data = { history, forecast, daysLeft, target, targetGrade, examDay };
   const mode = useMotionMode();
   const [ref, width] = useWidth();
   const themeTick = useThemeTick();
