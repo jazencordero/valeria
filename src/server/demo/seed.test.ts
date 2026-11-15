@@ -4,13 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentUserFor, ensureSessionFor, newToken } from "@/server/auth/session";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { courses } from "@/server/db/schema/courses";
-import { cards, exams, reviews } from "@/server/db/schema/study";
+import { lectureConcepts, lectureContent, lectures, notes } from "@/server/db/schema/learn";
+import { cardConcepts, cards, exams, reviews } from "@/server/db/schema/study";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import { users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
 import { ALLOWED_SITES, connectWithKey } from "@/server/moodle/connect";
 import { DEMO_KEY, fakeCall } from "@/server/moodle/fake-inline";
+import { courseView } from "@/server/courses/store";
 import { syncNow } from "@/server/sync/run";
+import { seedLearn } from "./seed-learn";
 import { DemoUnavailable, demoDueDates, isDemo, openDemo, resetDemo, seedDemo } from "./seed";
 
 // Made-up values for tests only. The fake Moodle accepts DEMO_KEY and nothing else.
@@ -107,6 +110,160 @@ describe("seedDemo", () => {
     const after = await syncNow(user.id, { force: false }, t.db);
     expect(after.ran).toBe(false);
     expect((await assignmentRows(user.id)).map((r) => r.dueAt?.toISOString())).toEqual(EXPECTED_DUE);
+  }, SLOW);
+});
+
+describe("seedDemo: lectures and notes (M9-20)", () => {
+  async function lectureRows(userId: string) {
+    return t.db
+      .select({ id: lectures.id, course: courses.name, courseId: lectures.courseId, n: lectures.n, title: lectures.title })
+      .from(lectures)
+      .innerJoin(courses, eq(courses.id, lectures.courseId))
+      .where(eq(lectures.userId, userId))
+      .orderBy(asc(courses.name), asc(lectures.n));
+  }
+  const countBy = (rows: { course: string }[]) => {
+    const out: Record<string, number> = {};
+    for (const r of rows) {
+      const short = r.course.split(",")[0];
+      out[short] = (out[short] ?? 0) + 1;
+    }
+    return out;
+  };
+
+  it("gives each of the four courses the prototype's lectures, with the current one where the prototype has it", async () => {
+    const { user } = await browser();
+    const result = await seedDemo(user.id, t.db, { now: NOW });
+    expect(result.lectures).toBe(24);
+    const rows = await lectureRows(user.id);
+    expect(countBy(rows)).toEqual({
+      "Digital Service Design": 5,
+      "Forecasting Methods": 6,
+      "Strategic IT Management": 8,
+      "Supply Chain Analytics": 5,
+    });
+
+    const states: Record<string, string> = {};
+    for (const courseId of new Set(rows.map((r) => r.courseId))) {
+      const view = await courseView(user.id, courseId, t.db, NOW);
+      states[view.course.name.split(",")[0]] = view.lectures.map((l) => l.state[0]).join("");
+    }
+    // d done, c current, u up next, s not posted yet.
+    expect(states).toEqual({
+      "Digital Service Design": "ddcus",
+      "Forecasting Methods": "dddcus",
+      "Strategic IT Management": "ddddcuus",
+      "Supply Chain Analytics": "dddcu",
+    });
+  }, SLOW);
+
+  it("writes the two full lecture pages with their blocks, and a short page for every other posted lecture", async () => {
+    const { user } = await browser();
+    await seedDemo(user.id, t.db, { now: NOW });
+    const pages = await t.db
+      .select({ course: courses.name, n: lectures.n, breath: lectureContent.breath, minutes: lectureContent.minutes, sections: lectureContent.sections })
+      .from(lectureContent)
+      .innerJoin(lectures, eq(lectures.id, lectureContent.lectureId))
+      .innerJoin(courses, eq(courses.id, lectures.courseId))
+      .where(eq(lectures.userId, user.id));
+    // 24 lectures, three not posted yet (no page).
+    expect(pages).toHaveLength(21);
+    expect(pages.every((p) => (p.breath ?? "").length > 0 && (p.minutes ?? 0) >= 1)).toBe(true);
+
+    type Section = { heading: string; blocks: [string, unknown][]; terms: string[]; slides: string };
+    const sit = (n: number) => pages.find((p) => p.course.startsWith("Strategic IT Management") && p.n === n)!;
+    const five = sit(5).sections as Section[];
+    expect(sit(5).minutes).toBe(6);
+    expect(five.map((s) => s.heading)).toEqual([
+      "Why firms source IT from outside",
+      "The sourcing options",
+      "What to keep in-house",
+      "Vendor lock-in",
+      "Service level agreements",
+    ]);
+    expect(five.flatMap((s) => s.blocks.map((b) => b[0]))).toEqual(expect.arrayContaining(["p", "ul", "dl"]));
+    expect(five.flatMap((s) => s.blocks.map((b) => b[0]))).not.toContain("fig");
+    expect(five[3].terms).toEqual(["Switching costs", "Multi-sourcing"]);
+    expect(five[4].slides).toBe("slides 20–24");
+    const three = sit(3).sections as Section[];
+    expect(sit(3).minutes).toBe(4);
+    expect(three.map((s) => s.heading)).toEqual(["Governance is not management", "Five key IT decisions", "Who decides"]);
+    expect(three[1].blocks.map((b) => b[0])).toEqual(["p", "ul"]);
+  }, SLOW);
+
+  it("links lectures only to deck concepts that have cards", async () => {
+    const { user } = await browser();
+    await seedDemo(user.id, t.db, { now: NOW });
+    const links = await t.db
+      .select({ course: courses.name, n: lectures.n, conceptId: lectureConcepts.conceptId })
+      .from(lectureConcepts)
+      .innerJoin(lectures, eq(lectures.id, lectureConcepts.lectureId))
+      .innerJoin(courses, eq(courses.id, lectures.courseId))
+      .where(eq(lectures.userId, user.id));
+    const where = [...new Set(links.map((l) => `${l.course.split(",")[0]} ${l.n}`))].sort();
+    expect(where).toEqual([
+      "Forecasting Methods 5",
+      "Forecasting Methods 6",
+      "Strategic IT Management 3",
+      "Strategic IT Management 5",
+      "Strategic IT Management 6",
+      "Strategic IT Management 7",
+    ]);
+    for (const l of links) {
+      expect(await t.db.select().from(cardConcepts).where(eq(cardConcepts.conceptId, l.conceptId))).not.toHaveLength(0);
+    }
+    // The current lecture of the exam's course: Sourcing and SLAs, 4 + 3 cards.
+    const rows = await lectureRows(user.id);
+    const sitId = rows.find((r) => r.course.startsWith("Strategic IT Management"))!.courseId;
+    const view = await courseView(user.id, sitId, t.db, NOW);
+    expect(view.lectures.find((l) => l.n === 5)).toMatchObject({ state: "cur", cards: 7 });
+    expect(view.lectures.filter((l) => l.cards > 0).map((l) => l.n)).toEqual([3, 5, 6, 7]);
+  }, SLOW);
+
+  it("writes the three seed notes, attached as in the prototype", async () => {
+    const { user } = await browser();
+    const result = await seedDemo(user.id, t.db, { now: NOW });
+    expect(result.notes).toBe(3);
+    const rows = await t.db
+      .select({
+        title: notes.title,
+        kind: notes.attachKind,
+        highlighted: notes.highlighted,
+        course: courses.name,
+        lecture: lectures.title,
+        assignment: assignments.name,
+        updatedAt: notes.updatedAt,
+      })
+      .from(notes)
+      .innerJoin(courses, eq(courses.id, notes.courseId))
+      .leftJoin(lectures, eq(lectures.id, notes.lectureId))
+      .leftJoin(assignments, eq(assignments.id, notes.assignmentId))
+      .where(eq(notes.userId, user.id))
+      .orderBy(asc(notes.updatedAt));
+    expect(rows.map((r) => [r.title, r.kind, r.course.split(",")[0], r.lecture ?? r.assignment, r.highlighted])).toEqual([
+      ["Questions for Thursday's session", "course", "Digital Service Design", null, false],
+      ["Lock-in: how to argue it in the exam", "lecture", "Strategic IT Management", "Sourcing and vendors", true],
+      ["A3 plan", "assignment", "Forecasting Methods", "Assignment 3", false],
+    ]);
+    // Wednesday, Thursday and Friday before the prototype's Saturday.
+    expect(rows.map((r) => r.updatedAt.toISOString().slice(0, 10))).toEqual(["2026-11-11", "2026-11-12", "2026-11-13"]);
+  }, SLOW);
+
+  it("is safe to run again: same lectures (same ids), pages, links and notes", async () => {
+    const { user } = await browser();
+    await seedDemo(user.id, t.db, { now: NOW });
+    const before = await lectureRows(user.id);
+    const count = async () => ({
+      pages: (await t.db.select().from(lectureContent).innerJoin(lectures, eq(lectures.id, lectureContent.lectureId)).where(eq(lectures.userId, user.id))).length,
+      links: (await t.db.select().from(lectureConcepts).innerJoin(lectures, eq(lectures.id, lectureConcepts.lectureId)).where(eq(lectures.userId, user.id))).length,
+      notes: (await t.db.select().from(notes).where(eq(notes.userId, user.id))).length,
+    });
+    const first = await count();
+
+    await seedLearn(user.id, NOW, t.db);
+    expect(await lectureRows(user.id)).toEqual(before);
+    expect(await count()).toEqual(first);
+    expect(first.notes).toBe(3);
   }, SLOW);
 });
 

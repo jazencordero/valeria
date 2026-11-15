@@ -1,0 +1,1249 @@
+{
+  "courses": [
+    {
+      "key": "fm",
+      "name": "Forecasting Methods",
+      "lectures": [
+        {
+          "n": 1,
+          "title": "Forecast accuracy",
+          "state": "done",
+          "opensDays": -33,
+          "readDays": -31,
+          "concepts": [],
+          "page": {
+            "breath": "A forecast is only useful if you know how wrong it tends to be. Error measures turn that into numbers you can compare.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Forecast errors",
+                "blocks": [
+                  [
+                    "p",
+                    "The error is the actual value minus the forecast. Look at its size, and at whether it leans one way."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "MAE, RMSE and MAPE",
+                "blocks": [
+                  [
+                    "p",
+                    "MAE averages the size of errors, RMSE punishes big misses more, MAPE shows errors as a percentage."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Training and test data",
+                "blocks": [
+                  [
+                    "p",
+                    "Judge a method on data it has not seen, or it will look better than it is."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 2,
+          "title": "Decomposition and seasonality",
+          "state": "done",
+          "opensDays": -26,
+          "readDays": -24,
+          "concepts": [],
+          "page": {
+            "breath": "Most demand series mix a trend, a seasonal pattern and noise. Decomposition separates them so each can be understood and forecast.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Trend, season, noise",
+                "blocks": [
+                  [
+                    "p",
+                    "Trend is the long direction, season repeats on a fixed calendar, noise is what is left."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Additive or multiplicative",
+                "blocks": [
+                  [
+                    "p",
+                    "If the seasonal swing grows with the level, use a multiplicative model."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Seasonal indices",
+                "blocks": [
+                  [
+                    "p",
+                    "An index says how much higher or lower a typical week or month is than average."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 3,
+          "title": "Regression for forecasting",
+          "state": "done",
+          "opensDays": -19,
+          "readDays": -17,
+          "concepts": [],
+          "page": {
+            "breath": "Regression forecasts demand from drivers such as price, promotions or weather. It explains why demand moves, not only that it moves.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Choosing drivers",
+                "blocks": [
+                  [
+                    "p",
+                    "Pick variables you will also know, or can forecast, at the time you need the forecast."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Reading the coefficients",
+                "blocks": [
+                  [
+                    "p",
+                    "Each coefficient says how much demand changes when that driver changes by one unit."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Warning signs",
+                "blocks": [
+                  [
+                    "p",
+                    "Drivers that move together, and patterns left in the errors, mean the model needs work."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 4,
+          "title": "Exponential smoothing",
+          "state": "cur",
+          "opensDays": -12,
+          "concepts": [],
+          "page": {
+            "breath": "Exponential smoothing weights recent observations more than old ones. Extensions add a trend and a seasonal pattern, which makes it a strong everyday method.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Simple smoothing",
+                "blocks": [
+                  [
+                    "p",
+                    "The new forecast is the old forecast plus a share, alpha, of the last error."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Holt and Holt-Winters",
+                "blocks": [
+                  [
+                    "p",
+                    "Holt adds a trend term. Holt-Winters also adds seasonality."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Choosing alpha",
+                "blocks": [
+                  [
+                    "p",
+                    "A high alpha reacts fast but is jumpy. A low alpha is smooth but slow."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 5,
+          "title": "Stationarity and differencing",
+          "state": "up",
+          "opensDays": -5,
+          "concepts": [
+            {
+              "exam": "quiz",
+              "concept": "sta"
+            },
+            {
+              "exam": "quiz",
+              "concept": "dif"
+            }
+          ],
+          "page": {
+            "breath": "ARIMA needs a stationary series: a steady mean and variance over time. Differencing is the usual way to get there.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "What stationary means",
+                "blocks": [
+                  [
+                    "p",
+                    "Mean, variance and autocorrelation do not change over time."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Differencing",
+                "blocks": [
+                  [
+                    "p",
+                    "Subtract last period from this one to remove a trend. Subtract the same period last year to remove seasonality."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Checking it",
+                "blocks": [
+                  [
+                    "p",
+                    "Plot the series and its ACF, or use a unit root test."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 6,
+          "title": "ARIMA models",
+          "state": "soon",
+          "opensDays": 9,
+          "concepts": [
+            {
+              "exam": "quiz",
+              "concept": "acf"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "sit",
+      "name": "Strategic IT Management",
+      "lectures": [
+        {
+          "n": 1,
+          "title": "Why IT matters strategically",
+          "state": "done",
+          "opensDays": -47,
+          "readDays": -45,
+          "concepts": [],
+          "page": {
+            "breath": "IT creates advantage only when it supports something rivals cannot easily copy. Most IT is necessary but not strategic, so the question is where it really makes a difference.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "IT as a cost or an asset",
+                "blocks": [
+                  [
+                    "p",
+                    "Some IT just keeps the lights on. Some changes how the firm competes. Telling the two apart guides how much to spend, and where."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Does IT matter?",
+                "blocks": [
+                  [
+                    "p",
+                    "Carr argued that IT became a commodity anyone can buy. The counterpoint: advantage comes from how firms use IT with their processes and people, not from the technology alone."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Making an advantage last",
+                "blocks": [
+                  [
+                    "p",
+                    "An advantage lasts when it is hard to copy: built over time, tied to data, or woven into how the organisation works."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 2,
+          "title": "Business models and digital strategy",
+          "state": "done",
+          "opensDays": -40,
+          "readDays": -38,
+          "concepts": [],
+          "page": {
+            "breath": "A business model explains how a firm creates, delivers and captures value. Digital technology changes all three, which is why strategy and IT are now hard to separate.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "The business model canvas",
+                "blocks": [
+                  [
+                    "p",
+                    "Nine building blocks, from customer segments to cost structure, give a one-page view of how a firm makes money."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Platforms and network effects",
+                "blocks": [
+                  [
+                    "p",
+                    "Platforms connect groups of users. Each new user makes the platform more valuable to the others."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Digital strategy",
+                "blocks": [
+                  [
+                    "p",
+                    "Not a plan for the IT department, but a business strategy that assumes digital from the start."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 3,
+          "title": "IT governance",
+          "state": "done",
+          "opensDays": -33,
+          "readDays": -31,
+          "concepts": [
+            {
+              "exam": "exam",
+              "concept": "gov"
+            },
+            {
+              "exam": "exam",
+              "concept": "dec"
+            }
+          ],
+          "page": {
+            "breath": "IT governance decides who makes which IT decisions and who is accountable for them. Management then makes and carries out those decisions day to day.",
+            "minutes": 4,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Governance is not management",
+                "blocks": [
+                  [
+                    "p",
+                    "Governance sets the rules of the game: decision rights and accountability. Management plays the game within those rules."
+                  ]
+                ],
+                "terms": [
+                  "Decision rights",
+                  "Accountability"
+                ],
+                "slides": "slides 4–8"
+              },
+              {
+                "heading": "Five key IT decisions",
+                "blocks": [
+                  [
+                    "p",
+                    "Weill and Ross name five decisions every firm has to assign to someone:"
+                  ],
+                  [
+                    "ul",
+                    [
+                      "IT principles",
+                      "IT architecture",
+                      "IT infrastructure",
+                      "Business application needs",
+                      "IT investment and prioritisation"
+                    ]
+                  ]
+                ],
+                "terms": [
+                  "Weill and Ross"
+                ],
+                "slides": "slides 12–14"
+              },
+              {
+                "heading": "Who decides",
+                "blocks": [
+                  [
+                    "p",
+                    "Firms mix archetypes, from business monarchy to IT monarchy to federal models. IT principles work best when business and IT leaders set them together."
+                  ]
+                ],
+                "terms": [
+                  "Archetypes",
+                  "Federal model"
+                ],
+                "slides": "slides 15–18"
+              }
+            ]
+          }
+        },
+        {
+          "n": 4,
+          "title": "Enterprise architecture",
+          "state": "done",
+          "opensDays": -26,
+          "readDays": -24,
+          "concepts": [],
+          "page": {
+            "breath": "Enterprise architecture is the blueprint of how processes, data, applications and technology fit together. It helps a firm change without breaking what already works.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Layers of architecture",
+                "blocks": [
+                  [
+                    "p",
+                    "Business, data, application and technology layers each describe one part of the whole."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Standardise or integrate",
+                "blocks": [
+                  [
+                    "p",
+                    "Operating models ask how much business units share data, and how alike their processes are."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Architecture as a roadmap",
+                "blocks": [
+                  [
+                    "p",
+                    "A target architecture shows where you want to be. A roadmap shows the steps from today."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 5,
+          "title": "Sourcing and vendors",
+          "state": "cur",
+          "opensDays": -19,
+          "concepts": [
+            {
+              "exam": "exam",
+              "concept": "src"
+            },
+            {
+              "exam": "exam",
+              "concept": "sla"
+            }
+          ],
+          "page": {
+            "breath": "Firms buy IT services from outside to cut costs, reach skills they lack and focus on what makes them different. The skill is choosing what to hand over, keeping strategy and architecture inside, and writing contracts that keep you in control of the vendor rather than the other way round.",
+            "minutes": 6,
+            "slideTitles": [
+              "Sourcing and vendors",
+              "Why firms outsource",
+              "The sourcing scale",
+              "Selective or total outsourcing",
+              "What to keep inside",
+              "Vendor lock-in",
+              "Reducing lock-in",
+              "Service level agreements"
+            ],
+            "sections": [
+              {
+                "heading": "Why firms source IT from outside",
+                "blocks": [
+                  [
+                    "p",
+                    "Running every system yourself is expensive and slow. Vendors spread their costs over many clients, so they can often do the same work for less."
+                  ],
+                  [
+                    "p",
+                    "Firms usually give four reasons:"
+                  ],
+                  [
+                    "ul",
+                    [
+                      "Cost: pay for what you use instead of keeping idle capacity.",
+                      "Skills: reach specialists you could not hire or keep busy.",
+                      "Focus: free your own people for the work that sets you apart.",
+                      "Flexibility: scale up or down without hiring or firing."
+                    ]
+                  ]
+                ],
+                "terms": [
+                  "Economies of scale",
+                  "Core competence"
+                ],
+                "slides": "slides 2–5"
+              },
+              {
+                "heading": "The sourcing options",
+                "blocks": [
+                  [
+                    "p",
+                    "Sourcing is not all or nothing. Think of it as a scale."
+                  ],
+                  [
+                    "dl",
+                    [
+                      [
+                        "In-house",
+                        "Your own staff build and run the service."
+                      ],
+                      [
+                        "Selective sourcing",
+                        "Hand over well-defined parts, keep the rest."
+                      ],
+                      [
+                        "Total outsourcing",
+                        "One or a few vendors run most of the IT function."
+                      ],
+                      [
+                        "Offshoring, nearshoring",
+                        "The work moves to another country, far away or close by."
+                      ],
+                      [
+                        "Backsourcing",
+                        "Bringing an outsourced service back inside."
+                      ]
+                    ]
+                  ]
+                ],
+                "terms": [
+                  "Selective sourcing",
+                  "Backsourcing"
+                ],
+                "slides": "slides 6–9"
+              },
+              {
+                "heading": "What to keep in-house",
+                "blocks": [
+                  [
+                    "p",
+                    "Keep the decisions that shape the business: IT strategy, architecture and how systems fit together. If a vendor makes those choices, the vendor is steering your company."
+                  ],
+                  [
+                    "p",
+                    "Commodity services, such as help desks, data centres and payroll systems, are good candidates to send out. They are easy to describe, easy to measure and give little advantage when done inside."
+                  ]
+                ],
+                "terms": [
+                  "Commodity service",
+                  "Retained organisation"
+                ],
+                "slides": "slides 10–13"
+              },
+              {
+                "heading": "Vendor lock-in",
+                "blocks": [
+                  [
+                    "p",
+                    "Lock-in happens when leaving a vendor costs more than staying, even when the vendor is no longer the best choice."
+                  ],
+                  [
+                    "ul",
+                    [
+                      "Switching costs: migrating data, retraining staff, paying exit fees.",
+                      "Bargaining power: once you depend on them, the vendor sets the price.",
+                      "Roadmap dependence: their product plans become your limits."
+                    ]
+                  ],
+                  [
+                    "p",
+                    "You reduce lock-in with open standards, clear exit clauses in the contract, and multi-sourcing so no single vendor holds everything."
+                  ]
+                ],
+                "terms": [
+                  "Switching costs",
+                  "Multi-sourcing"
+                ],
+                "slides": "slides 14–19"
+              },
+              {
+                "heading": "Service level agreements",
+                "blocks": [
+                  [
+                    "p",
+                    "A service level agreement, or SLA, turns a vague promise into numbers. It defines what is measured, such as uptime or how fast tickets are solved, how and how often it is measured, and what happens when the vendor misses the target, usually a fee reduction called a service credit."
+                  ],
+                  [
+                    "p",
+                    "A good SLA measures what the business actually feels, not only what is easy to count."
+                  ]
+                ],
+                "terms": [
+                  "SLA",
+                  "Service credit"
+                ],
+                "slides": "slides 20–24"
+              }
+            ]
+          }
+        },
+        {
+          "n": 6,
+          "title": "IT investments and value",
+          "state": "up",
+          "opensDays": -12,
+          "concepts": [
+            {
+              "exam": "exam",
+              "concept": "val"
+            }
+          ],
+          "page": {
+            "breath": "IT investments compete for money with everything else. Firms choose projects by expected value and risk, then check afterwards that the value really came.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Why value is hard to show",
+                "blocks": [
+                  [
+                    "p",
+                    "Benefits are often indirect: better decisions, fewer errors, happier customers."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Portfolio thinking",
+                "blocks": [
+                  [
+                    "p",
+                    "Treat projects like a portfolio: some safe infrastructure, some bets on growth."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Business cases and follow-up",
+                "blocks": [
+                  [
+                    "p",
+                    "A business case states costs, benefits and owners. Benefit tracking checks the promises later."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 7,
+          "title": "Digital strategy alignment",
+          "state": "up",
+          "opensDays": -5,
+          "concepts": [
+            {
+              "exam": "exam",
+              "concept": "dsa"
+            }
+          ],
+          "page": {
+            "breath": "Strategic alignment means business strategy and IT strategy fit and inform each other. It goes both ways, and structures and processes have to fit too.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "The alignment model",
+                "blocks": [
+                  [
+                    "p",
+                    "Henderson and Venkatraman link business and IT strategy with the structures and processes that deliver them."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Two directions",
+                "blocks": [
+                  [
+                    "p",
+                    "Business strategy can drive IT choices, and IT can open up new strategy."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Why alignment slips",
+                "blocks": [
+                  [
+                    "p",
+                    "Plans change faster than systems. Regular joint planning keeps both sides in step."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 8,
+          "title": "Security, risk and ethics",
+          "state": "soon",
+          "opensDays": 2,
+          "concepts": []
+        }
+      ]
+    },
+    {
+      "key": "sca",
+      "name": "Supply Chain Analytics",
+      "lectures": [
+        {
+          "n": 1,
+          "title": "Supply chain basics",
+          "state": "done",
+          "opensDays": -33,
+          "readDays": -31,
+          "concepts": [],
+          "page": {
+            "breath": "A supply chain moves goods one way and money the other, with information flowing both ways. Managing it means balancing cost against service.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Three flows",
+                "blocks": [
+                  [
+                    "p",
+                    "Material, money and information have to stay in step."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "The bullwhip effect",
+                "blocks": [
+                  [
+                    "p",
+                    "Small changes in customer demand grow into big swings further up the chain."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Cheap or responsive",
+                "blocks": [
+                  [
+                    "p",
+                    "Every chain picks a point between low cost and fast response."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 2,
+          "title": "Inventory models",
+          "state": "done",
+          "opensDays": -26,
+          "readDays": -24,
+          "concepts": [],
+          "page": {
+            "breath": "Inventory protects service against uncertain demand, but it ties up money. Inventory models find how much to order and when.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Order size",
+                "blocks": [
+                  [
+                    "p",
+                    "The economic order quantity balances ordering costs against holding costs."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Reorder point",
+                "blocks": [
+                  [
+                    "p",
+                    "Order when stock falls to the expected demand during lead time, plus safety stock."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Safety stock",
+                "blocks": [
+                  [
+                    "p",
+                    "More uncertainty, or a higher service target, means more safety stock."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 3,
+          "title": "Network design",
+          "state": "done",
+          "opensDays": -19,
+          "readDays": -17,
+          "concepts": [],
+          "page": {
+            "breath": "Network design decides how many plants and warehouses to have, and where. It sets most of the cost and speed of the chain for years.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Facility location",
+                "blocks": [
+                  [
+                    "p",
+                    "Weigh the fixed costs of sites against transport costs to customers."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Central or spread out",
+                "blocks": [
+                  [
+                    "p",
+                    "Fewer warehouses pool inventory. More warehouses get closer to customers."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Modelling the network",
+                "blocks": [
+                  [
+                    "p",
+                    "Optimisation models compare many layouts at once."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 4,
+          "title": "Transportation and routing",
+          "state": "cur",
+          "opensDays": -12,
+          "concepts": [],
+          "page": {
+            "breath": "Transportation often costs more than any other logistics activity. Good routing and mode choice cut cost without missing delivery times.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Modes",
+                "blocks": [
+                  [
+                    "p",
+                    "Road, rail, sea and air trade off cost, speed and reliability."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Vehicle routing",
+                "blocks": [
+                  [
+                    "p",
+                    "Routing finds short tours that respect truck capacity and delivery windows."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Consolidation",
+                "blocks": [
+                  [
+                    "p",
+                    "Combining small shipments into full loads lowers the cost per unit."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 5,
+          "title": "Risk and resilience",
+          "state": "up",
+          "opensDays": -5,
+          "concepts": [],
+          "page": {
+            "breath": "Disruptions will happen. Resilient chains spot risks early and keep options ready, such as a second supplier or buffer stock.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Types of risk",
+                "blocks": [
+                  [
+                    "p",
+                    "Supply, demand, process and environmental risks need different answers."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Building resilience",
+                "blocks": [
+                  [
+                    "p",
+                    "Redundancy, flexibility and visibility each buy time when something breaks."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Stress testing",
+                "blocks": [
+                  [
+                    "p",
+                    "Ask what happens if a key supplier stops for a month."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "key": "dsd",
+      "name": "Digital Service Design",
+      "lectures": [
+        {
+          "n": 1,
+          "title": "What a service is",
+          "state": "done",
+          "opensDays": -26,
+          "readDays": -24,
+          "concepts": [],
+          "page": {
+            "breath": "A service is made together with the customer, in the moment. Designing one means designing an experience, not only a product.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Services are different",
+                "blocks": [
+                  [
+                    "p",
+                    "They are intangible, produced and used at the same time, and vary from one time to the next."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Value in use",
+                "blocks": [
+                  [
+                    "p",
+                    "Value appears when the customer uses the service, not when it is sold."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Touchpoints",
+                "blocks": [
+                  [
+                    "p",
+                    "Every point of contact shapes how the service feels."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 2,
+          "title": "Customer journeys",
+          "state": "done",
+          "opensDays": -19,
+          "readDays": -17,
+          "concepts": [],
+          "page": {
+            "breath": "A customer journey map follows one person through every step of a service. It shows where the experience works and where it breaks.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Building the map",
+                "blocks": [
+                  [
+                    "p",
+                    "List the stages, then the actions, thoughts and feelings at each one."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Pain points",
+                "blocks": [
+                  [
+                    "p",
+                    "The low moments on the map are where design work pays off most."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Grounded in research",
+                "blocks": [
+                  [
+                    "p",
+                    "Maps come from interviews and observation, not guesses."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 3,
+          "title": "Service blueprints",
+          "state": "cur",
+          "opensDays": -12,
+          "concepts": [],
+          "page": {
+            "breath": "A service blueprint adds what the customer does not see: staff actions, support processes and systems. It links the experience to the work behind it.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Front stage and back stage",
+                "blocks": [
+                  [
+                    "p",
+                    "The line of visibility separates what customers see from what happens behind the scenes."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Lanes of a blueprint",
+                "blocks": [
+                  [
+                    "p",
+                    "Customer actions, front stage, back stage and support processes each get a lane."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Using it",
+                "blocks": [
+                  [
+                    "p",
+                    "Blueprints show where hand-offs fail and where to improve."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 4,
+          "title": "Prototyping services",
+          "state": "up",
+          "opensDays": -5,
+          "concepts": [],
+          "page": {
+            "breath": "Prototypes let you test a service idea cheaply before building it. Rough and fast beats polished and late.",
+            "minutes": null,
+            "slideTitles": [],
+            "sections": [
+              {
+                "heading": "Fidelity",
+                "blocks": [
+                  [
+                    "p",
+                    "Start rough: paper, role play, a fake booking page."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "Desktop walkthroughs",
+                "blocks": [
+                  [
+                    "p",
+                    "Act out the service on a table with small figures to spot gaps."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              },
+              {
+                "heading": "What to test",
+                "blocks": [
+                  [
+                    "p",
+                    "Decide what you want to learn before you build the prototype."
+                  ]
+                ],
+                "terms": [],
+                "slides": ""
+              }
+            ]
+          }
+        },
+        {
+          "n": 5,
+          "title": "Testing with users",
+          "state": "soon",
+          "opensDays": 9,
+          "concepts": []
+        }
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "key": "n1",
+      "title": "Lock-in: how to argue it in the exam",
+      "body": "Switching costs: data migration, retraining, contract exit fees\nBargaining power: vendor sets prices once you depend on them\nReduce it: open standards, exit clauses, multi-sourcing",
+      "highlighted": true,
+      "attach": {
+        "kind": "lecture",
+        "course": "sit",
+        "n": 5
+      },
+      "days": -2
+    },
+    {
+      "key": "n2",
+      "title": "Questions for Thursday's session",
+      "body": "Do we draw one blueprint per persona?\nHow much back stage detail does the draft need?",
+      "highlighted": false,
+      "attach": {
+        "kind": "course",
+        "course": "dsd"
+      },
+      "days": -3
+    },
+    {
+      "key": "n3",
+      "title": "A3 plan",
+      "body": "Clean the weekly data first\nRun Holt-Winters and the seasonal baseline\nCompare with MAPE, then write it up",
+      "highlighted": false,
+      "attach": {
+        "kind": "assignment",
+        "course": "fm",
+        "name": "Assignment 3"
+      },
+      "days": -1
+    }
+  ]
+}

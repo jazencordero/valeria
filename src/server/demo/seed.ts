@@ -30,6 +30,10 @@
  * the synced courses: concepts, cards and 13 days of review history, dated
  * from the same `now`.
  *
+ * Last, `seedLearn` (./seed-learn, M9-20) adds the prototype's lectures on the
+ * four courses, their pages, the links from lectures to the deck's concepts,
+ * and the three seed notes.
+ *
  * No `identities` row is written: every fake user is the same Moodle user
  * (4242), and an identity would make the next demo browser merge into this one.
  *
@@ -60,6 +64,7 @@ import { getAssignments, getSubmissionStatus, type Assignment } from "@/server/m
 import { getCourses } from "@/server/moodle/read/courses";
 import { getSiteInfo } from "@/server/moodle/read/site";
 import { syncNow, type SyncNowDeps } from "@/server/sync/run";
+import { seedLearn } from "./seed-learn";
 import { seedStudy } from "./seed-study";
 
 /** The key in `users.settings` that marks a demo user. */
@@ -171,7 +176,7 @@ export function shiftToDemoWeek(list: Assignment[], now: Date): Assignment[] {
 // Seeding.
 
 export type SeedOptions = { now?: Date };
-export type SeedResult = { userId: string; assignments: number; exams: number };
+export type SeedResult = { userId: string; assignments: number; exams: number; lectures: number; notes: number };
 
 async function markDemo(database: Db, userId: string): Promise<void> {
   await database
@@ -228,9 +233,11 @@ export async function seedDemo(userId: string, database: Db = defaultDb, opts: S
 
   // The prototype's exam and quiz with cards and history (M3-40), on the synced courses.
   const study = await seedStudy(userId, now, database);
+  // Lectures, pages and notes (M9-20), tied to the deck's concepts written just above.
+  const learn = await seedLearn(userId, now, database);
 
   const rows = await database.select({ id: assignments.id }).from(assignments).where(eq(assignments.userId, userId));
-  return { userId, assignments: rows.length, exams: study.exams.length };
+  return { userId, assignments: rows.length, exams: study.exams.length, lectures: learn.lectures, notes: learn.notes };
 }
 
 /**
