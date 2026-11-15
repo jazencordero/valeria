@@ -8,6 +8,8 @@
 .lec-reader .lec-h1{ margin-top: 8px; font-size: 34px; line-height: 1.1; overflow-wrap: anywhere; }
 .lec-reader .lec-h1:focus{ outline: none; }
 .lec-reader .lec-meta{ display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 10px; color: var(--ink-2); }
+/* "4 min · 17 with all the help · From 37 slides": the dot sits between the two, not a gap alone. */
+.lec-reader .lec-meta-dot{ margin: 0 -8px; color: var(--ink-3); }
 
 /* File chip: a link to the original, 44 px target around a 32 px pill. */
 .lec-reader .lec-file{ display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; color: var(--ink-2); text-decoration: none; }

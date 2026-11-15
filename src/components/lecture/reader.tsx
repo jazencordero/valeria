@@ -582,6 +582,11 @@ function ReadyReader({
       <Top course={course} n={n} title={title} />
       <div className="lec-meta">
         {minutes ? <span className="mono">{readingTime(minutes, minutesWithHelp)}</span> : null}
+        {minutes && slideCount ? (
+          <span className="mono lec-meta-dot" aria-hidden="true">
+            ·
+          </span>
+        ) : null}
         {slideCount ? <span className="mono">From {slideCount} slides</span> : null}
         {file ? <FileChip file={file} /> : null}
       </div>
