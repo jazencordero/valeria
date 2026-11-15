@@ -69,12 +69,27 @@
  *   foreign key sets it), and then reads like a hand-made row: it keeps its
  *   number, and a new lecture with no row of its own on that number takes
  *   it over.
+ *
+ * Lecture pages (M9-05). Last, per course, one `lecture-page` job is queued
+ * (`queueLecturePages`) for every lecture whose file has extracted text
+ * (`text_status = 'done'`) and that has no `lecture_content` row yet, with
+ * dedupe key `lecture:<id>`, so a lecture never has two live jobs. Only in a
+ * course whose files may go to an AI model (`mayUseFiles`): elsewhere the job
+ * would end without asking anything, every sync. The job
+ * (src/server/ai/jobs/lecture-page.ts) asks again itself. A file whose text
+ * is extracted after this sync gets its job on the next sync. This file stays
+ * free of the AI router: it only writes rows to the job queue.
  */
 import { and, eq, isNull } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courseFiles, courses } from "@/server/db/schema/courses";
-import { lectures } from "@/server/db/schema/learn";
+import { lectureContent, lectures } from "@/server/db/schema/learn";
+import { mayUseFiles } from "@/server/ai/consent";
+import { enqueue } from "@/server/jobs/queue";
 import { lecturesFrom, type CourseModule, type CourseSection, type Lecture } from "@/lib/courses/lectures";
+
+/** The job kind of a lecture page (M9-05); /api/cron/lecture-page drains it. */
+export const LECTURE_PAGE_KIND = "lecture-page";
 
 export type SyncLecturesResult = {
   /** New lecture rows. */
@@ -336,8 +351,41 @@ export async function syncLectures(userId: string, database: Db = defaultDb): Pr
       added += plan.inserts.length;
       updated += plan.updates.filter((u) => u.produced).length;
       kept += plan.kept;
+
+      await queueLecturePages(userId, course.id, tx);
     }
 
     return { added, updated, kept };
   });
+}
+
+/**
+ * Queues one `lecture-page` job per lecture of the course whose file has
+ * extracted text and that has no page yet, when the course's files may go to
+ * an AI model. Returns how many jobs were added (an already live job for the
+ * same lecture is not added again).
+ */
+export async function queueLecturePages(userId: string, courseId: string, database: Db = defaultDb): Promise<number> {
+  const waiting = await database
+    .select({ id: lectures.id })
+    .from(lectures)
+    .innerJoin(courseFiles, eq(courseFiles.id, lectures.fileId))
+    .leftJoin(lectureContent, eq(lectureContent.lectureId, lectures.id))
+    .where(
+      and(
+        eq(lectures.userId, userId),
+        eq(lectures.courseId, courseId),
+        eq(courseFiles.textStatus, "done"),
+        isNull(lectureContent.id),
+      ),
+    );
+  if (waiting.length === 0) return 0;
+  if (!(await mayUseFiles(userId, courseId, database))) return 0;
+
+  let created = 0;
+  for (const { id } of waiting) {
+    const job = await enqueue(LECTURE_PAGE_KIND, { lectureId: id }, { userId, dedupeKey: `lecture:${id}`, db: database });
+    if (job.created) created += 1;
+  }
+  return created;
 }

@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { courseFiles, courses } from "@/server/db/schema/courses";
 import { lectureContent, lectures } from "@/server/db/schema/learn";
+import { jobs } from "@/server/db/schema/system";
 import { users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
-import { planLectures, sectionsFromStored, syncLectures, type StoredFile } from "./lectures";
+import { LECTURE_PAGE_KIND, planLectures, sectionsFromStored, syncLectures, type StoredFile } from "./lectures";
 
 const DB_TIMEOUT = 90_000;
 const PLUGINFILE = "https://moodle.example.edu/webservice/pluginfile.php";
@@ -350,6 +351,50 @@ describe("syncLectures", () => {
     ]);
     expect(rows[1].id).toBe(imported.id);
     expect(rows[3]).toEqual(guest);
+  }, DB_TIMEOUT);
+});
+
+describe("syncLectures queues lecture pages (M9-05)", () => {
+  async function pageJobs() {
+    return t.db.select().from(jobs).where(eq(jobs.kind, LECTURE_PAGE_KIND)).orderBy(asc(jobs.createdAt));
+  }
+
+  it("queues one deduped job per lecture whose file has text and no page yet, only where AI may read the files", async () => {
+    const her = await makeUser();
+    const course = await makeCourse(her, 3101);
+    await t.db.update(courses).set({ aiStudy: "allowed" }).where(eq(courses.id, course));
+    await addFiles(her, course, [
+      { ref: "cm:7101:lecture-01.pdf", section: "Week 1" },
+      { ref: "cm:7201:lecture-02.pdf", section: "Week 2" },
+      { ref: "cm:7301:lecture-03.pdf", section: "Week 3" },
+    ]);
+    // A course whose study rule is not known yet: its lectures get no jobs.
+    const closed = await makeCourse(her, 3102);
+    await addFiles(her, closed, [{ ref: "cm:8101:lecture-01.pdf", section: "Week 1" }]);
+    await t.db.update(courseFiles).set({ textStatus: "done" }).where(eq(courseFiles.userId, her));
+
+    // Text not extracted yet: no job for that one.
+    await t.db.update(courseFiles).set({ textStatus: "queued" }).where(eq(courseFiles.moodleRef, "cm:7301:lecture-03.pdf"));
+    await syncLectures(her, t.db);
+    const [l1, l2, l3] = await lecturesOf(her, course);
+    // Lecture 2 already has its page: no job either.
+    await t.db.insert(lectureContent).values({ lectureId: l2.id, sourceHash: "h" });
+    await t.db.delete(jobs);
+
+    await syncLectures(her, t.db);
+    let queued = await pageJobs();
+    expect(queued).toHaveLength(1);
+    expect(queued[0].userId).toBe(her);
+    expect(queued[0].payload).toMatchObject({ lectureId: l1.id, _dedupeKey: `lecture:${l1.id}` });
+
+    // A second sync while it waits adds nothing; lecture 3's text arrives and gets its own job.
+    await syncLectures(her, t.db);
+    expect(await pageJobs()).toHaveLength(1);
+    await t.db.update(courseFiles).set({ textStatus: "done" }).where(eq(courseFiles.moodleRef, "cm:7301:lecture-03.pdf"));
+    await syncLectures(her, t.db);
+    queued = await pageJobs();
+    expect(queued.map((j) => (j.payload as { lectureId: string }).lectureId)).toEqual([l1.id, l3.id]);
+    expect(queued.every((j) => j.status === "queued")).toBe(true);
   }, DB_TIMEOUT);
 });
 
