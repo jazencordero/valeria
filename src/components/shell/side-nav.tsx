@@ -279,7 +279,8 @@ export function SideNavView({
           </p>
           <ul
             aria-labelledby="side-courses-label"
-            className="grid min-h-0 list-none gap-0.5 overflow-y-auto"
+            className="grid min-h-0 list-none grid-cols-[minmax(0,1fr)] gap-0.5 overflow-y-auto"
+            data-testid="side-courses"
           >
             {courses.map((course) => (
               <li key={course.id}>
