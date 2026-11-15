@@ -19,10 +19,16 @@
  * the form resets (React does this for form actions), the error is announced
  * and the field gets focus again, ready for a fresh paste.
  *
+ * The yes (M8-33): above Connect, one sentence with a checkbox she must tick
+ * and a link to /privacy. Connect is disabled until it is ticked. The link
+ * opens in a new tab so a pasted key is not lost. The box is sent with the
+ * form as `agree=yes`; the action stores the time in `users.settings.agreedAt`.
+ * The box stays ticked after an error: she has already said yes.
+ *
  * Cut: no QR, no one-tap sign-in, no school choice (M5).
  */
 import Link from "next/link";
-import { useActionState, useEffect, useId, useRef } from "react";
+import { useActionState, useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Vitonen, type VitonenHandle } from "@/components/vitonen";
 
@@ -40,7 +46,8 @@ export function PasteKey({ lmsName, siteUrl, action }: PasteKeyProps) {
   const [state, formAction, pending] = useActionState(action, INITIAL);
   const inputRef = useRef<HTMLInputElement>(null);
   const cap = useRef<VitonenHandle>(null);
-  const ids = { field: useId(), error: useId(), steps: useId() };
+  const ids = { field: useId(), error: useId(), steps: useId(), agree: useId() };
+  const [agreed, setAgreed] = useState(false);
 
   useEffect(() => {
     if (!state.error) return;
@@ -124,17 +131,45 @@ export function PasteKey({ lmsName, siteUrl, action }: PasteKeyProps) {
           {state.error}
         </p>
 
-        <div className="mt-2 grid gap-3 text-center">
-          <Button type="submit" size="lg" block loading={pending} loadingLabel="Connecting">
-            Connect
-          </Button>
-          <p className="text-[13px] text-ink-3">Ready reads your courses. Nothing is handed in without your tap.</p>
+        <div className="mt-1 grid gap-1">
+          <label htmlFor={ids.agree} className="grid min-h-11 grid-cols-[20px_1fr] items-start gap-x-3 text-[14px] text-ink">
+            <input
+              id={ids.agree}
+              name="agree"
+              value="yes"
+              type="checkbox"
+              required
+              checked={agreed}
+              onChange={(e) => setAgreed(e.target.checked)}
+              className="mt-0.5 size-5"
+            />
+            <span>
+              Ready will keep my {lmsName} key, encrypted, to read my courses and to hand in only when I tap.
+            </span>
+          </label>
           <Link
-            href="/settings#privacy"
-            className="mx-auto inline-flex min-h-11 items-center text-[14px] font-medium text-ink-2 underline decoration-line decoration-2 underline-offset-4 hover:text-ink hover:decoration-accent"
+            href="/privacy"
+            target="_blank"
+            rel="noopener"
+            className="ml-8 inline-flex min-h-11 items-center justify-self-start text-[14px] font-medium text-ink-2 underline decoration-line decoration-2 underline-offset-4 hover:text-ink hover:decoration-accent"
           >
             What does Ready keep?
           </Link>
+        </div>
+
+        <div className="mt-2 grid gap-3 text-center">
+          <Button
+            type="submit"
+            size="lg"
+            block
+            loading={pending}
+            loadingLabel="Connecting"
+            disabled={!agreed}
+            aria-describedby={agreed ? undefined : ids.agree}
+          >
+            Connect
+          </Button>
+          <p className="text-[13px] text-ink-3">Ready reads your courses. Nothing is handed in without your tap.</p>
         </div>
       </form>
     </div>

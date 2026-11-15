@@ -24,12 +24,15 @@
  * Moodle is slow it answers `more: true`; we go to /home anyway and Home syncs
  * again. A failed first sync never blocks the redirect: the key is stored.
  */
+import { eq, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { ConnectState } from "@/components/first-run/paste-key";
 import { lmsNameOf, schoolOf } from "@/lib/schools";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { KeyRejected, MoodleError, NotAllowed } from "@/server/moodle/client";
+import { db } from "@/server/db/client";
+import { users } from "@/server/db/schema/users";
 import { connectWithKey, type ConnectResult } from "@/server/moodle/connect";
 import { syncNow } from "@/server/sync/run";
 
@@ -49,6 +52,8 @@ const keySchema = z
 export function connectMessages(lms: string) {
   return {
     empty: "Paste your key first.",
+    // M8-33: the box on the connect screen; the button is disabled until it is ticked.
+    notAgreed: "Tick the box first.",
     rejected: `${lms} did not accept that key. Copy it again.`,
     down: `${lms} is not answering. Try again in a minute.`,
     // The key works but its service cannot read site info: she copied another key.
@@ -97,6 +102,9 @@ export async function connectAction(_prev: ConnectState, formData: FormData): Pr
     return { error: empty ? m.empty : m.rejected };
   }
 
+  // M8-33: she agrees to the key being kept before anything is stored (the button also waits for it).
+  if (formData.get("agree") !== "yes") return { error: m.notAgreed };
+
   const siteUrl = schoolOf(user).siteUrl;
   if (!siteUrl) return { error: m.notAllowed };
 
@@ -105,6 +113,11 @@ export async function connectAction(_prev: ConnectState, formData: FormData): Pr
     const result = await connectWithKey(user.id, siteUrl, parsed.data);
     if (!result.ok) return { error: refusal(result, lms) };
     ownerId = result.userId;
+    // When she agreed (M8-33). On the surviving user: connecting can merge two users. Keeps other settings keys.
+    await db
+      .update(users)
+      .set({ settings: sql`jsonb_set(${users.settings}, '{agreedAt}', to_jsonb(now()::text), true)` })
+      .where(eq(users.id, ownerId));
   } catch (err) {
     // Only the error's class name is logged: never the key, never Moodle's message.
     if (err instanceof KeyRejected) return { error: m.rejected };

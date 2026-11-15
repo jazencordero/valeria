@@ -63,6 +63,7 @@ test("hand in Assignment 3 from the demo and see it done", async ({ page }) => {
 test("a bad key on /connect shows the error sentence", async ({ page }) => {
   await page.goto("/connect");
   await page.getByLabel("Your key").fill("not-a-real-key");
+  await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "did not accept that key. Copy it again." })).toBeVisible();
   await expect(page).toHaveURL(/\/connect$/);
