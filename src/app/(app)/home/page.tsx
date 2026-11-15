@@ -86,6 +86,7 @@
  * through a ref, which needs a client component holding both cards; none of this
  * ticket's files can be one.
  */
+import { FAB_CLEAR, FAB_CLEAR_WIDE } from "@/components/notes/fab";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
@@ -276,9 +277,10 @@ function ExamCards({ exams }: { exams: HomeExam[] }) {
   );
 }
 
+// The bottom room keeps the last row's Start clear of the notes button (FAB_CLEAR).
 const GRID =
-  "mx-auto grid max-w-[720px] grid-cols-[minmax(0,1fr)] gap-x-10 px-[var(--pad)] pb-4 " +
-  "pt-[max(16px,env(safe-area-inset-top,0px))] min-[700px]:px-10 min-[700px]:pt-8 min-[700px]:pb-6 " +
+  `mx-auto grid max-w-[720px] grid-cols-[minmax(0,1fr)] gap-x-10 px-[var(--pad)] ${FAB_CLEAR} ` +
+  `pt-[max(16px,env(safe-area-inset-top,0px))] min-[700px]:px-10 min-[700px]:pt-8 ${FAB_CLEAR_WIDE} ` +
   "min-[700px]:[--pad:40px] @min-[960px]:max-w-[1100px] @min-[960px]:grid-cols-[minmax(0,720px)_340px]";
 
 async function HomeBody({ searchParams }: { searchParams: Search }) {

@@ -7,6 +7,7 @@
  * The heading ships in the static shell; her lists depend on the cookie and
  * `?course=`, so they stream inside Suspense. Cut: no search, no sort options.
  */
+import { FAB_CLEAR } from "@/components/notes/fab";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { FilterChips } from "@/components/assignments/filter-chips";
@@ -100,7 +101,7 @@ async function AssignmentLists({ searchParams }: { searchParams: SearchParams })
 
 export default function AssignmentsPage({ searchParams }: { searchParams: SearchParams }) {
   return (
-    <div className="mx-auto max-w-[720px] px-[var(--pad)] pt-[max(20px,env(safe-area-inset-top,0px))] pb-10">
+    <div className={`mx-auto max-w-[720px] px-[var(--pad)] pt-[max(20px,env(safe-area-inset-top,0px))] ${FAB_CLEAR}`}>
       <h1 className="type-h30" tabIndex={-1}>
         Assignments
       </h1>

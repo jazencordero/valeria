@@ -16,7 +16,7 @@ const toast = vi.hoisted(() => ({ show: vi.fn() }));
 vi.mock("@/components/ui/toast", () => ({ showToast: toast.show }));
 
 import { COURSE_NO_EXAM, NOTHING_WRITTEN } from "./draft-cards";
-import { NotepadView, openNotepad, SAVE_PAUSE_MS, type NotepadActions } from "./notepad";
+import { FAB_RETURN_MS, NotepadView, openNotepad, SAVE_PAUSE_MS, type NotepadActions } from "./notepad";
 
 const NOTE_ID = "11111111-1111-4111-8111-111111111111";
 const ASSIGNMENT = "/assignments/22222222-2222-4222-8222-222222222222";
@@ -510,3 +510,47 @@ describe("Notepad over a study session (Ask about this card)", () => {
     expect(screen.queryByRole("dialog", { name: "Notepad" })).toBeNull();
   });
 });
+
+describe("Notepad button on a phone while she scrolls", () => {
+  // The app scrolls `main`, so the button listens for scrolls on any element.
+  function scrollTo(el: HTMLElement, y: number) {
+    el.scrollTop = y;
+    fireEvent.scroll(el);
+  }
+
+  it("slides away while she scrolls down and comes back when she scrolls up", async () => {
+    const { container } = render(
+      <>
+        <main data-testid="main" />
+        <NotepadView pathname="/home" actions={fakeActions()} />
+      </>,
+    );
+    const main = screen.getByTestId("main");
+    const fab = () => screen.getByTestId("notepad-button");
+    scrollTo(main, 0);
+    scrollTo(main, 120);
+    await flush(10);
+    expect(fab().className).toContain("away");
+    scrollTo(main, 80);
+    await flush(10);
+    expect(fab().className).not.toContain("away");
+    expect(container).toBeTruthy();
+  });
+
+  it("comes back by itself once she stops scrolling", async () => {
+    render(
+      <>
+        <main data-testid="main" />
+        <NotepadView pathname="/home" actions={fakeActions()} />
+      </>,
+    );
+    const main = screen.getByTestId("main");
+    scrollTo(main, 0);
+    scrollTo(main, 200);
+    await flush(10);
+    expect(screen.getByTestId("notepad-button").className).toContain("away");
+    await flush(FAB_RETURN_MS);
+    expect(screen.getByTestId("notepad-button").className).not.toContain("away");
+  });
+});
+

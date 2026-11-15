@@ -374,6 +374,41 @@ function useKeyboardUp(): boolean {
   );
 }
 
+/** How long after the last scroll the notes button comes back. */
+export const FAB_RETURN_MS = 700;
+
+/**
+ * On a phone the notes button must never sit on a row's action while she reads:
+ * it slides away while she scrolls down, and comes back when she scrolls up or
+ * stops for a moment. Listens in the capture phase, since the app scrolls `main`,
+ * not the window.
+ */
+function useScrollAway(enabled: boolean): boolean {
+  const [away, setAway] = useState(false);
+  useEffect(() => {
+    if (!enabled) return;
+    const last = new WeakMap<EventTarget, number>();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onScroll = (e: Event) => {
+      const el = e.target === document ? document.scrollingElement : (e.target as Element | null);
+      if (!el || !(el instanceof Element)) return;
+      const y = el.scrollTop;
+      const before = last.get(el) ?? y;
+      last.set(el, y);
+      if (y - before > 4 && y > 24) setAway(true);
+      else if (before - y > 4) setAway(false);
+      clearTimeout(timer);
+      timer = setTimeout(() => setAway(false), FAB_RETURN_MS);
+    };
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener("scroll", onScroll, { capture: true });
+      clearTimeout(timer);
+    };
+  }, [enabled]);
+  return enabled && away;
+}
+
 const noopSubscribe = () => () => {};
 function useMounted(): boolean {
   return useSyncExternalStore(
@@ -891,6 +926,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
   };
 
   const fabHidden = inSession || open || (!wide && keyboardUp);
+  const fabAway = useScrollAway(!wide && !fabHidden);
   const full = mode === "full";
   const instant = mode === "instant";
   const panelAnim = full
@@ -917,7 +953,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
     <button
       ref={fabRef}
       type="button"
-      className={`pad-fab${onAssignment ? " high" : ""}${hint ? " hint" : ""}`}
+      className={`pad-fab${onAssignment ? " high" : ""}${hint ? " hint" : ""}${fabAway ? " away" : ""}`}
       aria-label="Notes, open the notepad"
       aria-keyshortcuts="N"
       aria-expanded={open}
