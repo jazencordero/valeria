@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SCHOOLS } from "@/lib/schools";
+
+const LMS = SCHOOLS.aalto.lms;
 
 // Dev-only sign-in test, browser side. Test A posts the QR text to our server.
-// Test B checks whether MyCourses' launch link honours our own URL scheme
+// Test B checks whether the Moodle launch link honours our own URL scheme
 // `web+ready`. The token Moodle sends back in Test B is checked here and then
 // dropped: never shown, stored or sent anywhere.
 
@@ -131,7 +134,7 @@ export function SignInTests() {
   const [errorB, setErrorB] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Coming back from MyCourses with ?u=web+ready://token=...
+  // Coming back from the school's LMS with ?u=web+ready://token=...
   // Reading the address bar and sessionStorage once on load is the point of
   // this effect, so setting state in it is intended.
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -186,7 +189,7 @@ export function SignInTests() {
     }
     const passport = randomPassport();
     writeSession(PASSPORT_KEY, passport);
-    // An external MyCourses URL, not a Next.js page.
+    // An external Moodle URL, not a Next.js page.
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.assign(`${SITE}/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=${passport}&urlscheme=web%2Bready`);
   }
@@ -224,16 +227,16 @@ export function SignInTests() {
         </button>
         {answerA && (
           <p className="mt-2 text-sm">
-            {answerA.ok ? "It worked: MyCourses accepted the swap from our server." : `It did not work: ${answerA.errorcode ?? "unknown"}.`}
-            {answerA.errorcode === "ipmismatch" && " MyCourses wants the QR shown and read from the same network address."}
+            {answerA.ok ? `It worked: ${LMS} accepted the swap from our server.` : `It did not work: ${answerA.errorcode ?? "unknown"}.`}
+            {answerA.errorcode === "ipmismatch" && ` ${LMS} wants the QR shown and read from the same network address.`}
           </p>
         )}
       </section>
 
       <section>
-        <h2 className="font-semibold">Test B: does MyCourses send the key back to us?</h2>
+        <h2 className="font-semibold">Test B: does {LMS} send the key back to us?</h2>
         <button type="button" className="mt-2 rounded bg-ink px-4 py-2 text-sm text-paper" onClick={startB}>
-          Open MyCourses launch link
+          Open {LMS} launch link
         </button>
         {errorB && <p className="mt-2 text-sm text-due">{errorB}</p>}
         {resultB && (
@@ -246,11 +249,11 @@ export function SignInTests() {
         <div className="mt-3 text-sm text-ink-2">
           <p className="font-medium text-ink">What happened?</p>
           <ul className="mt-1 list-disc space-y-1 pl-5">
-            <li>You came back to this page and it says &quot;Key received: yes&quot;: MyCourses honours our own link type. Good.</li>
-            <li>The browser tried to open the Moodle app (a <code>moodlemobile://</code> link, or &quot;no app to open this&quot;): MyCourses forces its own link type, so ours is ignored.</li>
-            <li>Nothing happened, or you stayed on a MyCourses page: the link was blocked. Write down what the page says.</li>
+            <li>You came back to this page and it says &quot;Key received: yes&quot;: {LMS} honours our own link type. Good.</li>
+            <li>The browser tried to open the Moodle app (a <code>moodlemobile://</code> link, or &quot;no app to open this&quot;): {LMS} forces its own link type, so ours is ignored.</li>
+            <li>Nothing happened, or you stayed on a {LMS} page: the link was blocked. Write down what the page says.</li>
           </ul>
-          <p className="mt-1">If MyCourses asks you to confirm or sign in first, do that and carry on.</p>
+          <p className="mt-1">If {LMS} asks you to confirm or sign in first, do that and carry on.</p>
         </div>
       </section>
 

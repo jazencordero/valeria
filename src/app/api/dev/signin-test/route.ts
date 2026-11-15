@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { allowedSiteUrls } from "@/lib/schools";
+import { allowedSiteUrls, SCHOOLS } from "@/lib/schools";
 import { callMoodle, MoodleError } from "@/server/moodle/client";
 import { exchangeQrKey, parseQr } from "@/server/moodle/qr";
 import { allow } from "@/server/throttle";
 
 /*
  * Dev-only sign-in test (preview links only, behind Vercel login): does
- * MyCourses swap a QR key for a token when the swap comes from our server?
+ * Moodle swap a QR key for a token when the swap comes from our server?
  * Moodle's `qrsameipcheck` may refuse it with `ipmismatch`, because the QR was
  * shown on her device and the swap comes from Vercel's address.
  *
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   }
 
   const qr = parseQr(text);
-  if (!qr) return reply({ ok: false, errorcode: "not_a_qr", message: "That text is not a MyCourses QR link.", site: null });
+  if (!qr) return reply({ ok: false, errorcode: "not_a_qr", message: `That text is not a ${SCHOOLS.aalto.lms} QR link.`, site: null });
   const site = allowedSiteUrls().find((s) => s === qr.site);
   if (!site) return reply({ ok: false, errorcode: "site_not_allowed", message: "That site is not in our schools list.", site: null });
 
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
   if (!allowed) return reply({ ok: false, errorcode: "too_many", message: "Too many tries. Wait a minute.", site: null });
 
   if (process.env.MOODLE_FAKE === "1") {
-    return reply({ ok: false, errorcode: "moodle_fake_on", message: "MOODLE_FAKE=1 is set; this test needs the real MyCourses.", site: null });
+    return reply({ ok: false, errorcode: "moodle_fake_on", message: `MOODLE_FAKE=1 is set; this test needs the real ${SCHOOLS.aalto.lms}.`, site: null });
   }
 
   const scrub = (s: string, secrets: (string | null)[]) =>
