@@ -28,20 +28,32 @@
  *   notepad's refresh; an edit shows at once (`NOTE_SAVED_EVENT`); delete
  *   hides the card at once.
  *
- * Plain data in. `markRead` and `remove` default to the real actions; a
- * preview can pass stand-ins.
+ * - Selecting text in Read view offers "Add note" (M9-16's `SelectNote`):
+ *   the text gets a butter highlight, is stored (`saveHighlight`) and opens
+ *   the notepad with it as the quote. Stored highlights are read when the
+ *   page opens (`lectureHighlights`) and re-applied by matching the text.
+ *
+ * Plain data in. `markRead`, `remove`, `saveHl` and `loadHl` default to the
+ * real actions; a preview can pass stand-ins.
  *
  * Cut: the grow-out-of-the-stop transition (M9-18), the path's advance on
- * Back (the course page does not take it yet), "Ask about this lecture"
- * (M9-22) and text selection to a note.
+ * Back (the course page does not take it yet) and "Ask about this lecture"
+ * (M9-22).
  */
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { markLectureRead, type MarkReadResult } from "@/app/(app)/courses/[id]/lectures/[n]/actions";
+import {
+  lectureHighlights,
+  saveHighlight,
+  type HighlightListResult,
+  type HighlightSaveResult,
+} from "@/app/(app)/courses/[id]/lectures/[n]/highlight-actions";
 import { removeNote, type NoteRemoveResult } from "@/app/(app)/notes/actions";
 import { DoodleDefs } from "@/components/doodle";
 import { DoodlePencil } from "@/components/doodle-pencil";
 import { LectureReader, type LectureView } from "@/components/lecture/reader";
+import { SelectNote } from "@/components/lecture/select-note";
 import { useReadProgress } from "@/components/lecture/use-read-progress";
 import { NoteCard, type NoteCardData } from "@/components/notes/note-card";
 import { NOTE_SAVED_EVENT, openNotepad, type NoteSavedDetail } from "@/components/notes/notepad";
@@ -60,6 +72,8 @@ export type LecturePageProps = {
   lmsName: string;
   markRead?: (lectureId: string) => Promise<MarkReadResult>;
   remove?: (noteId: string) => Promise<NoteRemoveResult>;
+  saveHl?: (lectureId: string, text: string) => Promise<HighlightSaveResult>;
+  loadHl?: (lectureId: string) => Promise<HighlightListResult>;
 };
 
 const VIEWS: readonly LectureView[] = ["read", "slides", "notes"];
@@ -71,7 +85,14 @@ function selectedView(root: HTMLElement): LectureView | null {
   return VIEWS.find((x) => x === v) ?? null;
 }
 
-export function LecturePage({ lecture, lmsName, markRead = markLectureRead, remove = removeNote }: LecturePageProps) {
+export function LecturePage({
+  lecture,
+  lmsName,
+  markRead = markLectureRead,
+  remove = removeNote,
+  saveHl = saveHighlight,
+  loadHl = lectureHighlights,
+}: LecturePageProps) {
   const router = useRouter();
   const main = useRef<HTMLElement | null>(null);
   const readerRef = useRef<HTMLDivElement | null>(null);
@@ -122,6 +143,7 @@ export function LecturePage({ lecture, lmsName, markRead = markLectureRead, remo
   };
 
   const notes = useLectureNotes(lecture.notes, remove);
+  const highlights = useHighlights(lecture.lectureId, saveHl, loadHl);
 
   return (
     <div className="mx-auto max-w-[720px] px-[var(--pad)] pb-10">
@@ -144,7 +166,7 @@ export function LecturePage({ lecture, lmsName, markRead = markLectureRead, remo
         </span>
       </StickyHeader>
 
-      <div ref={readerRef} onClickCapture={onClickCapture}>
+      <div ref={readerRef} className="relative" onClickCapture={onClickCapture}>
         <LectureReader
           course={lecture.course}
           n={lecture.n}
@@ -165,9 +187,50 @@ export function LecturePage({ lecture, lmsName, markRead = markLectureRead, remo
           notesCount={notes.list.length}
           notes={<LectureNotes {...notes} />}
         />
+        <SelectNote
+          containerRef={readerRef}
+          active={view === "read" && lecture.status === "ready"}
+          highlights={highlights.list}
+          onAdd={highlights.add}
+        />
       </div>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Highlights
+
+function useHighlights(
+  lectureId: string,
+  save: (lectureId: string, text: string) => Promise<HighlightSaveResult>,
+  load: (lectureId: string) => Promise<HighlightListResult>,
+) {
+  const [list, setList] = useState<readonly string[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    void load(lectureId).then(
+      (r) => {
+        if (live && r.ok && r.texts.length) setList((l) => [...r.texts, ...l.filter((t) => !r.texts.includes(t))]);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [lectureId, load]);
+
+  const add = useCallback(
+    (quote: string) => {
+      setList((l) => (l.includes(quote) ? l : [...l, quote]));
+      void save(lectureId, quote).catch(() => {});
+      openNotepad({ quote });
+    },
+    [lectureId, save],
+  );
+
+  return { list, add };
 }
 
 // ---------------------------------------------------------------------------
