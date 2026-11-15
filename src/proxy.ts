@@ -18,6 +18,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const SESSION_COOKIE = "ready_session";
+/** Keep in step with `FLASH_COOKIE` in `src/server/data/flash.ts`. */
+const FLASH_COOKIE = "ready_flash";
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 /** 32 random bytes as base64url, no padding. */
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -29,9 +31,42 @@ function mintToken(): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/**
+ * The one-time Home greeting (M4-15). After a hand-in or a session, the client
+ * navigates to Home and Home reads `ready_flash`. A navigation fetches Home in
+ * more than one RSC request (the page segment can come after the layout), so
+ * the cookie is not touched there. A full page load of Home (a reload, or
+ * typing the address) drops it from both the request and the response, so a
+ * reload no longer shows the greeting. It also expires by itself after 60 s.
+ */
+function isHomeDocument(request: NextRequest): boolean {
+  if (request.method !== "GET" || request.nextUrl.pathname !== "/home") return false;
+  const h = request.headers;
+  // Prefetches (the router's, or the browser's own speculative ones) must not use it up unseen.
+  if (h.has("next-router-prefetch") || h.get("purpose") === "prefetch" || (h.get("sec-purpose") ?? "").includes("prefetch")) {
+    return false;
+  }
+  // Next strips its RSC markers before the proxy runs, so tell a page load apart
+  // from a client navigation by what the browser says it is fetching.
+  const dest = h.get("sec-fetch-dest");
+  if (dest) return dest === "document";
+  return !h.has("next-url") && (h.get("accept") ?? "").includes("text/html");
+}
+
 export function proxy(request: NextRequest) {
+  const dropFlash = request.cookies.has(FLASH_COOKIE) && isHomeDocument(request);
+  if (dropFlash) request.cookies.delete(FLASH_COOKIE);
+  const response = withSession(request, dropFlash);
+  if (dropFlash) response.cookies.delete(FLASH_COOKIE);
+  return response;
+}
+
+function withSession(request: NextRequest, requestChanged: boolean): NextResponse {
   const existing = request.cookies.get(SESSION_COOKIE)?.value;
-  if (existing && TOKEN_PATTERN.test(existing)) return NextResponse.next();
+  if (existing && TOKEN_PATTERN.test(existing)) {
+    // Pass an edited cookie header on to the render when the flash was dropped.
+    return requestChanged ? NextResponse.next({ request: { headers: request.headers } }) : NextResponse.next();
+  }
 
   const token = mintToken();
   // Let this request's render see the token as if the browser had sent it.

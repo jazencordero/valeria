@@ -29,6 +29,7 @@
 import { refresh } from "next/cache";
 import { z } from "zod";
 import { currentUser, NotSignedIn } from "@/server/auth/session";
+import { setFlash } from "@/server/data/flash";
 import { confirmHandin, type ConfirmResult } from "@/server/handin/confirm";
 import { MAX_HANDIN_BYTES, prepareHandin, type HandinFile, type PrepareResult } from "@/server/handin/prepare";
 
@@ -79,6 +80,10 @@ export async function confirmHandinAction(code: unknown, form: unknown): Promise
   // A file over the cap cannot be the one she reviewed.
   if (!read.ok) return read.reason === "too_big" ? { ok: false, reason: "changed" } : { ok: false, reason: "invalid" };
   const result = await confirmHandin(userId, parsed.data, read.file);
-  if (result.ok) refresh();
+  if (result.ok) {
+    // Home greets her once with "Handed in, ..." (M4-15).
+    await setFlash("handedIn");
+    refresh();
+  }
   return result;
 }

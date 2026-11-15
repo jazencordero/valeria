@@ -50,7 +50,7 @@ describe("greeting: the six cases", () => {
 
   it("something due today: count, tonight, and clear until", () => {
     expect(say([a("x", "Quiz", TONIGHT), a("memo", "memo", TUESDAY)])).toBe(
-      "Hi Aino. One thing is due tonight, then you are clear until Tuesday.",
+      "Hi Aino. Quiz is due tonight, then you are clear until Tuesday.",
     );
   });
 
@@ -70,8 +70,8 @@ describe("greeting: the six cases", () => {
 });
 
 describe("greeting: counts", () => {
-  it("singular: One thing is", () => {
-    expect(say([a("x", "Quiz", TONIGHT)])).toBe("Hi Aino. One thing is due tonight, then you are clear.");
+  it("one thing due tonight is named", () => {
+    expect(say([a("x", "Quiz", TONIGHT)])).toBe("Hi Aino. Quiz is due tonight, then you are clear.");
   });
 
   it("plural: Two things are", () => {
@@ -121,12 +121,12 @@ describe("greeting: edges", () => {
   });
 
   it("due today before 17:00 says today, not tonight", () => {
-    expect(say([a("x", "Quiz", TODAY_4PM)])).toBe("Hi Aino. One thing is due today, then you are clear.");
+    expect(say([a("x", "Quiz", TODAY_4PM)])).toBe("Hi Aino. Quiz is due today, then you are clear.");
   });
 
   it("due tomorrow uses the same pattern", () => {
     expect(say([a("x", "Quiz", TOMORROW), a("memo", "memo", TUESDAY)])).toBe(
-      "Hi Aino. One thing is due tomorrow, then you are clear until Tuesday.",
+      "Hi Aino. Quiz is due tomorrow, then you are clear until Tuesday.",
     );
   });
 

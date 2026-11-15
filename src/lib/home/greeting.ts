@@ -15,8 +15,9 @@
  *    case is never true while something is late, and a late item is the most
  *    urgent thing on the page, so it wins over everything that is not a
  *    reaction to what she just did. Only the oldest late item is named.
- * 4. Something due today or tomorrow: "Hi Aino. One thing is due tonight,
- *    then you are clear until Tuesday." The ticket says "today"; tomorrow uses
+ * 4. Something due today or tomorrow: "Hi Aino. Case memo 2 is due tonight,
+ *    then you are clear until Tuesday." With one such item it is named; with
+ *    two or more the count is used ("Two things are due tonight, ..."). The ticket says "today"; tomorrow uses
  *    the same pattern ("due tomorrow"), since the "2 or more days" case below
  *    would otherwise leave tomorrow with no sentence. "tonight" when the
  *    earliest of those is due at 17:00 or later, "today" before that.
@@ -220,7 +221,9 @@ export function greeting(input: GreetingInput): string {
     const when = days === 0 ? (hourOf(soonest.due_at) >= 17 ? "tonight" : "today") : "tomorrow";
     const after = dated.find((a) => daysBetween(now, a.due_at) > days);
     const clear = after ? `then you are clear until ${dayName(after.due_at, now)}` : "then you are clear";
-    return `${hi} ${thingsAre(sameDayItems.length)} due ${when}, ${clear}.`;
+    // One thing: name it ("Case memo 2 is due tonight"); more: keep the count.
+    const what = sameDayItems.length === 1 ? `${capitalise(sameDayItems[0].title)} is` : thingsAre(sameDayItems.length);
+    return `${hi} ${what} due ${when}, ${clear}.`;
   }
 
   return `${hi} Nothing is due before ${dayName(soonest.due_at, now)}. A good day for a bite.`;

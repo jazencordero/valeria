@@ -436,7 +436,7 @@ describe("getHomeView: greeting", () => {
 
     const view = await getHomeView(u.id, { now: NOW }, t.db);
 
-    expect(view.greeting).toBe("Hi Valeria. One thing is due tonight, then you are clear until Tuesday.");
+    expect(view.greeting).toBe("Hi Valeria. Assignment 3 is due tonight, then you are clear until Tuesday.");
   });
 
   it("starts with 'Handed in' after a hand-in, naming what is next", async () => {

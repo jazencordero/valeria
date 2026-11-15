@@ -89,6 +89,7 @@
  */
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { currentUser } from "@/server/auth/session";
+import { setFlash } from "@/server/data/flash";
 import { db, type Db } from "@/server/db/client";
 import { cards, cardStates, CARD_TYPES, exams, reviews, SESSION_MODES, studySessions } from "@/server/db/schema/study";
 import { users } from "@/server/db/schema/users";
@@ -300,7 +301,10 @@ export async function saveProgress(sessionId: string, batch: ReviewInput[]): Pro
 /** Ends a session and returns the done screen. Ending it twice is harmless. */
 export async function endSession(sessionId: string): Promise<DoneScreen> {
   const user = await currentUser();
-  return end(user.id, String(sessionId), new Date(), db);
+  const done = await end(user.id, String(sessionId), new Date(), db);
+  // Home greets her once with the forecast she just moved (M4-15).
+  await setFlash("studied", { examId: done.examId, forecast: done.forecastAfterShown });
+  return done;
 }
 
 /** Two buttons (Missed / Got it) or four (Anki mode). */

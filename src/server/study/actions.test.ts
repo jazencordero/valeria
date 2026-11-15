@@ -33,6 +33,14 @@ vi.mock("@/server/db/client", async (importOriginal) => {
   return { ...real, db };
 });
 
+// Home's one-time greeting cookie (M4-15): recorded instead of written.
+const flashes = vi.hoisted(() => [] as unknown[][]);
+vi.mock("@/server/data/flash", () => ({
+  setFlash: async (...args: unknown[]) => {
+    flashes.push(args);
+  },
+}));
+
 const { beginSession, endSession, examView, saveProgress, setGradeMode } = await import("./actions");
 const { StudyNotFound } = await import("./store");
 
@@ -154,7 +162,10 @@ describe("a day of bites", () => {
     expect(first!.cards[0].intervals[1].ms).toBe(MIN);
     expect(first!.cards[0].intervals[3].ms).toBe(10 * MIN);
 
+    flashes.length = 0;
     const done1 = await play(first!.cards, first!.sessionId);
+    // Ending a session leaves Home a one-time "Nice. ... up to N%" greeting.
+    expect(flashes).toEqual([["studied", { examId, forecast: done1.forecastAfterShown }]]);
     expect(done1.forecastAfter).toBeGreaterThan(done1.forecastBefore);
     expect(done1.forecastBefore).toBe(0);
     expect(done1.stats).toMatchObject({ cards: first!.cards.length, missed: 0, perfect: true, best: first!.cards.length });
