@@ -12,6 +12,14 @@
  * rendered as React text, never as HTML. A first heading that repeats the
  * title is dropped (the importer takes the title from it).
  *
+ * Three more things a hand-written document uses and the chat does not:
+ * - A line of `---` (or `***`, `___`) is a rule between parts, not the text "---".
+ * - `*word*` is emphasis. Underscores are left alone: formulas write `x_t`.
+ * - Lines of one paragraph stay on their own lines (a mock exam lists its
+ *   statements and its (a), (b), (c) parts one per line with no blank line
+ *   between). The chat parser joins them with a space, so the break is carried
+ *   through it as `LINE_BREAK` and drawn as a line break here.
+ *
  * Tables sit in a box that scrolls sideways inside itself, so a wide mock-exam
  * table never widens the page at 390 px.
  *
@@ -35,19 +43,31 @@ export type DocumentReaderProps = {
 type Piece =
   | { type: "h"; level: 2 | 3 | 4; spans: Inline[] }
   | { type: "pre"; text: string }
+  | { type: "hr" }
   | Block;
 
 const HEADING = /^[ \t]{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
 const FENCE = /^[ \t]{0,3}(```|~~~)/;
+const RULE = /^[ \t]{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s+/;
+const TABLE_LINE = /^\s*\|/;
+
+/** A kept line break inside a paragraph (a private-use character, so `trim()` leaves it). */
+export const LINE_BREAK = "\uE000";
 
 /** Headings and fenced code here; every other run of lines through `parseMarkdown`. */
 export function documentPieces(src: string, title?: string): Piece[] {
   const lines = src.replace(/\r\n?/g, "\n").split("\n");
   const out: Piece[] = [];
   let run: string[] = [];
+  // Where the line before sits, as the chat parser will read it.
+  let inList = false;
+  let inParagraph = false;
   const flush = () => {
     if (run.length) out.push(...parseMarkdown(run.join("\n")));
     run = [];
+    inList = false;
+    inParagraph = false;
   };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -68,6 +88,23 @@ export function documentPieces(src: string, title?: string): Piece[] {
       out.push({ type: "h", level, spans: parseInline(h[2]) });
       continue;
     }
+    if (RULE.test(line)) {
+      flush();
+      out.push({ type: "hr" });
+      continue;
+    }
+    if (!line.trim() || TABLE_LINE.test(line)) {
+      inList = false;
+      inParagraph = false;
+    } else if (LIST_ITEM.test(line)) {
+      inList = true;
+      inParagraph = false;
+    } else if (!(inList && /^\s/.test(line))) {
+      // A paragraph line (not the indented rest of a list item): keep the break before it.
+      if (inParagraph) run[run.length - 1] += LINE_BREAK;
+      inList = false;
+      inParagraph = true;
+    }
     run.push(line);
   }
   flush();
@@ -76,7 +113,44 @@ export function documentPieces(src: string, title?: string): Piece[] {
   return out;
 }
 
-const plain = (spans: readonly Inline[]) => spans.map((s) => s.text).join("");
+const plain = (spans: readonly Inline[]) =>
+  spans
+    .map((s) => s.text)
+    .join("")
+    .replaceAll(LINE_BREAK, " ");
+
+// `*word*`: the stars hug the words and do not touch a letter, digit or star outside ("2*3*4" stays).
+const EMPHASIS = /(^|[^\w*])\*([^\s*](?:[^*\n]*[^\s*])?)\*(?![\w*])/g;
+
+/** Text with `*emphasis*` split out. */
+export function emphasisParts(text: string): { text: string; em?: true }[] {
+  const out: { text: string; em?: true }[] = [];
+  let last = 0;
+  for (const m of text.matchAll(EMPHASIS)) {
+    const start = m.index + m[1].length;
+    if (start > last) out.push({ text: text.slice(last, start) });
+    out.push({ text: m[2], em: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last) });
+  return out;
+}
+
+/** Plain or bold text: emphasis in italics, kept line breaks as breaks. */
+function Words({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(LINE_BREAK).map((line, i) => (
+        <span key={i}>
+          {i > 0 && <br />}
+          {emphasisParts(i > 0 ? line.replace(/^ /, "") : line).map((part, j) =>
+            part.em ? <em key={j}>{part.text}</em> : <span key={j}>{part.text}</span>,
+          )}
+        </span>
+      ))}
+    </>
+  );
+}
 
 function Text({ spans }: { spans: readonly Inline[] }) {
   return (
@@ -84,14 +158,14 @@ function Text({ spans }: { spans: readonly Inline[] }) {
       {spans.map((s, i) =>
         s.code ? (
           <code key={i} className="rounded-[4px] bg-paper px-1 font-mono text-[0.88em]">
-            {s.text}
+            {s.text.replaceAll(LINE_BREAK, " ")}
           </code>
         ) : s.bold ? (
           <strong key={i} className="font-semibold text-ink">
-            {s.text}
+            <Words text={s.text} />
           </strong>
         ) : (
-          <span key={i}>{s.text}</span>
+          <Words key={i} text={s.text} />
         ),
       )}
     </>
@@ -114,6 +188,8 @@ function PieceView({ piece }: { piece: Piece }) {
         </H>
       );
     }
+    case "hr":
+      return <hr className="mt-8 border-0 border-t border-solid border-line" />;
     case "pre":
       return (
         <pre className="mt-4 overflow-x-auto overscroll-x-contain rounded-xl border border-solid border-line bg-paper p-4 font-mono text-[13px] leading-[1.5]">
