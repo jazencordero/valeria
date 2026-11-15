@@ -160,8 +160,14 @@ function lmsOf(site: string): string {
   return id ? SCHOOLS[id].lms : "Moodle";
 }
 
-/** Swaps a QR key for a web service token. Errors never carry the key or the token. */
-async function exchangeQrKey(site: string, key: string, userid: number, timeoutMs: number): Promise<string> {
+/**
+ * Swaps a QR key for a web service token. Errors never carry the key or the
+ * token. Stores nothing and counts no tries: callers brake it themselves
+ * (`connectWithQr` above; the dev-only sign-in test, which throws the token
+ * away after one check). Throws `MoodleDown` when Moodle cannot be reached and
+ * `MoodleError` with Moodle's own `errorcode` (`invalidkey`, `ipmismatch`, ...).
+ */
+export async function exchangeQrKey(site: string, key: string, userid: number, timeoutMs: number): Promise<string> {
   const url = `${site.replace(/\/+$/, "")}/lib/ajax/service-nologin.php?info=${QR_LOGIN_FN}`;
   let res: Response;
   try {
