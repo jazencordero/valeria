@@ -57,6 +57,13 @@ describe("planEnd", () => {
     expect(planEnd(45, 13)).toBe(94);
     expect(planEnd(93, 1)).toBe(94);
   });
+
+  it("does not fall below today's forecast after the exam day", () => {
+    // The day after the exam `daysLeft` is -1: this used to give 2 - 5.5 = -3.5.
+    expect(planEnd(2, -1)).toBe(2);
+    expect(planEnd(40, -17)).toBe(40);
+    expect(verdict(2, 80, planEnd(2, -1)).key).toBe("tight");
+  });
 });
 
 describe("planCurve", () => {

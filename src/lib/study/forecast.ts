@@ -41,9 +41,13 @@ export function forecastShown(concepts: readonly WeightedConcept[]): number {
   return Math.round(forecastNow(concepts));
 }
 
-/** Where a bite a day lands on exam day: `min(94, f + daysLeft * 5.5)`. */
+/**
+ * Where a bite a day lands on exam day: `min(94, f + daysLeft * 5.5)`. Once
+ * the exam day has passed (`daysLeft` below 0) no days are left, so the result
+ * is `f` as on exam day, never below it.
+ */
 export function planEnd(f: number, daysLeft: number): number {
-  return Math.min(PLAN_CAP, f + daysLeft * PLAN_GAIN_PER_DAY);
+  return Math.min(PLAN_CAP, f + Math.max(0, daysLeft) * PLAN_GAIN_PER_DAY);
 }
 
 /**
