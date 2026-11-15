@@ -31,16 +31,25 @@
  * not retried (a spent key cannot be retried anyway). It does not count
  * toward the client's 2,000-a-day limit.
  *
- * MOODLE_FAKE=1: the in-process fake (./fake-inline) has no QR exchange and is
- * not this ticket's file, so in fake mode the exchange must be pointed at a
- * fake server with `options.exchangeSite` (tests do this with
- * `startFakeMoodle`); without it `connectWithQr` throws instead of reaching
- * a real Moodle.
+ * MOODLE_FAKE=1 (M5-08): with `options.exchangeSite` the exchange goes to that
+ * fake server (tests do this with `startFakeMoodle`); without it the
+ * in-process fake answers it (`fakeQrLogin` in ./fake-inline, which accepts
+ * the sample QR), so `next start` with the fake on never reaches a real
+ * Moodle. Without MOODLE_FAKE nothing changes: the real exchange, and never a
+ * redirect followed.
+ *
+ * Her yes (M8-33, for the QR way in since M5-08): `connectWithQr` refuses with
+ * `not_agreed`, before Moodle is called or a try counted, unless
+ * `options.agreed` is true. After a good connection it stores when she agreed
+ * in `users.settings.agreedAt` on the surviving user (connecting can merge
+ * two users), with the same statement as the paste-key action.
  *
  * Never logged or returned: the QR key, the token, the private token.
  */
+import { eq, sql } from "drizzle-orm";
 import { SCHOOLS, SCHOOL_IDS } from "@/lib/schools";
 import { db as defaultDb, type Db } from "@/server/db/client";
+import { users } from "@/server/db/schema/users";
 import { allow } from "@/server/throttle";
 import { MOODLE_TIMEOUT_MS, MoodleDown, MoodleError, USER_AGENT } from "./client";
 import {
@@ -51,6 +60,7 @@ import {
   connectWithKey,
   type ConnectResult,
 } from "./connect";
+import { fakeQrLogin } from "./fake-inline";
 
 export const QR_LOGIN_FN = "tool_mobile_get_tokens_for_qr_login";
 /** Moodle answers this function only to the Moodle app, which it knows by "MoodleMobile" in the User-Agent. */
@@ -94,10 +104,13 @@ export function parseQr(text: string): ParsedQr | null {
 export type QrResult =
   | ConnectResult
   | { ok: false; status: "not_a_qr" }
+  | { ok: false; status: "not_agreed" }
   | { ok: false; status: "site_not_allowed" }
   | { ok: false; status: "expired"; message: string };
 
 export type QrOptions = {
+  /** She ticked the box (M8-33). Without it nothing is called or stored. */
+  agreed?: boolean;
   /**
    * Send the exchange to this site instead of the QR's own (tests and fake
    * mode: a `startFakeMoodle` url). The site check and the stored connection
@@ -114,7 +127,7 @@ const KEY_GONE = new Set(["invalidkey", "expiredkey"]);
 
 /**
  * Connects `userId` with the text of a MyCourses QR code. Garbage text is
- * `not_a_qr` and a site we do not connect is `site_not_allowed`, both without
+ * `not_a_qr`, no `options.agreed` is `not_agreed`, and a site we do not connect is `site_not_allowed`, both without
  * a Moodle call or a counted try. Over the try limits it is `too_many` (as
  * from `connectWithKey`) and Moodle is not called. A used, expired or unknown
  * key is `expired` with the sentence to show. Otherwise it is whatever
@@ -129,6 +142,7 @@ export async function connectWithQr(
 ): Promise<QrResult> {
   const qr = parseQr(text);
   if (!qr) return { ok: false, status: "not_a_qr" };
+  if (options.agreed !== true) return { ok: false, status: "not_agreed" };
   const site = allowedSite(qr.site);
   if (!site) return { ok: false, status: "site_not_allowed" };
 
@@ -138,21 +152,28 @@ export async function connectWithQr(
     (await allow("qr:day", { max: QR_TRIES_PER_DAY, perSeconds: 24 * 60 * 60 }, counted));
   if (!ok) return { ok: false, reason: "too_many", message: TOO_MANY_TRIES };
 
-  const target = options.exchangeSite ?? site;
-  if (process.env.MOODLE_FAKE === "1" && !options.exchangeSite) {
-    throw new Error("connectWithQr: the in-process fake Moodle has no QR login; pass options.exchangeSite.");
-  }
+  const inProcessFake = process.env.MOODLE_FAKE === "1" && !options.exchangeSite;
 
   let token: string;
   try {
-    token = await exchangeQrKey(target, qr.key, qr.userid, options.timeoutMs ?? MOODLE_TIMEOUT_MS);
+    token = inProcessFake
+      ? fakeQrLogin(qr.key, qr.userid)
+      : await exchangeQrKey(options.exchangeSite ?? site, qr.key, qr.userid, options.timeoutMs ?? MOODLE_TIMEOUT_MS);
   } catch (err) {
     if (err instanceof MoodleError && !(err instanceof MoodleDown) && err.errorcode && KEY_GONE.has(err.errorcode)) {
       return { ok: false, status: "expired", message: qrExpiredMessage(lmsOf(site)) };
     }
     throw err;
   }
-  return connectWithKey(userId, site, token, database);
+  const result = await connectWithKey(userId, site, token, database);
+  if (result.ok) {
+    // When she agreed (M8-33). On the surviving user. Keeps other settings keys.
+    await database
+      .update(users)
+      .set({ settings: sql`jsonb_set(${users.settings}, '{agreedAt}', to_jsonb(now()::text), true)` })
+      .where(eq(users.id, result.userId));
+  }
+  return result;
 }
 
 function lmsOf(site: string): string {

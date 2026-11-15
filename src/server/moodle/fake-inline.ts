@@ -33,6 +33,15 @@
 //
 // State is memory only, on `globalThis`, so route handlers and pages share it
 // in dev (and survive module reloads); a server restart forgets it.
+//
+// QR sign-in (M5-08): `fakeQrLogin` stands in for Moodle's
+// `tool_mobile_get_tokens_for_qr_login` when `connectWithQr` (./qr.ts) runs
+// with MOODLE_FAKE=1 and no fake server to send the exchange to. It swaps the
+// key in tests/fixtures/files/sample-qr.png (`FAKE_QR_KEY`, for the sample
+// site info's user `FAKE_QR_USERID`) for `demo-key`, so uploading the sample
+// QR connects her. Unlike Moodle's, this key can be used again: preview
+// testers upload the same picture many times. Any other key or user id is
+// `invalidkey`, as Moodle answers for an unknown key.
 
 import siteInfo from "../../../tests/fixtures/moodle-sample/core_webservice_get_site_info.json";
 import usersCourses from "../../../tests/fixtures/moodle-sample/core_enrol_get_users_courses.json";
@@ -40,9 +49,14 @@ import assignments from "../../../tests/fixtures/moodle-sample/mod_assign_get_as
 import submissionStatus from "../../../tests/fixtures/moodle-sample/mod_assign_get_submission_status.json";
 import saveSubmission from "../../../tests/fixtures/moodle-sample/mod_assign_save_submission.json";
 import submitForGrading from "../../../tests/fixtures/moodle-sample/mod_assign_submit_for_grading.json";
-import { KeyRejected, NotAllowed, type MoodleConn, type MoodleParams } from "./client";
+import { KeyRejected, MoodleError, NotAllowed, type MoodleConn, type MoodleParams } from "./client";
 
 export const DEMO_KEY = "demo-key";
+
+/** The QR login key in tests/fixtures/files/sample-qr.png. Made up; reusable. */
+export const FAKE_QR_KEY = "demoqrkey123";
+/** The Moodle user id the sample QR is for: the sample site info's `userid`. */
+export const FAKE_QR_USERID = 4242;
 
 /** The draft itemid of a user's first fake upload; later uploads count up from it. */
 export const FAKE_DRAFT_ITEMID = 777001;
@@ -103,10 +117,14 @@ export function resetFake(userKey: string): void {
 
 // ---------------------------------------------------------------------------
 
-function guard(conn: MoodleConn): void {
+function notInProduction(): void {
   if (process.env.VERCEL_ENV === "production") {
     throw new Error("The fake Moodle is switched on in production. Unset MOODLE_FAKE.");
   }
+}
+
+function guard(conn: MoodleConn): void {
+  notInProduction();
   if (conn.token !== DEMO_KEY) {
     throw new KeyRejected("Invalid token - token not found", { errorcode: "invalidtoken", exception: "moodle_exception" });
   }
@@ -242,4 +260,17 @@ export function fakeForm(conn: MoodleConn, path: string, form: FormData): unknow
   if (at >= 0) area.splice(at, 1);
   area.push({ name: filename, size });
   return [{ component: "user", filearea: "draft", filename, filepath: "/", itemid }];
+}
+
+/**
+ * The fake's QR login: swaps `FAKE_QR_KEY` for `FAKE_QR_USERID` into the token
+ * `demo-key`. Any other key or user id throws `MoodleError` with Moodle's
+ * `invalidkey`, which `connectWithQr` shows as a spent code.
+ */
+export function fakeQrLogin(key: string, userid: number): string {
+  notInProduction();
+  if (key !== FAKE_QR_KEY || userid !== FAKE_QR_USERID) {
+    throw new MoodleError("Invalid key", { errorcode: "invalidkey", exception: "moodle_exception" });
+  }
+  return DEMO_KEY;
 }

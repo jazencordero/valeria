@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_SCHOOL,
   SCHOOLS,
   SCHOOL_IDS,
   allowedSiteUrls,
   canConnect,
+  forcedSchool,
   isSchoolId,
   lmsNameOf,
   schoolIdOf,
@@ -86,5 +87,44 @@ describe("connecting", () => {
     expect(canConnect("lut")).toBe(false);
     expect(canConnect("aalto")).toBe(true);
     expect(allowedSiteUrls()).toEqual(["https://mycourses.aalto.fi"]);
+  });
+});
+
+describe("READY_FORCE_SCHOOL (test flag)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("forces the school with the fake Moodle on, so LUT sees Moodle, not MyCourses", () => {
+    expect(forcedSchool({ READY_FORCE_SCHOOL: "lut", MOODLE_FAKE: "1" })).toBe("lut");
+    vi.stubEnv("READY_FORCE_SCHOOL", "lut");
+    vi.stubEnv("MOODLE_FAKE", "1");
+    expect(schoolIdOf({ school: "aalto" })).toBe("lut");
+    expect(lmsNameOf({ school: "aalto" })).toBe("Moodle");
+    expect(schoolOf(null).name).toBe("LUT");
+  });
+
+  it("is honoured under tests too", () => {
+    expect(forcedSchool({ READY_FORCE_SCHOOL: "lut", NODE_ENV: "test" })).toBe("lut");
+  });
+
+  it("is ignored without the fake Moodle and outside tests", () => {
+    expect(forcedSchool({ READY_FORCE_SCHOOL: "lut", NODE_ENV: "production" })).toBeNull();
+    expect(forcedSchool({ READY_FORCE_SCHOOL: "lut", MOODLE_FAKE: "0", NODE_ENV: "development" })).toBeNull();
+  });
+
+  it("is never honoured on a Vercel production deploy, even with the fake on", () => {
+    expect(forcedSchool({ READY_FORCE_SCHOOL: "lut", MOODLE_FAKE: "1", VERCEL_ENV: "production" })).toBeNull();
+    expect(forcedSchool({ READY_FORCE_SCHOOL: "lut", NODE_ENV: "test", VERCEL_ENV: "production" })).toBeNull();
+    vi.stubEnv("READY_FORCE_SCHOOL", "lut");
+    vi.stubEnv("MOODLE_FAKE", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    expect(schoolIdOf({ school: "aalto" })).toBe("aalto");
+    expect(lmsNameOf({ school: "aalto" })).toBe("MyCourses");
+  });
+
+  it("ignores an unknown school and an unset flag", () => {
+    expect(forcedSchool({ READY_FORCE_SCHOOL: "harvard", MOODLE_FAKE: "1" })).toBeNull();
+    expect(forcedSchool({ MOODLE_FAKE: "1" })).toBeNull();
   });
 });

@@ -10,7 +10,7 @@ import { assignments, submissions } from "@/server/db/schema/work";
 import { confirmHandin } from "@/server/handin/confirm";
 import { prepareHandin } from "@/server/handin/prepare";
 import { MoodleError, configureMoodleClient, resetMoodleClient, type MoodleConn } from "./client";
-import { DEMO_KEY, FAKE_DRAFT_ITEMID, fakeUserKey, resetFake } from "./fake-inline";
+import { DEMO_KEY, FAKE_DRAFT_ITEMID, FAKE_QR_KEY, FAKE_QR_USERID, fakeQrLogin, fakeUserKey, resetFake } from "./fake-inline";
 import { getSubmissionStatus } from "./read/assignments";
 import { saveSubmission, submitForGrading, uploadDraftFile } from "./write";
 import { dbConsumeConfirmCode, herTapFromConfirmCode, type HerTap } from "./her-tap";
@@ -208,4 +208,37 @@ describe("with MOODLE_FAKE=1, prepareHandin then confirmHandin", () => {
       expect(await getSubmissionStatus(conn(other), moodleId)).toMatchObject({ state: "none", files: [] });
     });
   }
+});
+
+describe("fakeQrLogin (M5-08)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("swaps the sample QR's key for demo-key, again and again", () => {
+    expect(fakeQrLogin(FAKE_QR_KEY, FAKE_QR_USERID)).toBe(DEMO_KEY);
+    expect(fakeQrLogin(FAKE_QR_KEY, FAKE_QR_USERID)).toBe(DEMO_KEY);
+  });
+
+  it("answers invalidkey for any other key or user id", () => {
+    for (const [key, userid] of [
+      ["otherkey", FAKE_QR_USERID],
+      [FAKE_QR_KEY, 7],
+    ] as const) {
+      const err = (() => {
+        try {
+          fakeQrLogin(key, userid);
+        } catch (e) {
+          return e;
+        }
+      })();
+      expect(err).toBeInstanceOf(MoodleError);
+      expect((err as MoodleError).errorcode).toBe("invalidkey");
+    }
+  });
+
+  it("refuses to run on a Vercel production deploy", () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    expect(() => fakeQrLogin(FAKE_QR_KEY, FAKE_QR_USERID)).toThrow(/production/);
+  });
 });

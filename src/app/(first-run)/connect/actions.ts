@@ -1,16 +1,20 @@
 /*
- * Connect action (M1-35): she pastes her Moodle key, we check it, store it
- * sealed (M1-13's `connectWithKey`, which also brakes key guessing, M1-43),
- * run the first sync (M1-16's `syncNow`) and send her to /home.
+ * Connect actions (M1-35, M5-08): she pastes her Moodle key, we check it, store
+ * it sealed (M1-13's `connectWithKey`, which also brakes key guessing, M1-43),
+ * start the first sync (M5-07's `startFirstSync`) and send her to /sorting,
+ * where the sorting scene shows it working. `startFirstSyncAction` does the
+ * same two last steps after the QR way in (`connectQrAction`, ./qr-actions.ts)
+ * has connected her.
  *
  * A Server Action, not an /api route: under `next dev`, route handlers and
  * pages run in separate PGlite instances, so a connection written by a route
- * would not be seen by /home.
+ * would not be seen by the next page.
  *
  * Same shape as settings/actions.ts and exams/actions.ts: no file-level
- * "use server", so only `connectAction` is a callable endpoint. It works for
- * the visitor's own cookie only; it never takes a user id or a site from the
- * form. The site is her school's (`schoolOf(user).siteUrl`).
+ * "use server", so only `connectAction` and `startFirstSyncAction` are
+ * callable endpoints. They work for the visitor's own cookie only; they never
+ * take a user id or a site from the client. The site is her school's
+ * (`schoolOf(user).siteUrl`).
  *
  * The key is never logged, never returned, never put in an error message.
  * The state sent back to the form holds only a sentence.
@@ -20,9 +24,9 @@
  * that one. `mergeUsers` moves her `sessions` rows too, so the cookie in this
  * browser keeps working and now points at the survivor; nothing to re-point.
  *
- * The first sync is not forced and is capped at ~8 s by `syncNow`. When
- * Moodle is slow it answers `more: true`; we go to /home anyway and Home syncs
- * again. A failed first sync never blocks the redirect: the key is stored.
+ * The first sync is not waited for: `startFirstSync` runs it after the
+ * response (`after`), and the sorting scene polls /api/sync/progress. A sync
+ * that already finished is not repeated, so reconnecting is cheap.
  */
 import { eq, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
@@ -32,9 +36,10 @@ import { lmsNameOf, schoolOf } from "@/lib/schools";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { KeyRejected, MoodleError, NotAllowed } from "@/server/moodle/client";
 import { db } from "@/server/db/client";
+import { moodleConnections } from "@/server/db/schema/moodle";
 import { users } from "@/server/db/schema/users";
 import { connectWithKey, type ConnectResult } from "@/server/moodle/connect";
-import { syncNow } from "@/server/sync/run";
+import { startFirstSync } from "@/server/sync/progress";
 
 /**
  * What a pasted key may look like. Real Moodle keys are 32 hex characters; the
@@ -89,7 +94,7 @@ async function visitor(): Promise<User> {
   }
 }
 
-/** `useActionState` action for the paste-key form. Redirects to /home on success. */
+/** `useActionState` action for the paste-key form. Redirects to /sorting on success. */
 export async function connectAction(_prev: ConnectState, formData: FormData): Promise<ConnectState> {
   "use server";
   const user = await visitor();
@@ -127,11 +132,25 @@ export async function connectAction(_prev: ConnectState, formData: FormData): Pr
     return { error: m.ourFault };
   }
 
-  try {
-    await syncNow(ownerId, { force: false });
-  } catch (err) {
-    // The key is stored; Home syncs again on arrival.
-    console.error("First sync failed:", err instanceof Error ? err.name : typeof err);
-  }
-  redirect("/home");
+  startFirstSync(ownerId);
+  redirect("/sorting");
+}
+
+/**
+ * After the QR way in connected her: starts her first sync and goes to
+ * /sorting. Her user is read from the cookie again, so after a merge it is
+ * the surviving user. Not connected (someone called it directly): back to
+ * /connect, nothing started.
+ */
+export async function startFirstSyncAction(): Promise<void> {
+  "use server";
+  const user = await visitor();
+  const conn = await db
+    .select({ id: moodleConnections.userId })
+    .from(moodleConnections)
+    .where(eq(moodleConnections.userId, user.id))
+    .limit(1);
+  if (conn.length === 0) redirect("/connect");
+  startFirstSync(user.id);
+  redirect("/sorting");
 }

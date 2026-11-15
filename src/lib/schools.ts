@@ -11,6 +11,13 @@
  * know (older rows, a school removed later), `schoolOf` answers Aalto
  * (`DEFAULT_SCHOOL`): every user so far is an Aalto student, and Aalto is the
  * only school that can connect.
+ *
+ * Test flag (M5-08): `READY_FORCE_SCHOOL=lut` (any key of `SCHOOLS`) makes
+ * `schoolIdOf` answer that school for every user, so per-school copy can be
+ * checked without a school picked ("Connect Moodle", not "MyCourses", for
+ * LUT). Honoured only with the fake Moodle on (`MOODLE_FAKE=1`) or under
+ * tests (`NODE_ENV=test`), and never on a Vercel production deploy
+ * (`VERCEL_ENV=production`). See `forcedSchool`.
  */
 
 export type School = {
@@ -70,8 +77,29 @@ export function isSchoolId(value: unknown): value is SchoolId {
 /** Just the part of a user row this file reads. */
 export type WithSchool = { school?: string | null } | null | undefined;
 
-/** Her school's id; `DEFAULT_SCHOOL` when the row has none or one we do not know. */
+type Env = Partial<Record<string, string | undefined>>;
+
+function serverEnv(): Env {
+  // In the browser `process` may be missing; the flag is a server thing anyway.
+  return typeof process === "undefined" ? {} : process.env;
+}
+
+/**
+ * The school `READY_FORCE_SCHOOL` forces, or null. Null on a Vercel
+ * production deploy, and unless the fake Moodle is on or tests are running.
+ * An unknown value is ignored.
+ */
+export function forcedSchool(env: Env = serverEnv()): SchoolId | null {
+  if (env.VERCEL_ENV === "production") return null;
+  if (env.MOODLE_FAKE !== "1" && env.NODE_ENV !== "test") return null;
+  const id = env.READY_FORCE_SCHOOL?.trim().toLowerCase();
+  return isSchoolId(id) ? id : null;
+}
+
+/** Her school's id; `DEFAULT_SCHOOL` when the row has none or one we do not know. `forcedSchool` wins when set. */
 export function schoolIdOf(user: WithSchool): SchoolId {
+  const forced = forcedSchool();
+  if (forced) return forced;
   const id = user?.school;
   return isSchoolId(id) ? id : DEFAULT_SCHOOL;
 }
