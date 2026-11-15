@@ -37,6 +37,15 @@
  * No `identities` row is written: every fake user is the same Moodle user
  * (4242), and an identity would make the next demo browser merge into this one.
  *
+ * The tutor (M2-28) is switched on for a demo user (`users.settings.tutor.enabled`) only on the
+ * whole-flow test server, so tests/e2e/tutor.spec.ts can click through it with the fake AI.
+ * There is no new environment value: it is on only where the dev server already runs against
+ * both fakes, `demoTutorOn()`: MOODLE_FAKE=1, AI_FAKE_URL naming this machine (localhost or
+ * 127.0.0.1, the same address rule the router keeps), no VERCEL* variable with a value (Vercel
+ * sets VERCEL=1 on every build and deploy, previews included), and NODE_ENV not "production".
+ * So it is never on in a deploy, a `next build` / `next start`, or with a real AI behind it;
+ * elsewhere a demo user has no tutor, as before.
+ *
  * Safety:
  * - Nothing here runs unless `demoAllowed()`: MOODLE_FAKE=1 and not Vercel
  *   production (the fake Moodle refuses production too). Otherwise it throws
@@ -96,6 +105,22 @@ export class DemoUnavailable extends Error {
 /** Whether demo data may be written here: the fake Moodle is on and this is not production. */
 export function demoAllowed(): boolean {
   return process.env.MOODLE_FAKE === "1" && process.env.VERCEL_ENV !== "production";
+}
+
+/**
+ * Whether a demo user gets the tutor switched on: only on the whole-flow test server (both
+ * fakes on, not Vercel, not production). See the header.
+ */
+export function demoTutorOn(env: Record<string, string | undefined> = process.env): boolean {
+  if (env.MOODLE_FAKE !== "1") return false;
+  if (env.NODE_ENV === "production" || process.env.NODE_ENV === "production") return false;
+  if (Object.keys(env).some((key) => key.startsWith("VERCEL") && env[key])) return false;
+  try {
+    const url = new URL(env.AI_FAKE_URL ?? "");
+    return (url.protocol === "http:" || url.protocol === "https:") && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
 }
 
 function guard(): void {
@@ -183,6 +208,13 @@ async function markDemo(database: Db, userId: string): Promise<void> {
     .update(users)
     .set({ settings: sql`jsonb_set(${users.settings}, ${`{${DEMO_FLAG}}`}::text[], 'true'::jsonb)` })
     .where(eq(users.id, userId));
+  // The tutor, on the whole-flow test server only (see the header).
+  if (demoTutorOn()) {
+    await database
+      .update(users)
+      .set({ settings: sql`jsonb_set(${users.settings}, '{tutor}', '{"enabled": true}'::jsonb)` })
+      .where(eq(users.id, userId));
+  }
 }
 
 /**

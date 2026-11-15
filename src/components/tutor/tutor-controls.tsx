@@ -15,9 +15,11 @@
  *
  * Usage chip: a thin ring of this month's tutor budget used (all users, one budget) and the
  * percentage; amber from 80%, never red. It is a button whose name carries the numbers. It
- * opens a popover (a non-modal dialog) with the bar, used and left, what is left at each level
- * (from her own average answer this month, or a default), the reset date and what happens at
- * zero, plus a small line that these are estimates. Escape or a tap outside closes it, and focus
+ * opens a popover (a non-modal dialog) with the bar, used and left ("Less than 1 of 150 EUR
+ * used. About 149 EUR left."), roughly how many answers are left at each level (a conservative
+ * default until she has 30 answers at a level, then blended; src/server/tutor/budget.ts,
+ * `answersLeftFor`; two significant figures), the reset date and what happens at zero, plus a
+ * small line that these are estimates. Escape or a tap outside closes it, and focus
  * goes back to the chip. With reduced motion the ring and bar do not animate.
  */
 import { useEffect, useId, useRef } from "react";
@@ -132,18 +134,15 @@ export function LevelPicker(props: { level: TutorLevel; available: boolean; disa
 // ---------------------------------------------------------------------------
 // Usage chip and popover
 
-/** About `n`: exact under 100, else two significant figures, with thousands commas. */
-export function aboutCount(n: number): string {
+/**
+ * Roughly `n`: two significant figures, with thousands commas ("296,442" -> "300,000",
+ * "14,822" -> "15,000", "2,264" -> "2,300"; under 100 it is the number itself).
+ */
+export function roughCount(n: number): string {
   const v = Math.max(0, Math.floor(n));
   if (v < 100) return String(v);
   const p = 10 ** (String(v).length - 2);
   return (Math.round(v / p) * p).toLocaleString("en-US");
-}
-
-/** Euros as she reads them: "under 1" for a few cents, else whole euros. */
-export function aboutEur(eur: number): string {
-  if (eur > 0 && eur < 1) return "under 1";
-  return String(Math.round(eur));
 }
 
 const budgetText = (b: number) => (Number.isInteger(b) ? String(b) : b.toFixed(2));
@@ -155,21 +154,35 @@ export function resetDay(resetsOn: string): string {
   return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(at);
 }
 
-/** The sentences the chip and popover show (also the chip's accessible name). */
+/** Euros as she reads them, without "about" before an exact or a "less than" figure. */
+function eurPhrase(eur: number, round: (n: number) => number): string {
+  if (eur <= 0) return "0";
+  if (eur < 1) return "less than 1";
+  return `about ${round(eur)}`;
+}
+
+const sentence = (s: string) => `${s[0].toUpperCase()}${s.slice(1)}.`;
+
+/**
+ * The sentences the chip and popover show. `used` (lower case, no full stop) is also the chip's
+ * accessible name and the bar's value text: "about 12 of 150 EUR used", "less than 1 of 150 EUR
+ * used". The popover reads "About 12 of 150 EUR used. About 138 EUR left." (left is rounded
+ * down, so used + left never reads more than the budget).
+ */
 export function meterWords(m: TutorMeter) {
-  const used = `about ${aboutEur(m.usedEur)} of ${budgetText(m.budgetEur)} EUR used`;
-  // Left is rounded down, so used + left never reads more than the budget.
-  const leftEur = Math.max(0, m.budgetEur - m.usedEur);
-  const left = `about ${leftEur > 0 && leftEur < 1 ? "under 1" : Math.floor(leftEur)} EUR left`;
+  const used = `${eurPhrase(m.usedEur, Math.round)} of ${budgetText(m.budgetEur)} EUR used`;
+  const left = `${eurPhrase(Math.max(0, m.budgetEur - m.usedEur), Math.floor)} EUR left`;
   const l = m.levels;
   const levels =
     m.usedEur >= m.budgetEur
       ? "Nothing is left for Claude this month."
-      : `That is about ${aboutCount(l.quick.answersLeft)} Quick answers, ${aboutCount(l.balanced.answersLeft)} Balanced, or ${aboutCount(l.deep.answersLeft)} Deep ones.`;
+      : `That is roughly ${roughCount(l.quick.answersLeft)} Quick answers, ${roughCount(l.balanced.answersLeft)} Balanced, or ${roughCount(l.deep.answersLeft)} Deep ones.`;
   return {
     percent: `${Math.round(m.fraction * 100)}%`,
     used,
     left,
+    usedSentence: sentence(used),
+    leftSentence: sentence(left),
     levels,
     resets: `Resets ${resetDay(m.resetsOn)}.`,
     chipName: `Tutor allowance this month: ${used}. Show details`,
@@ -286,7 +299,7 @@ export function UsageMeter(props: { meter: TutorMeter; open: boolean; onOpen: (o
             />
           </div>
           <p className="m-0 mt-2" data-testid="tutor-meter-used">
-            <span className={amber ? "text-due" : undefined}>{words.used[0].toUpperCase() + words.used.slice(1)}</span>, {words.left}.
+            <span className={amber ? "text-due" : undefined}>{words.usedSentence}</span> {words.leftSentence}
           </p>
           <p className="m-0 mt-1.5" data-testid="tutor-meter-levels">
             {words.levels}

@@ -5,6 +5,7 @@ import { ensureSessionFor } from "@/server/auth/session";
 import { notes, tutorMessages } from "@/server/db/schema/learn";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import {
+  answersLeftFor,
   budgetEur,
   budgetLeft,
   claudeAllowed,
@@ -147,38 +148,112 @@ describe("monthSpend and the budget", () => {
 
 describe("tutorMeter", () => {
   const NOW = new Date("2026-11-15T10:00:00Z");
+  const each = (level: "quick" | "balanced" | "deep") => costEur(`anthropic:${LEVEL_MODEL[level].id}`, DEFAULT_ANSWER_TOKENS[level]);
+
+  /** `n` answers of `use` on `model` for `userId`, one insert. */
+  async function answers(userId: string, model: string, n: number, use: { in?: number; out?: number }) {
+    const at = new Date("2026-11-10T08:00:00Z");
+    await t.db.insert(tutorMessages).values(
+      Array.from({ length: n }, () => ({
+        userId,
+        anchorKind: "general" as const,
+        role: "assistant" as const,
+        body: "a",
+        model,
+        tokensIn: use.in ?? 0,
+        tokensOut: use.out ?? 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        createdAt: at,
+      })),
+    );
+  }
+
+  it("the defaults: 3,000 uncached input tokens, 500 / 500 / 1,200 output", () => {
+    expect(DEFAULT_ANSWER_TOKENS).toEqual({
+      quick: { input: 3000, output: 500, cacheRead: 0, cacheWrite: 0 },
+      balanced: { input: 3000, output: 500, cacheRead: 0, cacheWrite: 0 },
+      deep: { input: 3000, output: 1200, cacheRead: 0, cacheWrite: 0 },
+    });
+    // Quick 0.0003 + 0.00025 USD, Balanced 0.006 + 0.005, Deep 0.024 + 0.048; times 0.92.
+    expect(each("quick")).toBeCloseTo(0.00055 * USD_TO_EUR, 12);
+    expect(each("balanced")).toBeCloseTo(0.011 * USD_TO_EUR, 12);
+    expect(each("deep")).toBeCloseTo(0.072 * USD_TO_EUR, 12);
+  });
 
   it("before she has any answers: the defaults, the reset date, and what is left", async () => {
     const { user } = await ensureSessionFor(t.db, undefined);
     const m = await tutorMeter(user.id, { ...KEY }, NOW, t.db);
     expect(m).toMatchObject({ usedEur: 0, budgetEur: 150, fraction: 0, resetsOn: "2026-12-01", paidAvailable: true });
-    for (const level of ["quick", "balanced", "deep"] as const) {
-      const each = costEur(`anthropic:${LEVEL_MODEL[level].id}`, DEFAULT_ANSWER_TOKENS[level]);
-      expect(m.levels[level]).toEqual({ answersLeft: Math.floor(150 / each), basis: "default" });
-    }
-    expect(m.levels.quick.answersLeft).toBeGreaterThan(m.levels.balanced.answersLeft);
-    expect(m.levels.balanced.answersLeft).toBeGreaterThan(m.levels.deep.answersLeft);
+    // A fresh month with 150 EUR: these are the figures the popover rounds.
+    expect(m.levels).toEqual({
+      quick: { answersLeft: 296_442, basis: "default" },
+      balanced: { answersLeft: 14_822, basis: "default" },
+      deep: { answersLeft: 2_264, basis: "default" },
+    });
     // The last day of November in Helsinki is still November; 22:00 UTC is 1 December there.
     expect((await tutorMeter(user.id, KEY, new Date("2026-11-30T21:59:00Z"), t.db)).resetsOn).toBe("2026-12-01");
     expect((await tutorMeter(user.id, KEY, new Date("2026-11-30T22:00:01Z"), t.db)).resetsOn).toBe("2027-01-01");
   });
 
-  it("uses her own averages per level (Go deeper counts as Deep), and everyone's spend for the bar", async () => {
+  it("two tiny answers do not move the estimate: still the default figures (the 490,000 Quick answers fault)", async () => {
+    const { user } = await ensureSessionFor(t.db, undefined);
+    await answers(user.id, "anthropic:claude-haiku-5-5", 2, { in: 40, out: 12 });
+    await answers(user.id, "anthropic:claude-sonnet-5-5", 2, { in: 40, out: 12 });
+    await answers(user.id, "anthropic:claude-fable-5-2", 2, { in: 40, out: 12 });
+    const m = await tutorMeter(user.id, KEY, NOW, t.db);
+    const left = 150 - m.usedEur;
+    expect(m.usedEur).toBeGreaterThan(0);
+    for (const level of ["quick", "balanced", "deep"] as const) {
+      expect(m.levels[level]).toEqual({ answersLeft: Math.floor(left / each(level)), basis: "default" });
+    }
+    // 29 is still too few.
+    await answers(user.id, "anthropic:claude-sonnet-5-5", 27, { in: 40, out: 12 });
+    expect((await tutorMeter(user.id, KEY, NOW, t.db)).levels.balanced.basis).toBe("default");
+  });
+
+  it("from 30 answers at a level: blends toward her own cost, weight n / (n + 30)", async () => {
     const { user: her } = await ensureSessionFor(t.db, undefined);
     const { user: other } = await ensureSessionFor(t.db, undefined);
-    await answer(her.id, "anthropic:claude-fable-5-2", new Date("2026-11-10T08:00:00Z"), { in: 1000, out: 2000 });
-    await answer(her.id, "anthropic:claude-fable-5-2", new Date("2026-11-11T08:00:00Z"), { in: 3000, out: 0 });
-    await answer(her.id, "anthropic:claude-fable-5-2", new Date("2026-10-11T08:00:00Z"), { out: 9_000_000 }); // last month
-    await answer(other.id, "anthropic:claude-sonnet-5-5", new Date("2026-11-12T08:00:00Z"), { out: 1_000_000 });
+    // 40 Balanced answers of 6,000 in and 1,000 out: 0.012 + 0.01 = 0.022 USD each, twice the default.
+    await answers(her.id, "anthropic:claude-sonnet-5-5", 40, { in: 6000, out: 1000 });
+    // Someone else's Deep answers count for the bar, not for her levels.
+    await answers(other.id, "anthropic:claude-fable-5-2", 50, { in: 6000, out: 1000 });
     const m = await tutorMeter(her.id, { ...KEY, TUTOR_BUDGET_EUR: "50" }, NOW, t.db);
-    const used = (0.004 * 8 + 0.002 * 40 + 10) * USD_TO_EUR;
+    const used = (40 * 0.022 + 50 * (0.048 + 0.04)) * USD_TO_EUR;
     expect(m.usedEur).toBeCloseTo(used, 6);
     expect(m.fraction).toBeCloseTo(used / 50, 6);
-    // Her average Deep answer: 2,000 in and 1,000 out.
-    const each = costEur("anthropic:claude-fable-5-2", { input: 2000, output: 1000, cacheRead: 0, cacheWrite: 0 });
-    expect(m.levels.deep).toEqual({ answersLeft: Math.floor((50 - used) / each), basis: "own" });
-    // The other user's Balanced answer is not hers: Balanced is still on the default.
-    expect(m.levels.balanced.basis).toBe("default");
+    const w = 40 / 70;
+    const blended = w * 0.022 * USD_TO_EUR + (1 - w) * each("balanced");
+    expect(m.levels.balanced).toEqual({ answersLeft: Math.floor((50 - used) / blended), basis: "own" });
+    expect(m.levels.balanced.answersLeft).toBeLessThan(Math.floor((50 - used) / each("balanced")));
+    expect(m.levels.deep).toEqual({ answersLeft: Math.floor((50 - used) / each("deep")), basis: "default" });
+  });
+
+  it("very short answers can never promise more than twice the default-based figure", async () => {
+    const { user } = await ensureSessionFor(t.db, undefined);
+    // 100 Quick answers of 10 output tokens: the blend alone would say about 1.2 million.
+    await answers(user.id, "anthropic:claude-haiku-5-5", 100, { out: 10 });
+    const m = await tutorMeter(user.id, KEY, NOW, t.db);
+    const left = 150 - m.usedEur;
+    const baseline = Math.floor(left / each("quick"));
+    const w = 100 / 130;
+    const blended = Math.floor(left / (w * costEur("anthropic:claude-haiku-5-5", { input: 0, output: 10, cacheRead: 0, cacheWrite: 0 }) + (1 - w) * each("quick")));
+    expect(blended).toBeGreaterThan(2 * baseline);
+    expect(m.levels.quick).toEqual({ answersLeft: 2 * baseline, basis: "own" });
+  });
+
+  it("answersLeftFor: the rule on its own", () => {
+    expect(answersLeftFor(100, 1, null)).toEqual({ answersLeft: 100, basis: "default" });
+    expect(answersLeftFor(100, 1, { n: 29, each: 0.01 })).toEqual({ answersLeft: 100, basis: "default" });
+    // 30 answers: w = 0.5. Own 3: each 2, 50 left. Own 0.5: each 0.75, 133.
+    expect(answersLeftFor(100, 1, { n: 30, each: 3 })).toEqual({ answersLeft: 50, basis: "own" });
+    expect(answersLeftFor(100, 1, { n: 30, each: 0.5 })).toEqual({ answersLeft: 133, basis: "own" });
+    // Own 0: each 0.5, 200 = exactly the ceiling; 300 answers of 0 would say 1,100, capped at 200.
+    expect(answersLeftFor(100, 1, { n: 30, each: 0 })).toEqual({ answersLeft: 200, basis: "own" });
+    expect(answersLeftFor(100, 1, { n: 300, each: 0 })).toEqual({ answersLeft: 200, basis: "own" });
+    expect(answersLeftFor(0, 1, null)).toEqual({ answersLeft: 0, basis: "default" });
+    expect(answersLeftFor(100, 0, null).answersLeft).toBe(0);
   });
 
   it("past the budget, or with no key or a broken budget: nothing left and no paid levels", async () => {

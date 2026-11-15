@@ -220,28 +220,58 @@ export async function tutorBudgetLine(env: Env = process.env, now: Date = new Da
  *
  * - The bar is ALL users' tutor spend this month against the one budget (`monthSpend`): it is
  *   Jazen's allowance, one key and one bill, so it is the same bar for everyone who sees it.
- * - "What is left at each level" uses HER answers this month: per level, her average tokens per
- *   answer priced at that level's model (`costEur`), then (budget - spend) / that. A level she has
- *   not used this month uses `DEFAULT_ANSWER_TOKENS` below. "Go deeper" answers count as Deep.
+ * - "What is left at each level" (Jazen, 2026-11-15, after the meter promised 490,000 Quick
+ *   answers from two short ones): never extrapolate from a handful of tiny answers.
+ *     default   the cost of one `DEFAULT_ANSWER_TOKENS` answer at that level's model, every
+ *               input token at the plain (uncached) input price, which is the dearest case.
+ *     baseline  floor(left / default), left = max(0, budget - everyone's spend this month).
+ *     n < 30    (her answers at that level this month, `BLEND_FROM`): the baseline only.
+ *     n >= 30   blend toward her own average cost per answer at that level, `own`:
+ *                 w     = n / (n + 30)               (0.5 at 30, 0.77 at 100, 0.91 at 300)
+ *                 each  = w * own + (1 - w) * default
+ *                 left  = floor(left / each), but never above 2 x baseline (`CEILING_TIMES`).
+ *               The default always keeps some weight, and the ceiling stops a run of very short
+ *               answers from promising more than twice the conservative figure. Answers longer
+ *               than the default lower the figure with no floor.
+ *   "Go deeper" answers count as Deep. The popover rounds the figure to two significant
+ *   figures and says "roughly" (src/components/tutor/tutor-controls.tsx).
  * - Everything here is an estimate; the popover says so.
  */
 
 /**
- * Tokens per answer before she has any at a level (chosen 2026-11-15 from the tutor's prompt:
- * rules plus a passage and its section are about 3,500 input tokens, most of it read from the
- * prompt cache after the first answer; answers run to roughly 70% of their cap, Deep's output
- * including its short thinking at effort "low").
+ * One answer before she has 30 at a level (chosen 2026-11-15): the context a lecture sends (the
+ * rules, the passage, its section, the lecture's key points and the last turns) is about 3,000
+ * input tokens, all counted as uncached; the output is the level's cap for Quick (500) and Deep
+ * (1,200, its short thinking included), and Balanced is held at 500 like Quick.
  */
 export const DEFAULT_ANSWER_TOKENS: Record<TutorLevel, TokenUse> = {
-  quick: { input: 2000, output: 350, cacheRead: 1500, cacheWrite: 500 },
-  balanced: { input: 2000, output: 550, cacheRead: 1500, cacheWrite: 500 },
-  deep: { input: 2000, output: 900, cacheRead: 1500, cacheWrite: 500 },
+  quick: { input: 3000, output: 500, cacheRead: 0, cacheWrite: 0 },
+  balanced: { input: 3000, output: 500, cacheRead: 0, cacheWrite: 0 },
+  deep: { input: 3000, output: 1200, cacheRead: 0, cacheWrite: 0 },
 };
 
+/** Her answers at a level this month before her own average counts at all. */
+export const BLEND_FROM = 30;
+/** The answers-left figure is never above this many times the default-based one. */
+export const CEILING_TIMES = 2;
+
+/**
+ * Answers left at one level: `left` euros, one default answer costing `defaultEach`, and her own
+ * `n` answers at that level this month averaging `ownEach` (see the block above).
+ */
+export function answersLeftFor(left: number, defaultEach: number, own: { n: number; each: number } | null): LevelLeft {
+  if (!(left > 0) || !(defaultEach > 0)) return { answersLeft: 0, basis: own && own.n >= BLEND_FROM ? "own" : "default" };
+  const baseline = Math.floor(left / defaultEach);
+  if (!own || own.n < BLEND_FROM) return { answersLeft: baseline, basis: "default" };
+  const w = own.n / (own.n + BLEND_FROM);
+  const each = w * Math.max(0, own.each) + (1 - w) * defaultEach;
+  return { answersLeft: Math.min(Math.floor(left / each), CEILING_TIMES * baseline), basis: "own" };
+}
+
 export type LevelLeft = {
-  /** About how many more answers at this level fit in what is left of the budget. */
+  /** About how many more answers at this level fit in what is left of the budget (`answersLeftFor`). */
   answersLeft: number;
-  /** "own": from her answers this month; "default": `DEFAULT_ANSWER_TOKENS`. */
+  /** "own": blended with her own answers (30 or more this month); "default": `DEFAULT_ANSWER_TOKENS` only. */
   basis: "own" | "default";
 };
 
@@ -264,12 +294,12 @@ function levelOf(model: string | null): TutorLevel | null {
   return TUTOR_LEVELS.find((l) => LEVEL_MODEL[l].id === id) ?? null;
 }
 
-/** Her answers this month on the Claude path: per level, the tokens of one average answer. */
+/** Her answers this month on the Claude path: per level, how many and the tokens of one average answer. */
 export async function ownAverages(
   userId: string,
   now: Date = new Date(),
   database: Db = defaultDb,
-): Promise<Partial<Record<TutorLevel, TokenUse>>> {
+): Promise<Partial<Record<TutorLevel, { n: number; use: TokenUse }>>> {
   const { start } = monthOf(now);
   const rows = await database
     .select({
@@ -302,10 +332,10 @@ export async function ownAverages(
     t.cacheWrite += num(r.cacheWrite);
     t.n += r.n;
   }
-  const out: Partial<Record<TutorLevel, TokenUse>> = {};
+  const out: Partial<Record<TutorLevel, { n: number; use: TokenUse }>> = {};
   for (const level of TUTOR_LEVELS) {
     const t = totals[level];
-    if (t) out[level] = { input: t.input / t.n, output: t.output / t.n, cacheRead: t.cacheRead / t.n, cacheWrite: t.cacheWrite / t.n };
+    if (t) out[level] = { n: t.n, use: { input: t.input / t.n, output: t.output / t.n, cacheRead: t.cacheRead / t.n, cacheWrite: t.cacheWrite / t.n } };
   }
   return out;
 }
@@ -327,9 +357,9 @@ export async function tutorMeter(
   const left = Math.max(0, budget - used);
   const levels = {} as Record<TutorLevel, LevelLeft>;
   for (const level of TUTOR_LEVELS) {
-    const use = own[level] ?? DEFAULT_ANSWER_TOKENS[level];
-    const each = costEur(`${ANTHROPIC_PREFIX}${LEVEL_MODEL[level].id}`, use);
-    levels[level] = { answersLeft: each > 0 ? Math.floor(left / each) : 0, basis: own[level] ? "own" : "default" };
+    const model = `${ANTHROPIC_PREFIX}${LEVEL_MODEL[level].id}`;
+    const mine = own[level];
+    levels[level] = answersLeftFor(left, costEur(model, DEFAULT_ANSWER_TOKENS[level]), mine ? { n: mine.n, each: costEur(model, mine.use) } : null);
   }
   return {
     usedEur: used,

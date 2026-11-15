@@ -22,7 +22,6 @@ import {
   type TutorChatViewProps,
 } from "./tutor-chat";
 import {
-  aboutCount,
   AMBER_FROM,
   ESTIMATE_LINE,
   FREE_LEVEL_LINE,
@@ -30,6 +29,7 @@ import {
   LEVEL_KEY,
   meterWords,
   resetDay,
+  roughCount,
   ZERO_LINE,
   type TutorMeter,
 } from "./tutor-controls";
@@ -473,9 +473,9 @@ const METER = (fraction: number, budget = 150): TutorMeter => ({
   resetsOn: "2026-12-01",
   paidAvailable: fraction < 1,
   levels: {
-    quick: { answersLeft: 338_123, basis: "own" },
-    balanced: { answersLeft: 14_321, basis: "default" },
-    deep: { answersLeft: 2_655, basis: "default" },
+    quick: { answersLeft: 296_442, basis: "default" },
+    balanced: { answersLeft: 14_822, basis: "default" },
+    deep: { answersLeft: 2_264, basis: "default" },
   },
 });
 
@@ -587,14 +587,48 @@ describe("the usage chip", () => {
     onCopy: () => {},
   };
 
-  it("words: about-counts, euros, the reset day", () => {
-    expect([aboutCount(7), aboutCount(338_123), aboutCount(14_321), aboutCount(2_655)]).toEqual(["7", "340,000", "14,000", "2,700"]);
+  it("counts: two significant figures, said as roughly", () => {
+    expect([roughCount(7), roughCount(87), roughCount(296_442), roughCount(14_822), roughCount(2_264), roughCount(995), roughCount(-3)]).toEqual([
+      "7",
+      "87",
+      "300,000",
+      "15,000",
+      "2,300",
+      "1,000",
+      "0",
+    ]);
+    expect(meterWords(METER(0.08)).levels).toBe("That is roughly 300,000 Quick answers, 15,000 Balanced, or 2,300 Deep ones.");
+    expect(meterWords(METER(1)).levels).toBe("Nothing is left for Claude this month.");
     expect(resetDay("2026-12-01")).toBe("1 Dec");
+    expect(meterWords(METER(0.08)).resets).toBe("Resets 1 Dec.");
+  });
+
+  it("euros: no 'About under' stutter anywhere the helpers are used", () => {
     const w = meterWords(METER(0.08));
-    expect(w.used).toBe("about 12 of 150 EUR used");
-    expect(w.levels).toBe("That is about 340,000 Quick answers, 14,000 Balanced, or 2,700 Deep ones.");
-    expect(w.resets).toBe("Resets 1 Dec.");
-    expect(meterWords({ ...METER(0.001), usedEur: 0.2 }).used).toBe("about under 1 of 150 EUR used");
+    expect([w.used, w.usedSentence, w.leftSentence]).toEqual(["about 12 of 150 EUR used", "About 12 of 150 EUR used.", "About 138 EUR left."]);
+    const small = meterWords({ ...METER(0.001), usedEur: 0.2 });
+    expect([small.usedSentence, small.leftSentence]).toEqual(["Less than 1 of 150 EUR used.", "About 149 EUR left."]);
+    expect(small.chipName).toBe("Tutor allowance this month: less than 1 of 150 EUR used. Show details");
+    const fresh = meterWords({ ...METER(0), usedEur: 0 });
+    expect([fresh.usedSentence, fresh.leftSentence]).toEqual(["0 of 150 EUR used.", "About 150 EUR left."]);
+    const nearly = meterWords({ ...METER(0.99), usedEur: 149.6 });
+    expect([nearly.usedSentence, nearly.leftSentence]).toEqual(["About 150 of 150 EUR used.", "Less than 1 EUR left."]);
+    const spent = meterWords({ ...METER(1), usedEur: 151 });
+    expect(spent.leftSentence).toBe("0 EUR left.");
+    for (const x of [w, small, fresh, nearly, spent]) {
+      expect(Object.values(x).join(" ")).not.toMatch(/about (under|less|0\b)|under 1/i);
+    }
+  });
+
+  it("the popover reads naturally under 1 EUR: chip name, bar and sentences", () => {
+    render(<TutorChatView {...base} meter={{ ...METER(0.001), usedEur: 0.2 }} meterOpen onMeterOpen={() => {}} />);
+    expect(screen.getByRole("button", { name: "Tutor allowance this month: less than 1 of 150 EUR used. Show details" })).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "Tutor allowance this month" });
+    expect(within(dialog).getByRole("meter").getAttribute("aria-valuetext")).toBe("less than 1 of 150 EUR used");
+    expect(screen.getByTestId("tutor-meter-used").textContent).toBe("Less than 1 of 150 EUR used. About 149 EUR left.");
+    expect(screen.getByTestId("tutor-meter-levels").textContent).toBe("That is roughly 300,000 Quick answers, 15,000 Balanced, or 2,300 Deep ones.");
+    expect(dialog.textContent).toContain(ESTIMATE_LINE);
+    expect(dialog.textContent).not.toMatch(/about under/i);
   });
 
   it("no meter (no key): no chip", () => {
@@ -618,8 +652,8 @@ describe("the usage chip", () => {
     expect(document.activeElement).toBe(dialog);
     const meter = within(dialog).getByRole("meter", { name: "Allowance used" });
     expect(meter.getAttribute("aria-valuetext")).toBe("about 12 of 150 EUR used");
-    expect(dialog.textContent).toContain("About 12 of 150 EUR used, about 138 EUR left.");
-    expect(dialog.textContent).toContain("340,000 Quick answers");
+    expect(dialog.textContent).toContain("About 12 of 150 EUR used. About 138 EUR left.");
+    expect(dialog.textContent).toContain("roughly 300,000 Quick answers");
     expect(dialog.textContent).toContain("Resets 1 Dec.");
     expect(dialog.textContent).toContain(ZERO_LINE);
     expect(ZERO_LINE).toBe("At zero, answers come from the free models until it resets.");

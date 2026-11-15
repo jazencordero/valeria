@@ -6,12 +6,14 @@
  * Both handles work: the one between the note and the chat, and (from 700 px) the panel's left
  * edge, whose width is remembered on this device. Under 700 px the panel is the modal sheet.
  *
- * States (buttons, or /dev/tutor#empty, #mid, #budget, #levels, #meter8, #meter85, #study):
+ * States (buttons, or /dev/tutor#empty, #mid, #budget, #levels, #meter0, #meter8, #meter85, #study):
  * - empty: a fresh highlight, the three starters (tap one: a made-up answer streams in);
  * - mid: an answer still arriving;
  * - budget: the month's tutor budget is spent, so the answer came from a free model, "Go deeper"
  *   is not offered, the picker is the one line "Free model this month" and the chip is full;
  * - levels: the picker with its three levels (Balanced chosen), an answer from the middle model;
+ * - meter0: a fresh month, 0.20 EUR used: "Less than 1 of 150 EUR used. About 149 EUR left." and
+ *   the default-based estimates (roughly 300,000 Quick, 15,000 Balanced, 2,300 Deep);
  * - meter8 / meter85: the usage chip's popover open at about 8% and about 85% (amber);
  * - study: the course's study-rule question (Yes / No / Not sure) above the chat.
  */
@@ -23,7 +25,7 @@ import type { TutorApi, TutorPreview } from "@/components/tutor/tutor-chat";
 import type { TutorMeter } from "@/components/tutor/tutor-controls";
 import { Button } from "@/components/ui/button";
 
-const DEMOS = ["empty", "mid", "budget", "levels", "meter8", "meter85", "study"] as const;
+const DEMOS = ["empty", "mid", "budget", "levels", "meter0", "meter8", "meter85", "study"] as const;
 type Demo = (typeof DEMOS)[number];
 
 const FAKE_NOTE = "00000000-0000-4000-8000-000000000001";
@@ -40,19 +42,23 @@ const ANSWER =
 const MIDDLE_MODEL = "anthropic:claude-sonnet-5-5";
 const COURSE = "00000000-0000-4000-8000-0000000000c1";
 
-/** A made-up allowance: `fraction` of 150 EUR used, the estimates scaled to what is left. */
-function meter(fraction: number): TutorMeter {
-  const left = 150 * (1 - fraction);
+/**
+ * A made-up allowance: `fraction` of 150 EUR used (or `usedEur`), the estimates from what is left
+ * at the default cost of one answer (src/server/tutor/budget.ts, `DEFAULT_ANSWER_TOKENS`, before
+ * she has 30 answers at a level): Quick 0.000506 EUR, Balanced 0.01012, Deep 0.06624.
+ */
+function meter(fraction: number, usedEur = 150 * fraction): TutorMeter {
+  const left = 150 - usedEur;
   return {
-    usedEur: 150 * fraction,
+    usedEur,
     budgetEur: 150,
     fraction,
     resetsOn: "2026-12-01",
     paidAvailable: fraction < 1,
     levels: {
-      quick: { answersLeft: Math.floor(left / 0.0004), basis: "own" },
-      balanced: { answersLeft: Math.floor(left / 0.0098), basis: "default" },
-      deep: { answersLeft: Math.floor(left / 0.052), basis: "default" },
+      quick: { answersLeft: Math.floor(left / 0.000506), basis: "default" },
+      balanced: { answersLeft: Math.floor(left / 0.01012), basis: "default" },
+      deep: { answersLeft: Math.floor(left / 0.06624), basis: "default" },
     },
   };
 }
@@ -81,6 +87,7 @@ const PREVIEWS: Record<Demo, TutorPreview> = {
     meter: meter(1),
   },
   levels: { turns: ANSWERED, deeperAvailable: true, level: "balanced", meter: meter(0.08), draft: "And with 5% instead?" },
+  meter0: { turns: ANSWERED, deeperAvailable: true, meter: meter(0.2 / 150, 0.2), meterOpen: true },
   meter8: { turns: ANSWERED, deeperAvailable: true, meter: meter(0.08), meterOpen: true },
   meter85: { turns: ANSWERED, deeperAvailable: true, level: "deep", meter: meter(0.85), meterOpen: true },
   study: {
@@ -178,6 +185,9 @@ export default function TutorDevPage() {
           </Button>
           <Button onClick={() => pick("levels")} data-testid="open-levels">
             Model picker
+          </Button>
+          <Button onClick={() => pick("meter0")} data-testid="open-meter0">
+            Allowance under 1 EUR
           </Button>
           <Button onClick={() => pick("meter8")} data-testid="open-meter8">
             Allowance 8%

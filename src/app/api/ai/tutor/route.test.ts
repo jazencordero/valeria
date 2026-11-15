@@ -462,7 +462,7 @@ describe("POST /api/ai/tutor", () => {
       expect(ai.calls).toHaveLength(0);
     });
 
-    it("the bar is everyone's spend against the one budget; the estimates are from her own answers", async () => {
+    it("the bar is everyone's spend against the one budget; the estimates stay on the defaults until she has 30 answers", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
       vi.stubEnv("TUTOR_BUDGET_EUR", "100");
       const s = await student();
@@ -492,8 +492,9 @@ describe("POST /api/ai/tutor", () => {
       expect(meter).toMatchObject({ budgetEur: 100, paidAvailable: true });
       expect(meter.fraction).toBeCloseTo(used / 100, 6);
       expect(meter.resetsOn).toMatch(/^\d{4}-\d{2}-01$/);
-      // Her Quick answer costs 1,000 x 0.50 USD / 1M = 0.0005 USD.
-      expect(meter.levels.quick).toEqual({ answersLeft: Math.floor((100 - used) / (0.0005 * 0.92)), basis: "own" });
+      // Two answers are too few (fewer than 30): Quick stays on the default, 3,000 in + 500 out.
+      const quickDefaultEur = ((3000 * 0.1 + 500 * 0.5) / 1e6) * 0.92;
+      expect(meter.levels.quick).toEqual({ answersLeft: Math.floor((100 - used) / quickDefaultEur), basis: "default" });
       expect(meter.levels.balanced.basis).toBe("default");
       expect(meter.levels.deep.basis).toBe("default");
       expect(meter.levels.balanced.answersLeft).toBeGreaterThan(meter.levels.deep.answersLeft);
