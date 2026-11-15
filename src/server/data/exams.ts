@@ -30,7 +30,7 @@
  * the cards then say "Starts Tue 24 Nov. Nothing to do here until then."
  * instead of a forecast, a verdict or a plan.
  */
-import { and, asc, eq, gte, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { dateLine, dayLine, dayMonth, daysBetween, startOfDay } from "@/lib/dates";
 import { listCourses } from "@/server/courses/store";
 import { db as defaultDb, type Db } from "@/server/db/client";
@@ -177,7 +177,9 @@ export async function getExamsView(
       .from(exams)
       .innerJoin(courses, eq(courses.id, exams.courseId))
       .where(and(eq(exams.userId, userId), eq(courses.userId, userId), eq(courses.hidden, false), examNotPast(now)))
-      .orderBy(asc(exams.at), asc(exams.createdAt), asc(exams.id)),
+      // Soonest first. At the same instant a whole-day exam comes before one with a real time
+      // (its stored time is only a stand-in), then the older row.
+      .orderBy(asc(exams.at), desc(exams.timeIsPlaceholder), asc(exams.createdAt), asc(exams.id)),
     listCourses(userId, database, now),
   ]);
   const formCourses = courseList.map((c) => ({ id: c.id, name: shortNameOf(c.name) }));
