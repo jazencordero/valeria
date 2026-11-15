@@ -16,6 +16,13 @@
  *   (M9-05: no breath, no sections) is "ready" with only the end block.
  * - Sections: M9-05's `[kind, …]` blocks become the reader's blocks; the
  *   slide range ("slides 2–5") is shown in capitals, "SLIDES 2–5".
+ * - Teaching parts (M9-26): a hand-made page may store a first entry
+ *   `{kind: "startHere", blocks, minutesWithHelp?}` in `lecture_content.sections`
+ *   (`storedSections`, src/server/study/import-bundle.ts). `pagePartsOf` takes
+ *   it out, so `sections` holds real sections only and their order and count
+ *   are what they were; a section's own `keyPoints`, `fromScratch`, `stuck`
+ *   and `example` come through when they have the right shape and are left
+ *   out otherwise. A page the AI job wrote has none of them.
  * - "From n slides": the file's page count (`file_pages`), else the number
  *   of slide titles.
  * - Cards: the count `lectureCards` gives (src/server/study/lecture-session.ts),
@@ -57,6 +64,10 @@ export type LecturePageData = {
   /** Not posted: "Mon 16 Nov". */
   opensOn: string | null;
   minutes: number | null;
+  /** Reading time with every piece of help open; null when the page gives none. */
+  minutesWithHelp: number | null;
+  /** "Start here" blocks; empty when the page has none. */
+  startHere: LectureBlock[];
   slideCount: number | null;
   breath: string | null;
   sections: LectureSection[];
@@ -98,16 +109,51 @@ export function blocksOf(raw: unknown): LectureBlock[] {
   return out;
 }
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const text = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+/** The stored "start here" entry (M9-26), which is not a section. */
+const isStartHere = (v: unknown): v is Record<string, unknown> => isRecord(v) && v.kind === "startHere";
+
+function exampleOf(raw: unknown): LectureSection["example"] {
+  if (!isRecord(raw) || !text(raw.title) || !text(raw.result) || !Array.isArray(raw.steps)) return undefined;
+  return { title: raw.title, steps: raw.steps.filter(text), result: raw.result };
+}
+
+/** The sections of a stored page. The "start here" entry is not one of them. */
 export function sectionsOf(raw: unknown): LectureSection[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((s): s is Record<string, unknown> => typeof s === "object" && s !== null)
-    .map((s) => ({
-      heading: typeof s.heading === "string" ? s.heading : "",
-      blocks: blocksOf(s.blocks),
-      terms: Array.isArray(s.terms) ? s.terms.filter((t): t is string => typeof t === "string") : [],
-      source: typeof s.slides === "string" ? s.slides.toUpperCase() : "",
-    }));
+    .filter((s): s is Record<string, unknown> => typeof s === "object" && s !== null && !isStartHere(s))
+    .map((s) => {
+      const section: LectureSection = {
+        heading: typeof s.heading === "string" ? s.heading : "",
+        blocks: blocksOf(s.blocks),
+        terms: Array.isArray(s.terms) ? s.terms.filter((t): t is string => typeof t === "string") : [],
+        source: typeof s.slides === "string" ? s.slides.toUpperCase() : "",
+      };
+      const keyPoints = Array.isArray(s.keyPoints) ? s.keyPoints.filter(text) : [];
+      if (keyPoints.length) section.keyPoints = keyPoints;
+      const fromScratch = blocksOf(s.fromScratch);
+      if (fromScratch.length) section.fromScratch = fromScratch;
+      const stuck = Array.isArray(s.stuck)
+        ? s.stuck.filter(isRecord).flatMap((x) => (text(x.q) && text(x.a) ? [{ q: x.q, a: x.a }] : []))
+        : [];
+      if (stuck.length) section.stuck = stuck;
+      const example = exampleOf(s.example);
+      if (example) section.example = example;
+      return section;
+    });
+}
+
+/** A stored page's three parts: "start here", the time with all the help, and the sections. */
+export function pagePartsOf(raw: unknown): { startHere: LectureBlock[]; minutesWithHelp: number | null; sections: LectureSection[] } {
+  const first = Array.isArray(raw) ? raw.find(isStartHere) : undefined;
+  const m = first?.minutesWithHelp;
+  return {
+    startHere: first ? blocksOf(first.blocks) : [],
+    minutesWithHelp: typeof m === "number" && Number.isInteger(m) && m > 0 ? m : null,
+    sections: sectionsOf(raw),
+  };
 }
 
 const DAY = new Intl.DateTimeFormat("en-GB", { timeZone: TIME_ZONE, weekday: "short", day: "numeric", month: "short" });
@@ -172,6 +218,7 @@ export async function getLecturePage(
 
   const href = lectureHref(courseId, n);
   const status: LecturePageData["status"] = lecture.state === "soon" ? "not-posted" : content ? "ready" : "writing";
+  const parts = pagePartsOf(content?.sections);
   const slideTitles = content ? (content.slideTitles ?? []).filter((t): t is string => typeof t === "string") : [];
   const pageCount = pages ? Number(pages.n) : 0;
   const cards = picked.cardIds.length;
@@ -188,9 +235,11 @@ export async function getLecturePage(
     file: status === "not-posted" ? null : (file ?? null),
     opensOn: lecture.opensAt ? dayText(lecture.opensAt) : null,
     minutes: content?.minutes ?? null,
+    minutesWithHelp: parts.minutesWithHelp,
+    startHere: parts.startHere,
     slideCount: pageCount || slideTitles.length || null,
     breath: content?.breath ?? null,
-    sections: content ? sectionsOf(content.sections) : [],
+    sections: parts.sections,
     slideTitles,
     cards,
     practiseHref: cards > 0 ? practiseHref(lecture.id, href) : null,

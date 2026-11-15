@@ -36,6 +36,19 @@
  *   the notepad with it as the quote. Stored highlights are read when the
  *   page opens (`lectureHighlights`) and re-applied by matching the text.
  *
+ * - Help that opens on request (M9-26, the reader's "Start here", "Explain it
+ *   from the start", "Worked example", "If you're stuck"). "Start here" is
+ *   open while `lecture.read` is false, the same read mark as everything
+ *   else here. Reading progress counts the main text only: the progress hook
+ *   reads its numbers from an unseen stand-in for the main column
+ *   (`useMainTextScroll`) that is as tall as the page without its open help
+ *   and scrolled as far as she is through the rest. With no help open the
+ *   numbers are the main column's own. So opening help never moves the bar
+ *   back, and the lecture is marked read at the end of the main text
+ *   whatever is open. Selecting text works inside every part (they sit in
+ *   the lecture text); a part's stored highlights are put back each time it
+ *   opens, since a closed part's text is not in the page.
+ *
  * Plain data in. `markRead`, `remove`, `saveHl` and `loadHl` default to the
  * real actions; a preview can pass stand-ins.
  *
@@ -44,7 +57,7 @@
  * (M9-22).
  */
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type RefObject } from "react";
 import { markLectureRead, type MarkReadResult } from "@/app/(app)/courses/[id]/lectures/[n]/actions";
 import {
   lectureHighlights,
@@ -101,6 +114,77 @@ function useExamBack(): string | null {
   );
 }
 
+/** An open piece of help in the reader (it marks them `data-lec-help`). */
+const OPEN_HELP = "[data-lec-help]";
+
+/**
+ * What the main column's scroll would be without the open help.
+ * `helps` are the open parts as [top, bottom] in the same coordinates as `viewBottom`.
+ * Help above the bottom edge of the view (read past, or on screen) is taken off the scroll
+ * position; all of it is taken off the height. Nothing open: the numbers as they are.
+ */
+export function mainTextScroll(
+  scroll: { top: number; height: number; client: number },
+  viewBottom: number,
+  helps: readonly (readonly [number, number])[],
+): { top: number; height: number } {
+  let total = 0;
+  let passed = 0;
+  for (const [top, bottom] of helps) {
+    total += Math.max(0, bottom - top);
+    passed += Math.max(0, Math.min(bottom, viewBottom) - top);
+  }
+  return { top: Math.max(0, scroll.top - passed), height: Math.max(scroll.client, scroll.height - total) };
+}
+
+/**
+ * Gives the ref of an unseen box (with one child) and keeps it scrolled like `main` would be
+ * without its open help, so `useReadProgress` can measure the main text only. Follows
+ * scrolling, resizing and the reader changing size (help opening or closing).
+ */
+function useMainTextScroll(main: RefObject<HTMLElement | null>, reader: RefObject<HTMLElement | null>): RefObject<HTMLDivElement | null> {
+  const mirror = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = main.current;
+    const box = mirror.current;
+    const fill = box?.firstElementChild as HTMLElement | null | undefined;
+    if (!el || !box || !fill) return;
+    let frame: number | null = null;
+
+    const sync = () => {
+      frame = null;
+      const viewBottom = el.getBoundingClientRect().top + el.clientHeight;
+      const helps = Array.from(el.querySelectorAll<HTMLElement>(OPEN_HELP), (h) => {
+        const r = h.getBoundingClientRect();
+        return [r.top, r.bottom] as const;
+      });
+      const m = mainTextScroll({ top: el.scrollTop, height: el.scrollHeight, client: el.clientHeight }, viewBottom, helps);
+      box.style.height = `${el.clientHeight}px`;
+      fill.style.height = `${m.height}px`;
+      box.scrollTop = m.top;
+      // The height can change with the position staying put; tell the progress hook either way.
+      box.dispatchEvent(new Event("scroll"));
+    };
+    const schedule = () => {
+      if (frame === null) frame = requestAnimationFrame(sync);
+    };
+
+    sync();
+    el.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
+    observer?.observe(el);
+    if (reader.current) observer?.observe(reader.current);
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      el.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      observer?.disconnect();
+    };
+  }, [main, reader]);
+  return mirror;
+}
+
 /** The selected tab of the reader inside `root`. */
 function selectedView(root: HTMLElement): LectureView | null {
   const tab = root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
@@ -121,19 +205,26 @@ export function LecturePage({
   const readerRef = useRef<HTMLDivElement | null>(null);
   const [view, setView] = useState<LectureView>("read");
   const [read, setRead] = useState(lecture.read);
+  // Goes up each time a piece of help opens, so its stored highlights are put back.
+  const [helpOpened, setHelpOpened] = useState(0);
 
   // Before the progress hook's effect: the element that scrolls is the app's main column.
   useEffect(() => {
     main.current = document.getElementById("main");
   }, []);
+  const mirror = useMainTextScroll(main, readerRef);
 
-  // Follow the reader's tabs.
+  // Follow the reader's tabs, and its help opening.
   useEffect(() => {
     const root = readerRef.current;
     if (!root) return;
-    const sync = () => {
+    const sync = (records: MutationRecord[] = []) => {
       const v = selectedView(root);
       if (v) setView(v);
+      const opened = records.some((r) =>
+        Array.from(r.addedNodes).some((node) => node instanceof Element && (node.matches(OPEN_HELP) || node.querySelector(OPEN_HELP))),
+      );
+      if (opened) setHelpOpened((k) => k + 1);
     };
     sync();
     const observer = new MutationObserver(sync);
@@ -151,7 +242,7 @@ export function LecturePage({
   }, [markRead, lecture.lectureId]);
 
   const progress = useReadProgress({
-    ref: main,
+    ref: mirror,
     view,
     onRead,
     enabled: !lecture.read && lecture.status === "ready",
@@ -168,6 +259,9 @@ export function LecturePage({
   const notes = useLectureNotes(lecture.notes, remove);
   const examBack = useExamBack();
   const highlights = useHighlights(lecture.lectureId, saveHl, loadHl);
+  // A new list each time help opens: `SelectNote` marks stored highlights again when its list changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `helpOpened` is the reason to make a new list
+  const highlightList = useMemo(() => [...highlights.list], [highlights.list, helpOpened]);
 
   return (
     <div className="mx-auto max-w-[720px] px-[var(--pad)] pb-10">
@@ -194,6 +288,16 @@ export function LecturePage({
         </span>
       </StickyHeader>
 
+      {/* Unseen: the main column's scroll without its open help, for the reading progress. */}
+      <div
+        ref={mirror}
+        aria-hidden="true"
+        data-testid="lec-main-text"
+        className="pointer-events-none invisible fixed top-0 left-0 w-px overflow-hidden"
+      >
+        <div />
+      </div>
+
       <div ref={readerRef} className="relative" onClickCapture={onClickCapture}>
         <LectureReader
           course={lecture.course}
@@ -204,6 +308,8 @@ export function LecturePage({
           file={lecture.file}
           opensOn={lecture.opensOn}
           minutes={lecture.minutes ?? undefined}
+          minutesWithHelp={lecture.minutesWithHelp}
+          startHere={lecture.startHere}
           slideCount={lecture.slideCount ?? undefined}
           breath={lecture.breath ?? undefined}
           sections={lecture.sections}
@@ -218,7 +324,7 @@ export function LecturePage({
         <SelectNote
           containerRef={readerRef}
           active={view === "read" && lecture.status === "ready"}
-          highlights={highlights.list}
+          highlights={highlightList}
           onAdd={highlights.add}
         />
       </div>

@@ -40,6 +40,46 @@
 .lec-reader .lec-deflist div{ display: grid; gap: 2px; }
 .lec-reader .lec-deflist dt{ font-weight: 600; }
 .lec-reader .lec-deflist dd{ margin: 0; color: var(--ink-2); }
+/* Key points: always visible, set apart from the text (M9-26). */
+.lec-reader .lec-key{ margin-top: 14px; padding: 14px 18px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); font-size: 16px; line-height: 1.5; }
+.lec-reader .lec-key .mono{ margin-top: 0; color: var(--ink-3); }
+.lec-reader .lec-key ul{ margin-top: 8px; }
+
+/*
+ * Help that opens on request (M9-26): "Start here", "Explain it from the start",
+ * "Worked example", "If you're stuck". Rows in one bordered box; a row's content
+ * opens right under its button, so nothing above it moves.
+ */
+.lec-reader .lec-help{ margin-top: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); overflow: hidden; }
+.lec-reader .lec-start{ margin-top: 0; margin-bottom: 16px; }
+.lec-reader .lec-help-item + .lec-help-item{ border-top: 1px solid var(--line); }
+.lec-reader .lec-help-btn{ display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 48px; padding: 8px 16px; border: 0; border-radius: 0; background: none; color: var(--ink); font: inherit; font-size: 15px; font-weight: 600; line-height: 1.35; text-align: left; cursor: pointer; }
+.lec-reader .lec-help-btn:hover{ background: var(--paper); }
+.lec-reader .lec-help-btn:focus-visible{ outline: 2px solid var(--ink); outline-offset: -2px; border-radius: 12px; }
+.lec-reader .lec-help-chev{ flex: none; color: var(--ink-3); transition: transform var(--t-quick, 180ms) ease-out; }
+.lec-reader .lec-help-btn[aria-expanded="true"] .lec-help-chev{ transform: rotate(180deg); }
+.lec-reader .lec-help-body{ overflow: hidden; overflow: clip; }
+.lec-reader .lec-help-in{ padding: 0 16px 16px; font-size: 16px; line-height: 1.55; }
+.lec-reader .lec-help-in > :first-child{ margin-top: 0; }
+.lec-reader .lec-help-in p{ margin-top: 10px; }
+.lec-reader .lec-help-in ul{ margin-top: 10px; padding-left: 22px; list-style: disc; }
+.lec-reader .lec-help-in li + li{ margin-top: 6px; }
+.lec-reader .lec-ex-title{ font-weight: 600; }
+.lec-reader .lec-help-in .lec-ex-steps{ margin-top: 10px; padding-left: 24px; list-style: decimal; }
+.lec-reader .lec-ex-result{ margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: var(--mint); }
+.lec-reader .lec-ex-result .mono{ color: var(--ink-2); }
+.lec-reader .lec-help-in .lec-ex-result p{ margin-top: 0; }
+.lec-reader .lec-help-in .lec-ex-result p + p{ margin-top: 4px; }
+/* Questions inside "If you're stuck": lighter rows, each opening its own answer. */
+.lec-reader .lec-stuck{ border: 1px solid var(--line); border-radius: 12px; background: var(--paper); overflow: hidden; }
+.lec-reader .lec-help-sub .lec-help-btn{ min-height: 44px; padding: 8px 14px; font-size: 15px; font-weight: 500; }
+.lec-reader .lec-help-sub .lec-help-btn:hover{ background: var(--surface); }
+.lec-reader .lec-help-sub .lec-help-in{ padding: 0 14px 14px; color: var(--ink-2); }
+@media (prefers-reduced-motion: reduce){
+  .lec-reader .lec-help-chev{ transition: none; }
+}
+[data-fast] .lec-reader .lec-help-chev{ transition: none; }
+
 .lec-reader .lec-terms{ display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 16px; }
 .lec-reader .lec-terms-l{ width: 100%; color: var(--ink-3); }
 .lec-reader .lec-term{ padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; line-height: 1.4; color: var(--ink-2); }
