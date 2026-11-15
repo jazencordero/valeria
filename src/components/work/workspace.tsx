@@ -39,10 +39,17 @@
  * After the hand-in: a receipt line in the chat ("Handed in to <LMS> at
  * 15:52."), the due line reads "Handed in 15:52" and the chip "Back to home".
  *
- * Cut: no open-from-card transition (M4-14).
+ * M4-13: the workspace opens out of the card she pressed Start on and the
+ * back arrow shrinks it into that card again (`@/lib/motion/shared`, which
+ * describes the whole transition). Here: `playArrival` when it mounts,
+ * `closeWork` on the back arrow until the hand-in (after it Home rearranges
+ * itself, M4-12, so the arrow is a plain link), and `holdShell` while it is
+ * on screen: the sidebar stays visible but inert, and under 700 px the tab
+ * bar goes away so the workspace covers everything. The header is the shared
+ * `StickyHeader`.
  */
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   confirmHandinAction,
   prepareHandinAction,
@@ -60,6 +67,9 @@ import { FilePick } from "@/components/work/file-pick";
 import { HandinSheet, type HandinReview, type Result } from "@/components/work/handin-sheet";
 import { SourceChips, SourcesColumn, type SourceFile } from "@/components/work/sources";
 import { Button } from "@/components/ui/button";
+import { StickyHeader } from "@/components/ui/sticky-header";
+import { WORK_TRANSITION_CSS, closeWork, holdShell, playArrival } from "@/lib/motion/shared";
+import { useMotionMode } from "@/lib/motion/use-calm";
 import { assignmentHelp, type AiAssignments } from "@/lib/ai-policy";
 import { nextSuggestion } from "@/lib/chat/suggest";
 import { listDate, sameDay, timeLeft } from "@/lib/dates";
@@ -481,6 +491,15 @@ export function Workspace({
     observer.observe(area);
     return () => observer.disconnect();
   }, []);
+
+  // M4-13: the shell steps back while the workspace is on screen, and the
+  // workspace plays its side of the open if Start led here.
+  const mode = useMotionMode();
+  useLayoutEffect(() => holdShell(), []);
+  useLayoutEffect(() => {
+    if (root.current) playArrival(root.current);
+  }, []);
+
   const [lastInput, setLastInput] = useState(0);
   const [note, setNote] = useState<Problem | null>(null);
 
@@ -726,10 +745,21 @@ export function Workspace({
 
   return (
     <div ref={root} className="flex h-full min-h-0" data-testid="workspace">
+      <style href="ready-work-transition" precedence="default">
+        {WORK_TRANSITION_CSS}
+      </style>
       <SourcesColumn files={sources} lmsName={lms} />
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-[2] flex flex-none items-center gap-1 border-b border-line bg-surface pt-[max(10px,env(safe-area-inset-top,0px))] pr-[var(--pad)] pb-2.5 pl-[max(6px,calc(var(--pad)-14px))] min-[700px]:pl-4">
-          <Button variant="icon" href={homeHref} aria-label="Back to home">
+        <StickyHeader
+          padTop="10px"
+          className="flex flex-none items-center gap-1 border-b border-line pr-[var(--pad)] pb-2.5 pl-[max(6px,calc(var(--pad)-14px))] min-[700px]:pl-4"
+        >
+          <Button
+            variant="icon"
+            href={homeHref}
+            aria-label="Back to home"
+            onClick={handed ? undefined : (e) => closeWork(e, mode, root.current)}
+          >
             <BackIcon />
           </Button>
           <div className="min-w-0">
@@ -745,7 +775,7 @@ export function Workspace({
               {dueText(dueAt, handed, now)}
             </p>
           </div>
-        </header>
+        </StickyHeader>
         <SourceChips files={sources} lmsName={lms} className="flex-none" />
 
         {chatOn ? (
