@@ -34,8 +34,11 @@
  *   changed herself.
  * - Other dates from `events`, except where another row already says it: an event an exam
  *   links to (the exam is listed instead), a Moodle `deadline` event (Moodle's calendar copy of
- *   an assignment, which the assignment row covers and knows whether it is handed in), and
- *   `other` events (not a deadline, exam or quiz).
+ *   an assignment, which the assignment row covers and knows whether it is handed in), a
+ *   `deadline` event of any source at the very time one of her assignments in the same course is
+ *   due (a hand-made account file lists the calendar's copy of each assignment as its own entry:
+ *   without this every deadline, and every reminder for it, comes twice), and `other` events
+ *   (not a deadline, exam or quiz).
  */
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
@@ -182,9 +185,18 @@ export async function itemsForUser(userId: string, database: Db = defaultDb): Pr
     .where(and(eq(exams.userId, userId), isNotNull(exams.eventId)));
   const covered = new Set(linked.map((row) => row.eventId));
 
+  // Every dated assignment of hers, handed in or not: a deadline event at the same time in the
+  // same course is that assignment's calendar copy.
+  const dueTimes = await database
+    .select({ courseId: assignments.courseId, at: assignments.dueAt })
+    .from(assignments)
+    .where(and(eq(assignments.userId, userId), isNotNull(assignments.dueAt)));
+  const assignmentAt = new Set(dueTimes.map((a) => `${a.courseId}|${a.at?.getTime()}`));
+
   const eventRows = await database
     .select({
       id: events.id,
+      courseId: events.courseId,
       kind: events.kind,
       source: events.source,
       title: events.title,
@@ -215,6 +227,7 @@ export async function itemsForUser(userId: string, database: Db = defaultDb): Pr
   for (const e of eventRows) {
     if (covered.has(e.id)) continue;
     if (e.kind === "deadline" && e.source === "moodle") continue;
+    if (e.kind === "deadline" && e.courseId && assignmentAt.has(`${e.courseId}|${e.at.getTime()}`)) continue;
     if (e.kind === "other") continue;
     items.push({ id: e.id, kind: e.kind, title: e.title, course: courseLabel(e), at: e.at });
   }

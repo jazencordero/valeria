@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "@/server/db/client";
 import { calendarFeeds, events } from "@/server/db/schema/calendar";
@@ -23,7 +24,7 @@ vi.mock("@/server/db/client", async (importOriginal) => {
 });
 
 const { GET } = await import("@/app/api/cal/[token]/route");
-const { createFeed, hashToken, itemsForToken, revokeFeed, subscribeLinks, userForToken } = await import("./feed");
+const { createFeed, hashToken, itemsForToken, itemsForUser, revokeFeed, subscribeLinks, userForToken } = await import("./feed");
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 120_000 });
 
@@ -186,6 +187,29 @@ describe("GET /api/cal/[token]", () => {
     expect(body).not.toContain("Lecture A");
     // The Moodle copy of the assignment is not listed a second time.
     expect(body.match(/SUMMARY:Due: Essay A/g)).toHaveLength(1);
+  });
+});
+
+describe("itemsForUser: an assignment's calendar copy", () => {
+  it("lists a deadline once when a hand-made entry repeats an assignment's due time", async () => {
+    const userId = await seedUser("A");
+    const [course] = await t.db.select().from(courses).where(and(eq(courses.userId, userId), eq(courses.hidden, false)));
+    const LATER = new Date(SOON.getTime() + 5 * DAY);
+    await t.db.insert(events).values([
+      // The calendar's copy of "Essay A" (open) and of "Handed A" (handed in), under their calendar titles.
+      { userId, courseId: course.id, kind: "deadline", title: "Essay A is due", startsAt: SOON, source: "manual", moodleRef: "seed:1" },
+      // A deadline of the same course at a time no assignment has: her own entry, kept.
+      { userId, courseId: course.id, kind: "deadline", title: "Peer review A", startsAt: LATER, source: "manual", moodleRef: "seed:2" },
+      // A quiz closing at the same time as the assignment is its own thing, kept.
+      { userId, courseId: course.id, kind: "quiz", title: "Essay A: quiz closes", startsAt: SOON, source: "manual", moodleRef: "seed:3" },
+    ]);
+    const titles = (await itemsForUser(userId, t.db)).map((i) => i.title);
+    expect(titles).not.toContain("Essay A is due");
+    expect(titles.filter((x) => x === "Essay A")).toHaveLength(1);
+    expect(titles).toContain("Peer review A");
+    expect(titles).toContain("Essay A: quiz closes");
+    // The entry with no course at the same time (seedUser's "Own A") is still hers.
+    expect(titles).toContain("Own A");
   });
 });
 
