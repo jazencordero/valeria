@@ -62,7 +62,7 @@ test("read a lecture, note it, turn the note into cards", async ({ page }) => {
   }).toPass({ timeout: 15_000 });
 
   // A two-line note on this lecture.
-  await page.getByRole("button", { name: "Notepad" }).click();
+  await page.getByRole("button", { name: "Notes, open the notepad" }).click();
   const pad = page.getByRole("dialog", { name: "Notepad" });
   await expect(pad).toBeVisible();
   await pad.getByLabel("Note", { exact: true }).fill(NOTE_LINES.join("\n"));

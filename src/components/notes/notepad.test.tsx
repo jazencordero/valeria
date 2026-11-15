@@ -72,7 +72,7 @@ async function flush(ms = 0) {
 }
 
 async function openPad() {
-  fireEvent.click(screen.getByRole("button", { name: "Notepad" }));
+  fireEvent.click(screen.getByRole("button", { name: "Notes, open the notepad" }));
   await flush(20);
   return screen.getByRole("dialog", { name: "Notepad" });
 }
@@ -210,10 +210,10 @@ describe("Notepad", () => {
 
   it("hides the button during a study session and while the drawer is open", async () => {
     const { rerender } = render(<NotepadView pathname="/study/abc" actions={fakeActions()} />);
-    expect(screen.queryByRole("button", { name: "Notepad" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Notes, open the notepad" })).toBeNull();
     rerender(<NotepadView pathname="/home" actions={fakeActions()} />);
     await openPad();
-    expect(screen.queryByRole("button", { name: "Notepad" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Notes, open the notepad" })).toBeNull();
   });
 
   it("List starts the line with a dash, Highlight toggles the marker", async () => {
@@ -232,9 +232,9 @@ describe("Notepad", () => {
     wide = true;
     render(<NotepadView pathname="/home" actions={fakeActions()} />);
     await flush(10);
-    expect(screen.getByRole("button", { name: "Notepad" }).textContent).toContain("Notes");
+    expect(screen.getByRole("button", { name: "Notes, open the notepad" }).textContent).toContain("Notes");
     await flush(4500);
-    expect(screen.getByRole("button", { name: "Notepad" }).textContent).not.toContain("Notes");
+    expect(screen.getByRole("button", { name: "Notes, open the notepad" }).textContent).not.toContain("Notes");
     expect(localStorage.getItem("ready-notes-hint")).toBe("1");
   });
 });

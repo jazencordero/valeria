@@ -712,7 +712,7 @@ export function NotepadView({ pathname, actions }: NotepadViewProps) {
       ref={fabRef}
       type="button"
       className={`pad-fab${onAssignment ? " high" : ""}${hint ? " hint" : ""}`}
-      aria-label="Notepad"
+      aria-label="Notes, open the notepad"
       aria-keyshortcuts="N"
       aria-expanded={open}
       aria-controls="notepad"
