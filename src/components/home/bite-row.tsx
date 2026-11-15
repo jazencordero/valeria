@@ -9,7 +9,8 @@
  * - "bite": the bite doodle, "Or a 5-minute bite for Friday's exam",
  *   "8 CARDS · +4% FORECAST" and "Start". The whole row links to the session.
  *   `first` (nothing is open, so the bite is the DO FIRST card) drops the
- *   "Or": "A 5-minute bite for Friday's exam".
+ *   "Or": "A 5-minute bite for Friday's exam". A paced exam adds one line
+ *   under it: "3 bites today keeps you on track for Monday".
  * - "done": the cup doodle, "Today's bites are done", "FORECAST 68% · FRIDAY"
  *   and "Open", linking to the exam.
  *
@@ -38,6 +39,8 @@ export type BiteRowProps =
       href: string;
       /** The bite is the DO FIRST card: no "Or". */
       first?: boolean;
+      /** A paced exam: how many bites today keeps her on plan, one sentence. */
+      pace?: string;
       className?: string;
     }
   | {
@@ -88,6 +91,7 @@ export function BiteRow(props: BiteRowProps) {
       <span className="grid min-w-0 gap-0.5">
         <span className="text-[15px] font-semibold">{title}</span>
         <span className="mono text-[11px] text-ink-3">{meta}</span>
+        {!done && props.pace ? <span className="text-[12px] text-ink-2">{props.pace}</span> : null}
       </span>
       <span className="inline-flex items-center gap-0.5 text-[13px] font-semibold">
         {done ? "Open" : "Start"}

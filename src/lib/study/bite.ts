@@ -44,13 +44,34 @@
  * `null` when today's plan is done (2 bites a day for an exam, 1 for a quiz)
  * or when the deck has nothing to put in a bite.
  *
+ * Core-first pace (`./pace`), only for an exam whose deck has core marks. A
+ * bite is then built from what is due or new, nothing else:
+ * - warm: up to 4 due reviews, most overdue first.
+ * - learn: the next new cards of the plan (`newQueue`: core cards first), up
+ *   to 5, and never more than today's budget has left. With no new card to
+ *   serve (the budget is used, or it is past the cut-off) learn holds the
+ *   next due reviews instead, up to 4.
+ * - boss: the boss cards among those new cards (a boss card has its place in
+ *   the plan's order like any other card); with none, one boss card that is
+ *   due, the most overdue (more of them when the bite is otherwise short of
+ *   8 cards).
+ * Past the cut-off (reviews only) "due" means due by the end of today, so the
+ * day's reviews come as full bites.
+ * The number of bites done today does not end the day: the next bite is there
+ * as long as today's budget has new cards left or something is due. Past the
+ * cut-off every session kind is reviews only: tiles, concept practice and
+ * extra are built from the cards she has graded. Before the cut-off an extra
+ * session is the next 5 new cards of the plan, whatever the budget.
+ *
  * `minutes = max(2, round(n * 0.6))`; `gainEstimate = max(2, round(n * 0.85))`
  * is the prototype's display formula, shown as "about".
  */
 
+import { startOfDay } from "../dates";
 import { aimedDue, type Time } from "./exam-aim";
 import { conceptMastery, focusConcept, rungOf } from "./ladder";
 import { newCard, type MemoryState } from "./memory";
+import { isPaced, newQueue, paceOf, reviewsOnly } from "./pace";
 
 /** Card types, as in the prototype's TYPE_NAMES. */
 export type CardType = "basic" | "cloze" | "explain" | "mcq" | "match";
@@ -102,6 +123,15 @@ export type Deck = {
   concepts: readonly BiteConcept[];
   examAt: Time;
   now: Time;
+  /** Exam or quiz. Only an exam can be paced (`./pace`); left out, the deck is never paced. */
+  kind?: ExamKind;
+  /** Ids of the cards she met for the first time today (Helsinki day), for today's budget. */
+  newToday?: readonly string[];
+  /**
+   * Whether the whole deck has core marks, for a caller that hands over only
+   * part of it. Left out, the cards given are looked at.
+   */
+  coreMarked?: boolean;
 };
 
 export type BiteInput = Deck & {
@@ -186,7 +216,50 @@ function conceptsInFocusOrder(deck: Deck, studyOrder: boolean) {
   return out;
 }
 
+/** The end of the Helsinki day that holds `t` (00:00 of the next day), epoch ms. */
+function endOfDay(t: Time): number {
+  // 36 hours on from the day's start is inside the next day whatever the clock change.
+  return startOfDay(new Date(startOfDay(new Date(ms(t))).getTime() + 36 * 60 * 60 * 1000)).getTime();
+}
+
+/** A bite for a paced deck: due reviews and the plan's next new cards (see the header). */
+function pacedBite(deck: Deck): Bite | null {
+  const pace = paceOf(deck)!;
+  const index = new Map(deck.cards.map((c, i) => [c.id, i]));
+  // On a reviews-only day everything due by the end of the day is due now, so a bite is a
+  // full one instead of the two or three cards that happen to have come due this minute.
+  const by = pace.open ? ms(deck.now) : Math.min(endOfDay(deck.now), ms(deck.examAt));
+  const dueBy = (id: string) => {
+    const s = stateOf(deck, id);
+    return aimedDue(s, deck.examAt, by) ?? s.dueAt;
+  };
+  const due = deck.cards
+    .filter((c) => c.active && isGraded(deck, c.id))
+    .map((c) => ({ c, due: pace.open ? dueOf(deck, c.id) : dueBy(c.id) }))
+    .filter((x) => x.due <= by)
+    .sort((a, b) => a.due - b.due || index.get(a.c.id)! - index.get(b.c.id)!)
+    .map((x) => x.c);
+  const reviews = due.filter((c) => !c.boss);
+  const fresh = pace.open ? newQueue(deck).slice(0, Math.min(pace.left, LEARN_MAX)) : [];
+  const warm = reviews.slice(0, WARM_MAX);
+  const learn = fresh.length > 0 ? fresh.filter((c) => !c.boss) : reviews.slice(WARM_MAX, BITE_MIN);
+  const freshBoss = fresh.filter((c) => c.boss);
+  // A due boss card: one in a bite that has other cards, more when the bite would be short
+  // (so the last boss reviews of a day are one bite, not one bite each).
+  const room = Math.max(1, BITE_MIN - warm.length - learn.length);
+  const boss = freshBoss.length > 0 ? freshBoss : due.filter((c) => c.boss).slice(0, room);
+  return session([
+    ["warm", warm.map((c) => c.id)],
+    ["learn", learn.map((c) => c.id)],
+    ["boss", boss.map((c) => c.id)],
+  ]);
+}
+
+/** Past a paced deck's cut-off, only the cards she has graded. */
+const practiceDeck = (deck: Deck): Deck => (isPaced(deck) && !paceOf(deck)!.open ? reviewsOnly(deck) : deck);
+
 export function buildBite(input: BiteInput): Bite | null {
+  if (isPaced(input)) return pacedBite(input);
   if (input.bitesDoneToday >= BITES_PER_DAY[input.kind]) return null;
   const deck: Deck = input;
   const now = ms(deck.now);
@@ -259,7 +332,8 @@ export function buildBite(input: BiteInput): Bite | null {
  * A tile session: the first 3 active, non-boss cards of one type, in deck
  * order, all in learn. Null when the deck has none ("No … for this one yet.").
  */
-export function tileSession(deck: Deck, type: CardType): Bite | null {
+export function tileSession(whole: Deck, type: CardType): Bite | null {
+  const deck = practiceDeck(whole);
   const ids = deck.cards
     .filter((c) => c.active && !c.boss && c.type === type)
     .slice(0, 3)
@@ -271,7 +345,8 @@ export function tileSession(deck: Deck, type: CardType): Bite | null {
  * A concept session: the first 4 active cards touching the concept, in deck
  * order. Boss cards go in boss, the rest in learn (learn shown first).
  */
-export function conceptSession(deck: Deck, conceptId: string): Bite | null {
+export function conceptSession(whole: Deck, conceptId: string): Bite | null {
+  const deck = practiceDeck(whole);
   const cards = deck.cards
     .filter((c) => c.active && conceptsOf(c).includes(conceptId))
     .slice(0, 4);
@@ -285,8 +360,21 @@ export function conceptSession(deck: Deck, conceptId: string): Bite | null {
  * An extra session (after the plan is done, or on request): the first 5
  * active, non-boss cards available now (new or due), in deck order, all in
  * warm. When none is available, the first 4 active non-boss cards instead.
+ *
+ * A paced deck (`./pace`) before its cut-off: the next 5 new cards of the plan
+ * instead, core first, with no daily cap; the rule above once none is left.
  */
-export function extraSession(deck: Deck): Bite | null {
+export function extraSession(whole: Deck): Bite | null {
+  if (isPaced(whole) && paceOf(whole)!.open) {
+    const next = newQueue(whole).slice(0, 5);
+    if (next.length > 0) {
+      return session([
+        ["warm", next.filter((c) => !c.boss).map((c) => c.id)],
+        ["boss", next.filter((c) => c.boss).map((c) => c.id)],
+      ]);
+    }
+  }
+  const deck = practiceDeck(whole);
   const pool = deck.cards.filter((c) => c.active && !c.boss);
   let ids = pool
     .filter((c) => isDue(deck, c.id))

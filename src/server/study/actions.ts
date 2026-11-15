@@ -53,6 +53,15 @@
  *   null once `BITES_PER_DAY[kind]` bites are done (2 for an exam, 1 for a
  *   quiz) or when the deck has nothing for a bite, so `anotherBite` on the
  *   done screen is simply "the next `buildBite` is not null".
+ * - Core-first pace (`src/lib/study/pace.ts`), for an exam whose deck has
+ *   core marks. The deck handed to every session builder then carries the
+ *   exam's kind and the cards she met for the first time today (a card whose
+ *   last review is today and that has no review before today), so today's
+ *   budget of new cards stays the same all day. `ExamView.pace` is set for
+ *   such an exam and only then: the bites that keep her on plan today, and
+ *   `done`, which is "no bite is left and the study start has passed" (the
+ *   number of bites done never ends the day for it). `bitesPerDay` is left as
+ *   it is for other exams and means nothing here.
  * - Due dates. `recordReviews` grades with FSRS and writes the FSRS due date.
  *   `saveProgress` then aims it at the exam: `due_at = aimedDue(fsrs,
  *   examAt, lastReviewAt)`, which only ever moves it earlier; when aiming
@@ -89,13 +98,13 @@
  *   reviews it already has), so the screen retries a failed save three times
  *   with the same batch, then tells her.
  */
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
 import { currentUser } from "@/server/auth/session";
 import { setFlash } from "@/server/data/flash";
 import { db, type Db } from "@/server/db/client";
 import { cards, cardStates, CARD_TYPES, exams, reviews, SESSION_MODES, studySessions } from "@/server/db/schema/study";
 import { users } from "@/server/db/schema/users";
-import { daysBetween, startOfWeek } from "@/lib/dates";
+import { daysBetween, startOfDay, startOfWeek } from "@/lib/dates";
 import {
   BITES_PER_DAY,
   buildBite,
@@ -127,6 +136,7 @@ import {
   type Phase,
   type RungLevel,
 } from "@/lib/study/ladder";
+import { isPaced, paceOf } from "@/lib/study/pace";
 import { GRADES, grade as gradeMemory, intervalLabel, newCard, type Grade, type MemoryState } from "@/lib/study/memory";
 import type { SessionMode } from "@/lib/study/session";
 import { DEFAULT_GOAL, freeSkipsLeft, streakLine, weekOf, weeksInARow, type Week } from "@/lib/study/week";
@@ -172,6 +182,22 @@ export type TodayBite = Bite & { cards: number };
 
 export type StudyWeek = Week & { weeksInARow: number; freeSkipsLeft: 0 | 1; streakLine: string };
 
+/** Today's core-first pace, for an exam whose deck has core marks (`src/lib/study/pace.ts`). */
+export type PaceView = {
+  /** New cards may be served today (false past the cut-off). */
+  open: boolean;
+  /** New cards today's plan serves. */
+  budget: number;
+  /** New cards the plan still serves today. */
+  left: number;
+  /** Bites that keep her on plan today, still to do. */
+  bites: number;
+  /** The days left cannot hold the core cards: said plainly instead of "on track". */
+  impossible: boolean;
+  /** Today's plan is done: no bite is left (the budget is used and nothing is due). */
+  done: boolean;
+};
+
 export type ExamView = {
   exam: { id: string; title: string; kind: ExamKind; at: Date; targetPct: number; courseId: string };
   daysLeft: number;
@@ -193,6 +219,8 @@ export type ExamView = {
   bite: TodayBite | null;
   bitesDoneToday: number;
   bitesPerDay: number;
+  /** Set only for a paced exam; then `bitesPerDay` does not end the day. */
+  pace?: PaceView;
   counts: TodayCounts;
   /** Graded cards per due day from today on. */
   nextReviews: DayCount[];
@@ -372,7 +400,8 @@ const clampRung = (r: number) => Math.min(5, Math.max(1, Math.round(r))) as Bite
 const flagOf = (body: unknown, key: "core" | "first") =>
   typeof body === "object" && body !== null && (body as Record<string, unknown>)[key] === true;
 
-function toBiteDeck(deck: Deck, examAt: Date, now: Date): BiteDeck {
+function toBiteDeck(deck: Deck, exam: Exam, now: Date): BiteDeck {
+  const examAt = exam.at;
   const states: Record<string, MemoryState> = {};
   for (const c of deck.cards) if (c.memory) states[c.id] = c.memory.fsrs;
   return {
@@ -391,7 +420,24 @@ function toBiteDeck(deck: Deck, examAt: Date, now: Date): BiteDeck {
     concepts: deck.concepts.map((c, i) => ({ id: c.id, weight: c.weight, order: i })),
     examAt,
     now,
+    kind: exam.kind,
   };
+}
+
+/**
+ * The cards she met for the first time today (Helsinki day): last graded
+ * today, and no review before today.
+ */
+async function newTodayIds(userId: string, deck: BiteDeck, now: Date, database: Db): Promise<string[]> {
+  const start = startOfDay(now);
+  const today = deck.cards.map((c) => c.id).filter((id) => (deck.states[id]?.lastReviewAt ?? 0) >= start.getTime());
+  if (today.length === 0) return [];
+  const earlier = await database
+    .selectDistinct({ cardId: reviews.cardId })
+    .from(reviews)
+    .where(and(eq(reviews.userId, userId), inArray(reviews.cardId, today), lt(reviews.at, start)));
+  const seenBefore = new Set(earlier.map((r) => r.cardId));
+  return today.filter((id) => !seenBefore.has(id));
 }
 
 /**
@@ -424,7 +470,12 @@ function forecastOf(deck: Deck, mastery: Readonly<Record<string, number>>): numb
 async function examState(userId: string, examId: string, now: Date, database: Db): Promise<ExamState> {
   const exam = await loadExam(userId, examId, database);
   const deck = await loadDeck(userId, examId, database);
-  const biteDeck = toBiteDeck(deck, exam.at, now);
+  let biteDeck = toBiteDeck(deck, exam, now);
+  // A paced deck (core marks): what today's budget needs, and the mark itself, which the
+  // study-start cut below could hide.
+  if (isPaced(biteDeck)) {
+    biteDeck = { ...biteDeck, coreMarked: true, newToday: await newTodayIds(userId, biteDeck, now, database) };
+  }
   const mastery = masteries(biteDeck, biteDeck.states, exam.at);
   const concepts = deck.concepts.map((c): ConceptView => {
     const m = mastery[c.id] ?? 0;
@@ -506,6 +557,7 @@ async function buildExamView(userId: string, examId: string, now: Date, database
   const end = planEnd(shown, daysLeft);
   // Past its day (whole-day or not): the exam is over, so no bite is offered.
   const bite = daysLeft < 0 ? null : todayBite(state, done);
+  const pace = paceOf(state.studyDeck);
   return {
     exam: { id: exam.id, title: exam.title, kind: exam.kind, at: exam.at, targetPct: exam.targetPct, courseId: exam.courseId },
     daysLeft,
@@ -521,6 +573,18 @@ async function buildExamView(userId: string, examId: string, now: Date, database
     bite: bite ? { ...bite, cards: sizeOf(bite) } : null,
     bitesDoneToday: done,
     bitesPerDay: BITES_PER_DAY[exam.kind],
+    ...(pace
+      ? {
+          pace: {
+            open: pace.open,
+            budget: pace.budget,
+            left: pace.left,
+            bites: pace.bites,
+            impossible: pace.impossible,
+            done: bite === null && daysLeft >= 0 && newCardsAllowed(exam, now) && state.biteDeck.cards.length > 0,
+          },
+        }
+      : {}),
     counts,
     nextReviews: next,
     last14: recent,

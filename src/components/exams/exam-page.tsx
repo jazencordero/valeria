@@ -102,6 +102,8 @@ export type ExamPageToday =
       /** Name of the concept most of the cards are about. */
       focus: string;
       next?: BiteCardNext;
+      /** A paced exam: today's pace as one sentence, shown instead of `next`. */
+      pace?: string;
     }
   | { state: "done"; /** "Next reviews tomorrow." */ nextReviews: string }
   /** The cards are being made from this many lectures. */
@@ -479,6 +481,7 @@ export function ExamPage({
         gain={today.gain}
         focus={today.focus}
         next={today.next}
+        pace={today.pace}
         onStart={() => start("bite")}
       />
     ) : today.state === "done" ? (

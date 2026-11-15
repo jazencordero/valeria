@@ -265,26 +265,38 @@ describe("buildBite study order: core and first (M3-52)", () => {
     { id: "later", weight: 3, order: 2 },
   ];
 
-  it("a fresh seeded deck opens concepts in study order, not by weight", () => {
+  it("a fresh deck with first marks only opens concepts in study order, not by weight", () => {
     const cards = [
-      card("h1", "heavy", 1, { core: true }),
+      card("h1", "heavy", 1),
       card("l1", "later", 1),
-      card("i1", "intro", 1),
+      card("i1", "intro", 1, { first: true }),
       card("i2", "intro", 2),
       card("h2", "heavy", 2),
     ];
     expect(section(bite(cards, concepts), "learn")).toEqual(["i1", "i2", "h1", "h2", "l1"]);
   });
 
-  it("a never-graded first card opens its concept, then core before non-core, then rung", () => {
+  it("a deck with core marks is paced: core cards in study order, then the rest", () => {
+    const cards = [
+      card("h1", "heavy", 1, { core: true }),
+      card("l1", "later", 1),
+      card("i1", "intro", 1),
+      card("i2", "intro", 2, { core: true }),
+      card("h2", "heavy", 2),
+    ];
+    // Core: intro before heavy (study order, not weight). Then the others, in study order.
+    expect(section(bite(cards, concepts), "learn")).toEqual(["i2", "h1", "i1", "h2", "l1"]);
+  });
+
+  it("in a paced deck a first card leads its concept inside its group, then lower rung", () => {
     const cards = [
       card("i1", "intro", 1),
-      card("i2", "intro", 1, { core: true }),
+      card("i2", "intro", 2, { core: true }),
       card("i5", "intro", 5, { first: true }),
-      card("i3", "intro", 3, { core: true }),
+      card("i3", "intro", 3, { core: true, first: true }),
       card("i4", "intro", 2),
     ];
-    expect(section(bite(cards, concepts), "learn")).toEqual(["i5", "i2", "i3", "i1", "i4"]);
+    expect(section(bite(cards, concepts), "learn")).toEqual(["i3", "i2", "i5", "i1", "i4"]);
   });
 
   it("a first card she has graded no longer leads", () => {

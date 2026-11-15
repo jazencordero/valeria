@@ -332,7 +332,100 @@ describe("a seeded deck (M3-52)", () => {
 
     const bite = await beginSession(exam.id, "bite");
     expect(bite!.cards[0].body).toMatchObject({ q: "Intro opens?", first: true, core: true });
-    expect(bite!.cards.map((c) => (c.body as { q: string }).q)).toEqual(["Intro opens?", "Intro 1?", "Intro 2?", "Heavy?"]);
+    // Core marks make it a paced deck: both core cards (study order) before the others.
+    expect(bite!.cards.map((c) => (c.body as { q: string }).q)).toEqual(["Intro opens?", "Heavy?", "Intro 1?", "Intro 2?"]);
+    const view = await examView(exam.id);
+    expect(view.pace).toMatchObject({ open: true, budget: 7, left: 4, bites: 1, impossible: false, done: false });
+    // A deck without core marks has no pace.
+    expect((await examView(examId)).pace).toBeUndefined();
+  }, DB_TIMEOUT);
+});
+
+describe("a paced exam (core marks)", () => {
+  /** An exam 7 days out (5 days to its cut-off) with one concept of 60 core cards and 6 others. */
+  async function seedPaced(): Promise<{ examId: string; core: string[]; plain: string[] }> {
+    const [course] = await t.db.insert(courses).values({ userId: her, moodleId: 11, name: "Paced" }).returning();
+    const [exam] = await t.db
+      .insert(exams)
+      .values({ userId: her, courseId: course.id, title: "Paced final", kind: "exam", at: new Date(NOW.getTime() + 7 * D) })
+      .returning();
+    const [concept] = await t.db.insert(concepts).values({ userId: her, examId: exam.id, name: "Paced concept", position: 1, weight: 1 }).returning();
+    const core: string[] = [];
+    const plain: string[] = [];
+    // The other cards come first in the deck: the plan still starts with the core ones.
+    for (let k = 0; k < 66; k++) {
+      const isCore = k >= 6;
+      const [card] = await t.db
+        .insert(cards)
+        .values({ userId: her, examId: exam.id, type: "basic", rung: 1, body: { q: `Paced ${k}?`, a: "A", core: isCore }, origin: "manual", contentHash: `paced-${k}`, createdAt: new Date(NOW.getTime() - D + k * 1000) })
+        .returning();
+      await t.db.insert(cardConcepts).values({ cardId: card.id, conceptId: concept.id });
+      (isCore ? core : plain).push(card.id);
+    }
+    return { examId: exam.id, core, plain };
+  }
+
+  it("serves today's budget in as many bites as it takes, then is done; extra goes on with the next core cards", async () => {
+    const paced = await seedPaced();
+    const start = await examView(paced.examId);
+    // 60 core cards over 5 days: 12 a day, in 3 bites of up to 5 new cards.
+    expect(start.pace).toMatchObject({ open: true, budget: 12, left: 12, bites: 3, impossible: false, done: false });
+
+    const served: string[] = [];
+    for (const [i, left] of [7, 2, 0].entries()) {
+      const bite = await beginSession(paced.examId, "bite");
+      expect(bite).not.toBeNull();
+      const done = await play(bite!.cards, bite!.sessionId);
+      served.push(...bite!.cards.map((c) => c.id));
+      expect(done.bitesDoneToday).toBe(i + 1);
+      // The third bite is offered although an exam otherwise has two a day.
+      expect(done.anotherBite).toBe(left > 0);
+      expect((await examView(paced.examId)).pace).toMatchObject({ budget: 12, left, bites: Math.ceil(left / 5) });
+    }
+    expect(served).toEqual(paced.core.slice(0, 12));
+
+    // The budget is used and nothing is due yet: today's bites are done.
+    const after = await examView(paced.examId);
+    expect(after.bite).toBeNull();
+    expect(after.pace).toMatchObject({ left: 0, bites: 0, done: true });
+    expect(await beginSession(paced.examId, "bite")).toBeNull();
+
+    // Extra: the next unseen core cards, in order, with no cap.
+    for (const from of [12, 17]) {
+      const extra = await beginSession(paced.examId, "extra");
+      expect(extra!.cards.map((c) => c.id)).toEqual(paced.core.slice(from, from + 5));
+      await play(extra!.cards, extra!.sessionId);
+    }
+
+    // Tomorrow the budget is worked out again from what is still unseen: 38 over 4 days.
+    setNow(NOW.getTime() + D);
+    expect((await examView(paced.examId)).pace).toMatchObject({ budget: 10, left: 10, bites: 2, done: false });
+  }, DB_TIMEOUT);
+
+  it("serves no new card after the cut-off, the day before the exam or on exam day", async () => {
+    const paced = await seedPaced();
+    const first = await beginSession(paced.examId, "bite");
+    await play(first!.cards, first!.sessionId);
+    const met = new Set(first!.cards.map((c) => c.id));
+
+    // The cut-off day (three days before the exam): new cards still come.
+    setNow(NOW.getTime() + 4 * D);
+    const cutoff = await examView(paced.examId);
+    expect(cutoff.daysLeft).toBe(3);
+    expect(cutoff.pace).toMatchObject({ open: true, budget: 55 });
+
+    for (const daysOn of [5, 6, 7]) {
+      setNow(NOW.getTime() + daysOn * D - 3 * 60 * MIN);
+      const view = await examView(paced.examId);
+      expect(view.daysLeft).toBe(7 - daysOn);
+      expect(view.pace).toMatchObject({ open: false, budget: 0, bites: 0 });
+      for (const kind of ["bite", "extra", "tile", "concept"] as const) {
+        const arg = kind === "tile" ? "basic" : kind === "concept" ? view.concepts[0].id : undefined;
+        const s = await beginSession(paced.examId, kind, arg);
+        expect(s).not.toBeNull();
+        expect(s!.cards.every((c) => met.has(c.id))).toBe(true);
+      }
+    }
   }, DB_TIMEOUT);
 });
 

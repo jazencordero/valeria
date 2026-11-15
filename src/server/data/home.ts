@@ -31,6 +31,10 @@
  *   or the deck has nothing for a bite yet. That covers M3-53's study start
  *   too: before `start_new_on` `examView` builds no bite from never-graded
  *   cards, so a fresh exam shows no row instead of a done one.
+ *   A paced exam (its deck has core marks, `ExamView.pace`) is never done by
+ *   the number of bites: its row says how many bites today keeps her on plan
+ *   ("3 bites today keeps you on track for Monday"), and it is done when
+ *   `pace.done` says so (today's new cards are used and nothing is due).
  * - `biteFirst`: nothing is open, so the bite is the DO FIRST card.
  *
  * M4-10 adds the greeting and the week:
@@ -82,8 +86,9 @@
  * Later Home tickets extend `HomeView` here.
  */
 import { and, eq, gte, inArray, lt } from "drizzle-orm";
-import { TIME_ZONE } from "@/lib/dates";
+import { byDay, TIME_ZONE } from "@/lib/dates";
 import { greeting, type GreetingAssignment, type JustHandedIn, type JustStudied, type NextExam } from "@/lib/home/greeting";
+import { onTrackLine } from "@/lib/study/pace";
 import { WEEK_DAYS, weekModel, type WeekItem, type WeekModel } from "@/lib/home/week";
 import { DONE_WINDOW_MS, type Queue } from "@/lib/queue";
 import { FEED_PROVIDERS, itemsForUser, type FeedProvider } from "@/server/calendar/feed";
@@ -136,6 +141,8 @@ export type HomeBite =
       /** "Friday's exam", "tomorrow's quiz", "the exam on 4 Dec". */
       forWhat: string;
       href: string;
+      /** A paced exam: "3 bites today keeps you on track for Monday". */
+      pace?: string;
     }
   | {
       state: "done";
@@ -265,10 +272,11 @@ function homeExam(card: ExamsTabExam, v: ExamView): HomeExam {
   };
 }
 
-function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>): HomeBite | null {
+function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>, now: Date): HomeBite | null {
   for (const card of list) {
     const v = views.get(card.id);
     if (!v?.bite) continue;
+    const pace = v.pace ? onTrackLine(v.pace, byDay(v.exam.at, now), v.bitesDoneToday > 0) : null;
     return {
       state: "bite",
       examId: card.id,
@@ -277,11 +285,12 @@ function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>): HomeBite 
       gain: v.bite.gainEstimate,
       forWhat: biteFor(card.kind, v.exam.at, v.daysLeft),
       href: biteHref(card.id),
+      ...(pace ? { pace } : {}),
     };
   }
   for (const card of list) {
     const v = views.get(card.id);
-    if (!v || v.bitesDoneToday < v.bitesPerDay) continue;
+    if (!v || !(v.pace ? v.pace.done : v.bitesDoneToday >= v.bitesPerDay)) continue;
     return { state: "done", examId: card.id, forecast: v.forecastShown, day: biteDay(v.exam.at, v.daysLeft), href: card.href };
   }
   return null;
@@ -495,7 +504,7 @@ export async function getHomeView(
     const v = views.get(card.id);
     return v ? [homeExam(card, v)] : [];
   });
-  const bite = pickBite(examList.exams, views);
+  const bite = pickBite(examList.exams, views, now);
 
   // The greeting: the bite row's exam is the one it offers a bite for.
   const biteView = bite?.state === "bite" ? views.get(bite.examId) : undefined;

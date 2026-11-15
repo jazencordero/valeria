@@ -29,7 +29,11 @@
  * - "mostly <concept>" is the concept most of the bite's cards belong to (a
  *   card's first linked concept, as in `examView`).
  * - "Then: bite 2 of 2, N min" uses this bite's minutes: the next bite is
- *   built by the same rule only once this one is done.
+ *   built by the same rule only once this one is done. A paced exam (core
+ *   marks, `ExamView.pace`) says its pace there instead: "3 bites today keeps
+ *   you on track for Monday.", or once, when the days left cannot hold the
+ *   core cards, "There are more cards than days: core cards first, about 60 a
+ *   day." Neither is said before the study start.
  * - Tiles count the active, non-boss cards of each type (what a tile session
  *   draws from). "Practise this" minutes are for the first four cards that
  *   touch the concept (`conceptSession`).
@@ -54,6 +58,7 @@ import type { PracticeType } from "@/components/study/practice-tiles";
 import type { ProgressConcept } from "@/components/study/progress-sheet";
 import { byDay, startsLine, TIME_ZONE } from "@/lib/dates";
 import { biteMinutes } from "@/lib/study/bite";
+import { impossibleLine, onTrackLine } from "@/lib/study/pace";
 import { gradeFor } from "@/lib/study/forecast";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { shortNameOf } from "@/server/data/courses";
@@ -250,6 +255,10 @@ async function todayOf(
   const today = dayKey(now);
   if (view.bite) {
     const following = view.bitesDoneToday + 2;
+    const pace =
+      view.pace && !quiet
+        ? (impossibleLine(view.pace) ?? onTrackLine(view.pace, byDay(view.exam.at, now), view.bitesDoneToday > 0))
+        : null;
     return {
       state: "bite",
       more: view.bitesDoneToday > 0,
@@ -257,9 +266,11 @@ async function todayOf(
       cards: view.bite.cards,
       gain: view.bite.gainEstimate,
       focus: biteFocus(view, deck),
-      ...(following <= view.bitesPerDay
-        ? { next: { number: following, of: view.bitesPerDay, minutes: view.bite.minutes } }
-        : {}),
+      ...(pace
+        ? { pace: `${pace}.` }
+        : !view.pace && following <= view.bitesPerDay
+          ? { next: { number: following, of: view.bitesPerDay, minutes: view.bite.minutes } }
+          : {}),
     };
   }
   if (quiet) return { state: "quiet", line: quiet };

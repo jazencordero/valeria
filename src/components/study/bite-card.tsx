@@ -10,6 +10,8 @@
  *  - "bite": "Today's bite" (or "One more bite" once one is done), the
  *    minutes / cards / focus line, the "+N% forecast" gain chip, "Start bite",
  *    and a mono "Then: bite 2 of 2, 4 min" line when another bite follows.
+ *    A paced exam says its pace there instead: "3 bites today keeps you on
+ *    track for Monday."
  *  - "done": "TODAY'S BITES", the cup doodle, "Today's plan is done", the next
  *    reviews sentence plus "Rest counts too.", and "Practise anyway".
  * Takes plain data: the page using it decides minutes and gain (the gain
@@ -43,6 +45,8 @@ export type BiteCardProps =
       focus: string;
       /** The bite after this one, if any. */
       next?: BiteCardNext;
+      /** A paced exam: today's pace as one sentence, shown instead of `next`. */
+      pace?: string;
       onStart?: () => void;
       className?: string;
     }
@@ -88,7 +92,7 @@ export function BiteCard(props: BiteCardProps) {
     );
   }
 
-  const { more = false, minutes, cards, gain, focus, next, onStart } = props;
+  const { more = false, minutes, cards, gain, focus, next, pace, onStart } = props;
   return (
     <section className={cls} aria-labelledby={labelId}>
       <div className="flex items-start justify-between gap-3">
@@ -110,7 +114,11 @@ export function BiteCard(props: BiteCardProps) {
       <Button size="lg" block className="mt-[18px]" onClick={onStart}>
         Start bite
       </Button>
-      {next ? (
+      {pace ? (
+        <p className="mt-3 text-center text-[13px] text-ink-2" data-testid="bite-pace">
+          {pace}
+        </p>
+      ) : next ? (
         <p className="mono mt-3 text-center text-ink-3">
           Then: bite {next.number} of {next.of}, {next.minutes} min
         </p>
