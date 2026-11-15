@@ -7,7 +7,7 @@ import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { calendarFeeds, events, pushSubscriptions, reminderLog } from "@/server/db/schema/calendar";
 import { courseFiles, courses, filePages } from "@/server/db/schema/courses";
 import { gradeItems } from "@/server/db/schema/grades";
-import { highlights, lectureConcepts, lectureContent, lectures, notes } from "@/server/db/schema/learn";
+import { highlights, lectureConcepts, lectureContent, lectures, notes, tutorMessages } from "@/server/db/schema/learn";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import {
   cardConcepts,
@@ -169,7 +169,18 @@ async function seedEverything(userId: string, tag: string) {
     .returning();
   await db.insert(lectureContent).values({ lectureId: lecture.id, sourceHash: `s-${tag}` });
   await db.insert(lectureConcepts).values({ lectureId: lecture.id, conceptId: concept.id });
-  await db.insert(notes).values({ userId, body: `Note ${tag}`, courseId: course.id, lectureId: lecture.id });
+  const [note] = await db.insert(notes).values({ userId, body: `Note ${tag}`, courseId: course.id, lectureId: lecture.id }).returning();
+  await db.insert(tutorMessages).values({
+    userId,
+    noteId: note.id,
+    anchorKind: "lecture",
+    anchorId: lecture.id,
+    role: "assistant",
+    body: `Tutor answer ${tag}`,
+    model: "groq:openai/gpt-oss-120b",
+    tokensIn: 10,
+    tokensOut: 5,
+  });
   await db.insert(highlights).values({ userId, lectureId: lecture.id, text: "Highlighted" });
   await db.insert(jobs).values({ userId, kind: "sync" });
   await db.insert(aiCalls).values({ userId, provider: "p", model: "m", job: "j", ok: true, ms: 1 });
@@ -233,6 +244,8 @@ describe("collectExport", () => {
     expect(json).not.toContain("other");
     expect(json).toContain("Note her");
     expect(json).toContain("Page text her");
+    // Her tutor chat is in it (M2-28).
+    expect(file.tables.tutor_messages[0]).toMatchObject({ body: "Tutor answer her", role: "assistant", model: "groq:openai/gpt-oss-120b", tokensOut: 5 });
     expect(JSON.parse(json)).toEqual(file);
   });
 

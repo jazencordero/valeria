@@ -21,7 +21,7 @@ import type { Db } from "@/server/db/client";
 import { calendarFeeds, events, pushSubscriptions, reminderLog } from "@/server/db/schema/calendar";
 import { courseFiles, courses, filePages } from "@/server/db/schema/courses";
 import { gradeItems } from "@/server/db/schema/grades";
-import { highlights, lectureConcepts, lectureContent, lectures, notes } from "@/server/db/schema/learn";
+import { highlights, lectureConcepts, lectureContent, lectures, notes, tutorMessages } from "@/server/db/schema/learn";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import {
   cardConcepts,
@@ -117,6 +117,8 @@ export const EXPORT_PLAN: PlanEntry[] = [
   child(lectureConcepts, lectureConcepts.lectureId, lectures),
   own(notes),
   own(highlights),
+  // Her tutor chats: her messages, the answers, which model answered and the tokens it used.
+  own(tutorMessages),
 
   // System rows that point at her.
   exclude(

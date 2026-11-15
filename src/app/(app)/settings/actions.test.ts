@@ -156,7 +156,11 @@ async function seedEverything(userId: string, tag: string) {
     .returning();
   await db.insert(lectureContent).values({ lectureId: lecture.id, sourceHash: "s1" });
   await db.insert(lectureConcepts).values({ lectureId: lecture.id, conceptId: concept.id });
-  await db.insert(notes).values({ userId, body: "A note", courseId: course.id, lectureId: lecture.id });
+  const [note] = await db.insert(notes).values({ userId, body: "A note", courseId: course.id, lectureId: lecture.id }).returning();
+  await db.execute(
+    sql`insert into tutor_messages (user_id, note_id, anchor_kind, anchor_id, role, body, model, tokens_in, tokens_out) values (${userId}, ${note.id}, 'lecture', ${lecture.id}, 'assistant', 'An answer', 'anthropic:claude-haiku-5-5', 10, 5)`,
+  );
+  await db.execute(sql`insert into tutor_messages (user_id, anchor_kind, role, body) values (${userId}, 'general', 'user', 'A question')`);
   await db.insert(highlights).values({ userId, lectureId: lecture.id, text: "Highlighted" });
   await db.insert(jobs).values({ userId, kind: "sync" });
   await db.insert(aiCalls).values({ userId, provider: "p", model: "m", job: "j", ok: true, ms: 1 });

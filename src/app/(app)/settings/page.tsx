@@ -6,6 +6,8 @@
  * she could never get back in.
  * M2-26 adds a plain checkbox under "What Ready keeps": "Use my course files with AI"
  * (M8-03 turns it into the designed switch).
+ * M2-28 adds one plain line, "Tutor this month: about N EUR of M", only for an account with the
+ * tutor switched on and only when the Claude path exists (ANTHROPIC_API_KEY is set).
  *
  * Built from existing pieces only; no design pass (M8-01 designs it). Works
  * with or without the (app) frame from M1-25: it is an ordinary page in the
@@ -20,6 +22,8 @@ import { filesSwitchOn } from "@/server/ai/consent";
 import { ensureSession } from "@/server/auth/session";
 import { db } from "@/server/db/client";
 import { moodleConnections } from "@/server/db/schema/moodle";
+import { tutorBudgetLine } from "@/server/tutor/budget";
+import { tutorEnabled } from "@/server/tutor/context";
 import { DELETE_PHRASE, deleteAccountAction, disconnectAction, setUseFilesAction } from "./actions";
 
 // src/lib/schools.ts (the school's `lms` name) does not exist on this branch
@@ -40,6 +44,8 @@ type AccountProps = {
   connection: Connection | null;
   /** True after a delete attempt whose typed text did not match. */
   confirmWrong: boolean;
+  /** "Tutor this month: about N EUR of M", or null when it is not hers to see. */
+  tutorLine?: string | null;
 };
 
 /** The visitor's user, read once per request for both parts that need it. */
@@ -80,17 +86,20 @@ async function AccountSections({ searchParams }: { searchParams: SearchParams })
     .where(eq(moodleConnections.userId, user.id))
     .limit(1);
   const { confirm } = await searchParams;
+  const tutorLine =
+    tutorEnabled(user.settings) && process.env.ANTHROPIC_API_KEY ? await tutorBudgetLine() : null;
 
   return (
     <Account
       username={user.username}
       connection={row ? { name: user.displayName, ...row } : null}
       confirmWrong={confirm === "wrong"}
+      tutorLine={tutorLine}
     />
   );
 }
 
-function Account({ username, connection, confirmWrong }: AccountProps) {
+function Account({ username, connection, confirmWrong, tutorLine = null }: AccountProps) {
   return (
     <>
       <section aria-labelledby="lms-title" className="space-y-3">
@@ -156,6 +165,7 @@ function Account({ username, connection, confirmWrong }: AccountProps) {
         <h2 id="data-title" className="type-h22">
           Your data
         </h2>
+        {tutorLine ? <p className="ink-2">{tutorLine}</p> : null}
         <form action={deleteAccountAction} className="space-y-3">
           <label htmlFor="confirm-delete" className="block">
             Type <strong>{DELETE_PHRASE}</strong> to delete your account and everything in it.

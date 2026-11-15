@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DATA_RULE } from "@/server/ai/as-data";
 import { ensureSessionFor } from "@/server/auth/session";
 import { courses } from "@/server/db/schema/courses";
-import { lectureContent, lectures } from "@/server/db/schema/learn";
+import { lectureConcepts, lectureContent, lectures } from "@/server/db/schema/learn";
 import { cards, concepts, exams, studySessions } from "@/server/db/schema/study";
 import { users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
@@ -13,6 +13,8 @@ import {
   buildCopyPrompt,
   buildTutorContext,
   COPY_NO_COURSE_TEXT,
+  findPassage,
+  tutorAnchor,
   SECTION_MAX_CHARS,
   tutorEnabled,
   type TutorWhere,
@@ -272,5 +274,109 @@ describe("buildCopyPrompt", () => {
     const assignment = await buildCopyPrompt(s.user.id, { kind: "assignment", assignmentId: s.assignment.id }, "help", { now: NOW }, t.db);
     expect(assignment.text).not.toContain("BRIEF-TEXT");
     expect(assignment.text).not.toContain("ASSIGNMENT-NAME");
+  });
+});
+
+describe("a highlighted passage (M2-28 step A)", () => {
+  async function withConcepts() {
+    const s = await student();
+    const rows = await t.db.select().from(concepts).where(eq(concepts.examId, s.exam.id));
+    await t.db.insert(lectureConcepts).values(rows.map((c) => ({ lectureId: s.lecture.id, conceptId: c.id })));
+    // A worked example on the second section.
+    await t.db
+      .update(lectureContent)
+      .set({
+        sections: [
+          { heading: "Discounting", blocks: [["p", "SECTION-ONE-TEXT money today is worth more."]], keyPoints: ["KEYPOINT-ONE"] },
+          {
+            heading: "Annuities",
+            blocks: [["p", "SECTION-TWO-TEXT a stream of   equal payments."]],
+            keyPoints: ["KEYPOINT-TWO"],
+            example: { title: "EXAMPLE-TITLE three payments", steps: ["EXAMPLE-STEP pay 100 a year"], result: "EXAMPLE-RESULT 273" },
+          },
+        ],
+      })
+      .where(eq(lectureContent.lectureId, s.lecture.id));
+    return s;
+  }
+  const lecture = (s: { course: { id: string } }, section = 0): TutorWhere => ({ kind: "lecture", courseId: s.course.id, n: 3, section });
+
+  it("puts the passage first, then the section it sits in (with key points and worked example), then the concepts", async () => {
+    const s = await withConcepts();
+    // She is scrolled to section 0, but the passage is in section 1: the passage picks its section.
+    const ctx = await buildTutorContext(s.user.id, lecture(s, 0), { now: NOW, quote: "a stream of equal\n payments" }, t.db);
+    expect(ctx.quote).toEqual({ text: "a stream of equal\n payments", course: true, sent: true });
+    const cached = ctx.parts.find((p) => p.cache)!;
+    const at = (x: string) => cached.text.indexOf(x);
+    expect(at("The passage she highlighted")).toBeGreaterThan(-1);
+    expect(at("The passage she highlighted")).toBeLessThan(at("SECTION-TWO-TEXT"));
+    expect(at("SECTION-TWO-TEXT")).toBeLessThan(at("Concepts of this lecture"));
+    expect(cached.text).toContain("KEYPOINT-TWO");
+    expect(cached.text).toContain("EXAMPLE-TITLE three payments");
+    expect(cached.text).toContain("EXAMPLE-STEP pay 100 a year");
+    expect(cached.text).toContain("EXAMPLE-RESULT 273");
+    expect(cached.text).toContain("Discounting; Annuities");
+    // Never the whole lecture: the other section stays out.
+    expect(all(ctx.parts)).not.toContain("SECTION-ONE-TEXT");
+    // How to answer about the passage, after the cached block.
+    const last = ctx.parts.at(-1)!.text;
+    expect(last).toContain("Answer her question about that passage, in plain words.");
+    expect(last).toContain("one small worked example with real, small numbers");
+    expect(last).toContain("one short check question");
+    expect(last).toContain("If the passage and its section do not contain the answer, say so plainly first");
+  });
+
+  it("a passage that is not her lecture's text is treated as her own words", async () => {
+    const s = await withConcepts();
+    const ctx = await buildTutorContext(s.user.id, lecture(s, 1), { now: NOW, quote: "OWN-WORDS-91 the moon is cheese" }, t.db);
+    expect(ctx.quote).toEqual({ text: "OWN-WORDS-91 the moon is cheese", course: false, sent: true });
+    const cached = ctx.parts.find((p) => p.cache)!;
+    expect(cached.text).not.toContain("OWN-WORDS-91");
+    expect(cached.text).not.toContain("The passage she highlighted");
+    const last = ctx.parts.at(-1)!.text;
+    expect(last).toContain("OWN-WORDS-91");
+    expect(last).toContain("treat it as her own words");
+    expect(last).not.toContain("Answer her question about that passage");
+  });
+
+  it("where the course does not allow AI for studying, a real passage is not sent at all", async () => {
+    const s = await student({ study: "not_allowed" });
+    const ctx = await buildTutorContext(s.user.id, lecture(s, 0), { now: NOW, quote: "money today is worth more" }, t.db);
+    expect(ctx.courseText).toBe(false);
+    expect(ctx.quote).toEqual({ text: "money today is worth more", course: true, sent: false });
+    expect(all(ctx.parts)).not.toContain("money today is worth more");
+    expect(all(ctx.parts)).not.toContain("SECTION-ONE-TEXT");
+  });
+
+  it("findPassage matches across spaces and case, and refuses tiny or foreign text", async () => {
+    const sections = [
+      { heading: "A", blocks: [{ kind: "p" as const, text: "Alpha beta gamma." }], terms: [], source: "" },
+      { heading: "B", blocks: [{ kind: "ul" as const, items: ["delta one", "epsilon two"] }], terms: [], source: "" },
+    ];
+    expect(findPassage(sections, "BETA   gamma")).toBe(0);
+    expect(findPassage(sections, "delta one epsilon")).toBe(1);
+    expect(findPassage(sections, "gamma. B delta")).toBe(-1);
+    expect(findPassage(sections, "ab")).toBeNull();
+    expect(findPassage(sections, "not in here")).toBeNull();
+  });
+});
+
+describe("tutorAnchor", () => {
+  it("names the lecture, exam or card, and general for anything else or anything not hers", async () => {
+    const s = await student();
+    const other = await student();
+    expect(await tutorAnchor(s.user.id, { kind: "lecture", courseId: s.course.id, n: 3 }, t.db, NOW)).toEqual({ kind: "lecture", id: s.lecture.id });
+    expect(await tutorAnchor(s.user.id, { kind: "exam", examId: s.exam.id }, t.db, NOW)).toEqual({ kind: "exam", id: s.exam.id });
+    // The card's chat exists before she answers it (nothing of the card is sent then).
+    expect(await tutorAnchor(s.user.id, { kind: "study", sessionId: s.session.id, cardId: s.card.id, revealed: false }, t.db, NOW)).toEqual({
+      kind: "card",
+      id: s.card.id,
+    });
+    expect(await tutorAnchor(s.user.id, { kind: "assignment", assignmentId: s.assignment.id }, t.db, NOW)).toEqual({ kind: "general", id: null });
+    expect(await tutorAnchor(s.user.id, { kind: "other" }, t.db, NOW)).toEqual({ kind: "general", id: null });
+    expect(await tutorAnchor(s.user.id, { kind: "exam", examId: other.exam.id }, t.db, NOW)).toEqual({ kind: "general", id: null });
+    expect(
+      await tutorAnchor(s.user.id, { kind: "study", sessionId: s.session.id, cardId: other.card.id, revealed: true }, t.db, NOW),
+    ).toEqual({ kind: "general", id: null });
   });
 });

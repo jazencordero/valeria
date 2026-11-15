@@ -28,7 +28,11 @@
  * override, so tests can point it at `tests/fake-ai/server.ts`.
  *
  * The tutor's optional paid path (M2-28). `streamChat({ ..., job: "tutor", paid: "tutor" })` is the
- * ONLY way to reach the `anthropic` provider, and only when `ANTHROPIC_API_KEY` is set:
+ * ONLY way to reach the `anthropic` provider, and only when `ANTHROPIC_API_KEY` is set (the route
+ * also leaves `paid` out once the month's budget is spent, src/server/tutor/budget.ts):
+ * - Everyday answers use the small Claude model (`TUTOR_CLAUDE.small`, capped at its maxTokens);
+ *   `deeper: true` reruns one question on `TUTOR_CLAUDE.deep`. `deeper` is the only way to the
+ *   large model, and it needs `paid: "tutor"` too (else `PaidNotAllowed`).
  * - `anthropic` is not in `PROVIDERS` or `FREE_MODELS`, so `withFallback` (runText, runObject,
  *   streamChat without `paid`) can never pick it, whatever the job.
  * - `paid` with any job other than `TUTOR_JOB`, or any value other than "tutor", throws
@@ -36,9 +40,15 @@
  * - With the key set it is tried first; a limit (429, 5xx, 529) writes its cool-down as for any
  *   provider, and then, like any other failed first response, the tutor falls back to the free
  *   providers for the same size. Without the key the paid path is skipped without a word.
+ * - A refusal before any text (`stop_reason: "refusal"`) also falls back. Every refusal or error
+ *   from Anthropic prints exactly one line, `tutor: anthropic refused <status> <error type>`, and
+ *   nothing else: never the key, the prompt or the answer.
  * - It speaks Anthropic's Messages API over plain `fetch` with SSE streaming (no Anthropic SDK is
  *   installed and package.json is not ours to change), as a small AI SDK model (`anthropicModel`),
  *   so the stream, `onEnd`, the cool-downs and the `ai_calls` row work exactly as for the others.
+ *   `onEnd` gets the provider's token usage when it reported one.
+ * - The tutor job on Groq's gpt-oss models also sends `reasoning_effort: "low"`, so their thinking
+ *   does not eat the answer's token cap. Other jobs send exactly what they did before.
  *   `systemParts` marked `cache` get a prompt-cache breakpoint there (the free path joins them).
  *
  * Test-only switch (M2-23): `AI_FAKE_URL` points a running dev server at the fake AI, so the
@@ -54,6 +64,7 @@ import {
   streamText,
   tool,
   type LanguageModel,
+  type LanguageModelUsage,
   type ModelMessage,
   type ToolSet,
 } from "ai";
@@ -67,6 +78,7 @@ import { gt } from "drizzle-orm";
 import { z } from "zod";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { aiCalls, providerCooldowns } from "@/server/db/schema/system";
+import { TUTOR_CLAUDE } from "@/server/tutor/budget";
 import {
   isFreeModel,
   PROVIDERS,
@@ -107,13 +119,14 @@ export class PaidNotAllowed extends Error {
 
 /** The only job that may ask for the paid provider (`paid: "tutor"`). */
 export const TUTOR_JOB = "tutor";
-/** Anthropic's model for the tutor (claude-api skill, model table cached 2026-11-03). */
-export const ANTHROPIC_MODEL = "claude-fable-5-2";
+/** Anthropic's models for the tutor: ids, caps and prices live in src/server/tutor/budget.ts. */
+export const ANTHROPIC_SMALL_MODEL = TUTOR_CLAUDE.small.id;
+export const ANTHROPIC_DEEP_MODEL = TUTOR_CLAUDE.deep.id;
 export const ANTHROPIC_ENV_KEY = "ANTHROPIC_API_KEY";
 export const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 /** Anthropic API version header (claude-api skill, curl examples). */
 export const ANTHROPIC_VERSION = "2026-10-21";
-/** Server-side refusal fallback, opted into by default for claude-fable-5-2 (claude-api skill). */
+/** Server-side refusal fallback for claude-fable-5-2 (claude-api skill). Claude Haiku 5.5 has none. */
 export const ANTHROPIC_FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
 /** The model's answer was not valid JSON for the schema, even after one repair. */
@@ -160,8 +173,14 @@ export type PlainTool = {
   execute: (input: never) => Promise<unknown>;
 };
 
-/** What `onEnd` gets: the text of every step, in order, joined by a blank line. */
-export type StreamChatEnd = { text: string };
+/** Tokens a reply used, as the provider reported them. */
+export type StreamUsage = { input: number; output: number; cacheRead: number; cacheWrite: number };
+
+/**
+ * What `onEnd` gets: the text of every step, in order, joined by a blank line, and the token
+ * usage when the provider reported input and output counts (null otherwise).
+ */
+export type StreamChatEnd = { text: string; usage: StreamUsage | null };
 
 export type StreamChatInput = RunInput & {
   /** Tools the model may call. Undefined entries are skipped; none means a plain chat. */
@@ -179,6 +198,8 @@ export type StreamChatInput = RunInput & {
   systemParts?: SystemPart[];
   /** "tutor": try the paid provider first when its key is set. Only for `job: TUTOR_JOB`. */
   paid?: "tutor";
+  /** "Go deeper": the paid path uses the large model. Needs `paid: "tutor"`. */
+  deeper?: boolean;
 };
 
 export type Picked = { entry: ProviderEntry; provider: ProviderName; model: string };
@@ -269,13 +290,16 @@ export function createRouter(deps: RouterDeps = {}) {
     }
   }
 
-  function modelFor(c: Candidate, jsonMode: boolean, fetch = deps.fetch): LanguageModel {
+  function modelFor(c: Candidate, jsonMode: boolean, fetch = deps.fetch, extra?: Record<string, unknown>): LanguageModel {
     const provider = createOpenAICompatible({
       name: c.provider,
       baseURL: c.baseUrl,
       apiKey: c.apiKey,
       fetch,
-      transformRequestBody: jsonMode ? (body) => ({ ...body, response_format: { type: "json_object" } }) : undefined,
+      transformRequestBody:
+        jsonMode || extra
+          ? (body) => ({ ...body, ...(jsonMode ? { response_format: { type: "json_object" } } : {}), ...extra })
+          : undefined,
     });
     return provider.chatModel(c.model);
   }
@@ -348,6 +372,7 @@ export function createRouter(deps: RouterDeps = {}) {
     input: StreamChatInput,
     model: (fetch: typeof globalThis.fetch) => LanguageModel,
     system: string | undefined,
+    wrapFetch?: (fetch: typeof globalThis.fetch) => typeof globalThis.fetch,
   ): Promise<StreamChatResult> {
     const tools = sdkTools(input.tools);
     const rounds = tools ? Math.max(0, Math.floor(input.maxToolRounds ?? 0)) : 0;
@@ -362,7 +387,8 @@ export function createRouter(deps: RouterDeps = {}) {
     type First = { status: number; headers: Record<string, string> } | { error: unknown } | { ended: true };
     let settle!: (first: First) => void;
     const first = new Promise<First>((resolve) => (settle = resolve));
-    const baseFetch = deps.fetch ?? globalThis.fetch;
+    const plainFetch = deps.fetch ?? globalThis.fetch;
+    const baseFetch = wrapFetch ? wrapFetch(plainFetch) : plainFetch;
     const watchedFetch: typeof globalThis.fetch = async (url, init) => {
       try {
         const res = await baseFetch(url, init);
@@ -390,11 +416,11 @@ export function createRouter(deps: RouterDeps = {}) {
         settle({ ended: true });
         await log(false);
       },
-      onEnd: async ({ steps }) => {
+      onEnd: async ({ steps, totalUsage }) => {
         settle({ ended: true });
         await log(true);
         if (input.onEnd && streamError === undefined) {
-          await input.onEnd({ text: steps.map((step) => step.text).filter(Boolean).join("\n\n") });
+          await input.onEnd({ text: steps.map((step) => step.text).filter(Boolean).join("\n\n"), usage: usageOf(totalUsage) });
         }
       },
     });
@@ -418,13 +444,14 @@ export function createRouter(deps: RouterDeps = {}) {
   }
 
   /** Anthropic's address for the tutor, or null when there is no key. Same fake switch as the rest. */
-  function anthropicTarget(): (Target & { apiKey: string }) | null {
+  function anthropicTarget(deeper: boolean): (Target & { apiKey: string }) | null {
     const e = env();
     const apiKey = e[ANTHROPIC_ENV_KEY];
     if (!apiKey) return null;
     const fake = deps.anthropicBaseUrl ? null : fakeAiUrl(e);
     const baseUrl = deps.anthropicBaseUrl ?? (fake ? `${fake}/anthropic` : ANTHROPIC_BASE_URL);
-    return { entry: null, provider: "anthropic", model: ANTHROPIC_MODEL, baseUrl, apiKey };
+    const model = deeper ? ANTHROPIC_DEEP_MODEL : ANTHROPIC_SMALL_MODEL;
+    return { entry: null, provider: "anthropic", model, baseUrl, apiKey };
   }
 
   /**
@@ -433,16 +460,21 @@ export function createRouter(deps: RouterDeps = {}) {
    * it refuses (401, 403), writes a cool-down so a broken key is not retried on every message.
    */
   async function tryAnthropic(input: StreamChatInput): Promise<StreamChatResult | null> {
-    const target = anthropicTarget();
+    const deeper = input.deeper === true;
+    const target = anthropicTarget(deeper);
     if (!target) return null;
     if ((await coolingProviders()).has("anthropic")) return null;
     const parts = input.systemParts ?? (input.system ? [{ text: input.system }] : []);
+    const maxTokens = deeper ? TUTOR_CLAUDE.deep.maxTokens : TUTOR_CLAUDE.small.maxTokens;
     try {
       return await streamOn(
         target,
-        input,
-        (fetch) => anthropicModel({ baseUrl: target.baseUrl, apiKey: target.apiKey, system: parts, fetch }),
+        // The paid path's own caps, whatever the free path's cap is.
+        { ...input, maxOutputTokens: maxTokens },
+        (fetch) =>
+          anthropicModel({ baseUrl: target.baseUrl, apiKey: target.apiKey, system: parts, fetch, model: target.model, maxTokens }),
         undefined,
+        anthropicGuard,
       );
     } catch (error) {
       if (APICallError.isInstance(error)) {
@@ -462,13 +494,16 @@ export function createRouter(deps: RouterDeps = {}) {
    * (see the header).
    */
   async function streamChat(input: StreamChatInput): Promise<StreamChatResult> {
+    if (input.deeper !== undefined && input.paid === undefined) throw new PaidNotAllowed(input.job);
     if (input.paid !== undefined) {
       if (input.paid !== "tutor" || input.job !== TUTOR_JOB) throw new PaidNotAllowed(input.job);
       const paid = await tryAnthropic(input);
       if (paid) return paid;
     }
     const system = input.systemParts ? input.systemParts.map((p) => p.text).join("\n\n") : input.system;
-    return withFallback(input, (c) => streamOn(c, input, (fetch) => modelFor(c, false, fetch), system));
+    return withFallback(input, (c) =>
+      streamOn(c, input, (fetch) => modelFor(c, false, fetch, freeExtras(input.job, c.provider, c.model)), system),
+    );
   }
 
   return { pick, runText, runObject, streamChat };
@@ -508,30 +543,124 @@ export function fakeAiUrl(env: Record<string, string | undefined> = process.env)
 //
 // Shapes from the claude-api skill (curl examples, prompt caching, model notes), checked
 // 2026-11-15. No Anthropic SDK is installed, so this is raw HTTP:
-// - POST {base}/v1/messages, headers `x-api-key`, `anthropic-version: 2026-10-21`, and
-//   `anthropic-beta: server-side-fallback-2026-07-01` for `fallbacks: "default"` (on a policy
-//   decline Anthropic re-runs the request on its own fallback model inside the same call).
+// - POST {base}/v1/messages, headers `x-api-key`, `anthropic-version: 2026-10-21`. For
+//   claude-fable-5-2 only, also `anthropic-beta: server-side-fallback-2026-07-01` with
+//   `fallbacks: "default"` (on a policy decline Anthropic re-runs the request on its own fallback
+//   model inside the same call). Claude Haiku 5.5 has no server-side fallback, so neither is sent.
 // - `stream: true`: server-sent events `message_start`, `content_block_start`,
 //   `content_block_delta` (`text_delta`), `content_block_stop`, `message_delta` (stop_reason,
 //   output usage), `message_stop`, and `error`.
 // - claude-fable-5-2 always thinks: `thinking` is left out (anything but adaptive is a 400) and
 //   `output_config.effort` is "low", because thinking counts against `max_tokens` and the tutor's
 //   answers are capped. Its thinking blocks stream with empty text by default; they are skipped.
+// - claude-haiku-5-5 thinks by default too; `thinking: {type: "disabled"}` is accepted at effort
+//   `high` or below, so it is sent with effort "low": the whole 500-token cap goes to the answer.
 // - No `temperature`/`top_p`/`top_k` (a 400 on 2026-10-21) and no assistant prefill.
 // - Prompt caching: `cache_control: {type: "ephemeral"}` on the system block marked `cache`
-//   (the lecture text). The prefix up to it (rules, then the material) is cached for 5 minutes.
-//   Prefixes under 512 tokens on this model silently do not cache.
+//   (the passage, its section and the concept names). The prefix up to it (rules, then the
+//   material) is cached for 5 minutes, so follow-ups on the same passage read it from the cache.
+//   Prefixes under 512 tokens silently do not cache (the minimum for both Claude Haiku 5.5 and
+//   Claude Fable 5.2, claude-api skill, prompt caching); the rules alone are close to that.
 // Prompts, answers and the key are never logged; errors carry no request body.
 
 const ANTHROPIC_EFFORT = "low";
-const DEFAULT_TUTOR_MAX_TOKENS = 1500;
 
 type AnthropicOptions = {
   baseUrl: string;
   apiKey: string;
   system: SystemPart[];
   fetch: typeof globalThis.fetch;
+  /** `ANTHROPIC_SMALL_MODEL` or `ANTHROPIC_DEEP_MODEL`. */
+  model: string;
+  /** The answer cap when the call does not give one. */
+  maxTokens: number;
 };
+
+/** The one line printed when Anthropic refuses or errors: status and error type, nothing else. */
+function warnRefused(status: number | string, type: unknown) {
+  const kind = typeof type === "string" && /^[a-z0-9_]{1,40}$/i.test(type) ? type : "unknown";
+  console.warn(`tutor: anthropic refused ${status} ${kind}`);
+}
+
+/** The `error.type` of an Anthropic error body, read without keeping anything else. */
+async function errorTypeOf(res: Response): Promise<unknown> {
+  try {
+    const body = (await res.json()) as { error?: { type?: unknown } };
+    return body?.error?.type;
+  } catch {
+    return undefined;
+  }
+}
+
+const REFUSED_BEFORE_TEXT = 422;
+
+/**
+ * Wraps the paid path's fetch. Prints `warnRefused` once for a failed response or a network
+ * error. On a 200 it reads the stream up to the first text (or its end): a refusal (422) or an
+ * error event (503, so it cools down like any limit) before any text comes back as a failed
+ * response, so the router falls back to the free providers. Otherwise the bytes read are handed
+ * on untouched.
+ */
+export function anthropicGuard(fetch: typeof globalThis.fetch): typeof globalThis.fetch {
+  return async (url, init) => {
+    let res: Response;
+    try {
+      res = await fetch(url, init);
+    } catch (error) {
+      warnRefused("none", "network_error");
+      throw error;
+    }
+    if (!res.ok || !res.body) {
+      warnRefused(res.status, await errorTypeOf(res));
+      return new Response(null, { status: res.ok ? 502 : res.status, headers: res.headers });
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    const seen: Uint8Array[] = [];
+    let text = "";
+    let done = false;
+    const ERROR_EVENT = /"type"\s*:\s*"error"\s*,\s*"error"\s*:\s*\{[^}]*?"type"\s*:\s*"([^"]*)"/;
+    while (!/"text_delta"/.test(text) && !/"message_stop"/.test(text) && !ERROR_EVENT.test(text)) {
+      const next = await reader.read();
+      if (next.done) {
+        done = true;
+        break;
+      }
+      seen.push(next.value);
+      text += decoder.decode(next.value, { stream: true });
+    }
+    const early = /"text_delta"/.test(text) ? null : ERROR_EVENT.exec(text);
+    if (early) {
+      // An error event before any text (e.g. overloaded): a failed attempt, like a 5xx.
+      warnRefused(res.status, early[1]);
+      await reader.cancel().catch(() => {});
+      return Response.json({ type: "error", error: { type: early[1] } }, { status: 503 });
+    }
+    if (!/"text_delta"/.test(text) && /"stop_reason"\s*:\s*"refusal"/.test(text)) {
+      warnRefused(res.status, "refusal");
+      await reader.cancel().catch(() => {});
+      return Response.json({ type: "error", error: { type: "refusal" } }, { status: REFUSED_BEFORE_TEXT });
+    }
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of seen) controller.enqueue(chunk);
+        if (done) controller.close();
+      },
+      async pull(controller) {
+        if (done) return;
+        const next = await reader.read();
+        if (next.done) {
+          done = true;
+          controller.close();
+        } else controller.enqueue(next.value);
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
+    });
+    return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+  };
+}
 
 type AnthropicMessage = { role: "user" | "assistant"; content: string };
 
@@ -648,6 +777,8 @@ function anthropicParts(): TransformStream<string, LanguageModelV4StreamPart> {
       case "message_delta": {
         const delta = (data.delta ?? {}) as Record<string, unknown>;
         if (typeof delta.stop_reason === "string") stop = delta.stop_reason;
+        // A refusal after the answer started (one before it is caught by anthropicGuard).
+        if (stop === "refusal") warnRefused(200, "refusal");
         const u = (data.usage ?? {}) as Record<string, unknown>;
         if (typeof u.output_tokens === "number") usage.output = u.output_tokens;
         return;
@@ -657,6 +788,7 @@ function anthropicParts(): TransformStream<string, LanguageModelV4StreamPart> {
         return;
       case "error": {
         const err = (data.error ?? {}) as Record<string, unknown>;
+        warnRefused(200, err.type);
         // Only the error's type: its message could quote the request.
         controller.enqueue({ type: "error", error: new Error(`anthropic stream error: ${String(err.type ?? "unknown")}`) });
         return;
@@ -711,21 +843,22 @@ export function anthropicModel(options: AnthropicOptions): LanguageModelV4 {
   return {
     specificationVersion: "v4",
     provider: "anthropic",
-    modelId: ANTHROPIC_MODEL,
+    modelId: options.model,
     supportedUrls: {},
     async doGenerate() {
       throw new Error("The tutor's Anthropic path only streams.");
     },
     async doStream(call) {
       const { system, messages } = anthropicPrompt(call.prompt, options.system);
+      const deep = options.model === ANTHROPIC_DEEP_MODEL;
       const body = {
-        model: ANTHROPIC_MODEL,
-        max_tokens: call.maxOutputTokens ?? DEFAULT_TUTOR_MAX_TOKENS,
+        model: options.model,
+        max_tokens: call.maxOutputTokens ?? options.maxTokens,
         stream: true,
         system,
         messages,
         output_config: { effort: ANTHROPIC_EFFORT },
-        fallbacks: "default",
+        ...(deep ? { fallbacks: "default" } : { thinking: { type: "disabled" } }),
       };
       const res = await options.fetch(url, {
         method: "POST",
@@ -733,7 +866,7 @@ export function anthropicModel(options: AnthropicOptions): LanguageModelV4 {
           "content-type": "application/json",
           "x-api-key": options.apiKey,
           "anthropic-version": ANTHROPIC_VERSION,
-          "anthropic-beta": ANTHROPIC_FALLBACK_BETA,
+          ...(deep ? { "anthropic-beta": ANTHROPIC_FALLBACK_BETA } : {}),
         },
         body: JSON.stringify(body),
         signal: call.abortSignal,
@@ -756,6 +889,21 @@ export function anthropicModel(options: AnthropicOptions): LanguageModelV4 {
       };
     },
   };
+}
+
+/** The SDK's usage as ours, or null when the provider gave no input or output count. */
+function usageOf(u: LanguageModelUsage | undefined): StreamUsage | null {
+  if (!u || typeof u.inputTokens !== "number" || typeof u.outputTokens !== "number") return null;
+  const cacheRead = u.inputTokenDetails?.cacheReadTokens ?? 0;
+  const cacheWrite = u.inputTokenDetails?.cacheWriteTokens ?? 0;
+  const noCache = u.inputTokenDetails?.noCacheTokens ?? Math.max(0, u.inputTokens - cacheRead - cacheWrite);
+  return { input: noCache, output: u.outputTokens, cacheRead, cacheWrite };
+}
+
+/** Extra body fields for a free provider: the tutor on Groq's gpt-oss models thinks "low". */
+export function freeExtras(job: string, provider: ProviderName, model: string): Record<string, unknown> | undefined {
+  if (job === TUTOR_JOB && provider === "groq" && model.startsWith("openai/gpt-oss")) return { reasoning_effort: "low" };
+  return undefined;
 }
 
 /** Plain tool definitions as SDK tools, or undefined when there are none. */

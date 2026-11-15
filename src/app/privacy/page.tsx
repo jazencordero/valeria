@@ -156,9 +156,13 @@ export default function PrivacyPage() {
           so far, and where you are in Ready (which lecture, exam, card or assignment page) go to the same free services
           as above. The part of a lecture you are on, or a card you have already answered, goes with it only for a course
           you marked as allowing AI for studying. Only if whoever runs Ready has set an Anthropic key, the tutor asks
-          Anthropic&rsquo;s Claude first and uses the free services when Claude does not answer. &ldquo;Copy for
-          Claude&rdquo; sends nothing: it only puts text on your clipboard. The tutor&rsquo;s chat is kept in your
-          browser tab, not by Ready.
+          Anthropic&rsquo;s Claude first and uses the free services when Claude does not answer or this
+          month&rsquo;s tutor budget is used up. A passage you highlight goes with your question only for a course
+          you marked as allowing AI for studying. &ldquo;Copy for Claude&rdquo; sends nothing: it only puts text on
+          your clipboard. Ready keeps your tutor chats on its server, each with the note or the page it belongs
+          to, which model answered and how many tokens it used, so a chat is there when you open it again. They
+          stay until you delete them: a note&rsquo;s chat goes with the note, and all of them go when you delete
+          your account. They are in your data download.
         </p>
         <p>
           Ready itself keeps your chats. For each AI call it also notes which service answered and how long it took,

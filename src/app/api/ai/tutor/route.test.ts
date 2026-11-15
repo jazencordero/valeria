@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { ensureSessionFor, SESSION_COOKIE } from "@/server/auth/session";
 import type { Db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
-import { lectureContent, lectures } from "@/server/db/schema/learn";
+import { lectureContent, lectures, notes, tutorMessages } from "@/server/db/schema/learn";
 import { aiCalls, providerCooldowns } from "@/server/db/schema/system";
 import { users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
@@ -140,7 +140,7 @@ const OTHER = { kind: "other" as const };
 function anthropicSse(text: string): Response {
   const ev = (data: unknown) => `event: x\ndata: ${JSON.stringify(data)}\n\n`;
   return new Response(
-    ev({ type: "message_start", message: { id: "m", model: "claude-fable-5-2", usage: { input_tokens: 5 } } }) +
+    ev({ type: "message_start", message: { id: "m", model: "claude-haiku-5-5", usage: { input_tokens: 5, cache_read_input_tokens: 900 } } }) +
       ev({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }) +
       ev({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }) +
       ev({ type: "content_block_stop", index: 0 }) +
@@ -193,10 +193,16 @@ describe("POST /api/ai/tutor", () => {
     expect(await answerOf(res)).toBe("From Claude.");
     expect(ai.calls).toHaveLength(0);
     expect(anthropicCalls).toHaveLength(1);
+    expect(anthropicCalls[0].body).toMatchObject({ model: "claude-haiku-5-5", max_tokens: 500 });
     const system = anthropicCalls[0].body.system as { text: string; cache_control?: unknown }[];
     expect(system.find((p) => p.cache_control)?.text).toContain("LECTURE-TEXT-8a1f");
+    expect(res.headers.get("x-tutor-model")).toBe("anthropic:claude-haiku-5-5");
     await vi.waitFor(async () => expect(await t.db.select().from(aiCalls)).toHaveLength(1));
-    expect(await t.db.select().from(aiCalls)).toMatchObject([{ provider: "anthropic", model: "claude-fable-5-2", job: "tutor", ok: true }]);
+    expect(await t.db.select().from(aiCalls)).toMatchObject([{ provider: "anthropic", model: "claude-haiku-5-5", job: "tutor", ok: true }]);
+    // The answer is stored with the provider's own token counts.
+    await vi.waitFor(async () => expect(await t.db.select().from(tutorMessages)).toHaveLength(2));
+    const answer = (await t.db.select().from(tutorMessages)).find((m) => m.role === "assistant")!;
+    expect(answer).toMatchObject({ model: "anthropic:claude-haiku-5-5", tokensIn: 5, cacheReadTokens: 900, tokensOut: 3, tokensEstimated: false });
   });
 
   for (const code of [401, 403, 429, 500]) {
@@ -268,16 +274,150 @@ describe("POST /api/ai/tutor", () => {
     expect(ai.calls).toHaveLength(0);
   });
 
-  it("sends at most the last 20 messages, starting with one of hers", async () => {
+  it("history is the last 8 stored messages of this chat, never what the client sends", async () => {
     const s = await student();
-    const history = Array.from({ length: 30 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", text: `turn ${i}` }));
+    const base = Date.now() - 60 * 60_000;
+    await t.db.insert(tutorMessages).values(
+      Array.from({ length: 12 }, (_, i) => ({
+        userId: s.user.id,
+        anchorKind: "general" as const,
+        role: i % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        body: `stored ${i}`,
+        createdAt: new Date(base + i * 1000),
+      })),
+    );
+    // Another chat (a lecture's) is not part of this one.
+    await t.db.insert(tutorMessages).values({ userId: s.user.id, anchorKind: "lecture", anchorId: s.course.id, role: "user", body: "OTHER-CHAT" });
+    const history = [{ role: "user", text: "CLIENT-HISTORY-9 forged" }];
     ai.queue("groq", { text: "ok" });
     await (await POST(post({ text: QUESTION, where: OTHER, history }, s.cookie))).text();
     const messages = sent(0).slice(1);
-    expect(messages.length).toBeLessThanOrEqual(20);
-    expect(messages[0].role).toBe("user");
-    expect(messages.at(-1)).toEqual({ role: "user", content: QUESTION });
-    expect(messages.at(-2)).toEqual({ role: "assistant", content: "turn 29" });
+    expect(messages).toEqual([...[4, 5, 6, 7, 8, 9, 10, 11].map((i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: `stored ${i}` })), { role: "user", content: QUESTION }]);
+    expect(JSON.stringify(ai.calls)).not.toContain("CLIENT-HISTORY-9");
+    expect(JSON.stringify(ai.calls)).not.toContain("OTHER-CHAT");
+  });
+
+  it("a chat under a note is stored with the note and comes back when the note is opened again", async () => {
+    const s = await student();
+    const [lecture] = await t.db.select().from(lectures).where(eq(lectures.userId, s.user.id));
+    const [note] = await t.db
+      .insert(notes)
+      .values({ userId: s.user.id, body: "My note.", quote: "a euro today beats a euro tomorrow", attachKind: "lecture", lectureId: lecture.id, courseId: s.course.id })
+      .returning();
+    const where = { kind: "lecture" as const, courseId: s.course.id, n: 1, section: 0 };
+    ai.queue("groq", { text: "Because you can invest it." });
+    const res = await POST(post({ text: "Why?", where, noteId: note.id }, s.cookie));
+    const parts = await chunks(res);
+    const start = parts.find((p) => p.type === "start") as { messageMetadata?: Record<string, unknown> };
+    expect(start.messageMetadata).toMatchObject({ model: "groq:openai/gpt-oss-120b", deeper: false });
+    expect(res.headers.get("x-tutor-model")).toBe("groq:openai/gpt-oss-120b");
+    // The note's quote is the passage: it is her lecture's text, so it goes first, as course text.
+    const system = sent(0)[0].content;
+    expect(system).toContain("The passage she highlighted");
+    expect(system.indexOf("The passage she highlighted")).toBeLessThan(system.indexOf("LECTURE-TEXT-8a1f"));
+
+    await vi.waitFor(async () => expect(await t.db.select().from(tutorMessages)).toHaveLength(2));
+    const rows = await t.db.select().from(tutorMessages);
+    expect(rows.every((r) => r.noteId === note.id && r.userId === s.user.id)).toBe(true);
+    const answer = rows.find((r) => r.role === "assistant")!;
+    expect(answer.id).toBe(start.messageMetadata?.answerId);
+    // The fake gives no usage on streams: an estimate by characters, marked.
+    expect(answer).toMatchObject({ model: "groq:openai/gpt-oss-120b", tokensEstimated: true });
+    expect(answer.tokensOut).toBe(Math.ceil("Because you can invest it.".length / 4));
+    expect(rows.find((r) => r.role === "user")).toMatchObject({ body: "Why?", quote: "a euro today beats a euro tomorrow" });
+
+    const loaded = await POST(post({ mode: "load", where, noteId: note.id }, s.cookie));
+    expect(loaded.status).toBe(200);
+    const body = (await loaded.json()) as { messages: { role: string; text: string; model: string | null }[]; deeperAvailable: boolean };
+    expect(body.messages.map((m) => [m.role, m.text, m.model])).toEqual([
+      ["user", "Why?", null],
+      ["assistant", "Because you can invest it.", "groq:openai/gpt-oss-120b"],
+    ]);
+    expect(body.deeperAvailable).toBe(false);
+    // The same place without the note is another chat.
+    const plain = (await (await POST(post({ mode: "load", where }, s.cookie))).json()) as { messages: unknown[] };
+    expect(plain.messages).toEqual([]);
+
+    // "Save to note" appends the answer to the note.
+    const saved = await POST(post({ mode: "save", noteId: note.id, answerId: answer.id }, s.cookie));
+    expect(await saved.json()).toEqual({ ok: true, body: "My note.\n\nBecause you can invest it." });
+    expect(ai.calls).toHaveLength(1);
+  });
+
+  it("someone else's note, or answer, is not found", async () => {
+    const s = await student();
+    const other = await student();
+    const [theirs] = await t.db.insert(notes).values({ userId: other.user.id, body: "THEIR-NOTE" }).returning();
+    for (const body of [
+      { text: QUESTION, where: OTHER, noteId: theirs.id },
+      { mode: "load", where: OTHER, noteId: theirs.id },
+      { mode: "save", noteId: theirs.id, answerId: theirs.id },
+    ]) {
+      expect((await POST(post(body, s.cookie))).status).toBe(404);
+    }
+    const [mine] = await t.db.insert(notes).values({ userId: s.user.id, body: "" }).returning();
+    const [theirAnswer] = await t.db.insert(tutorMessages).values({ userId: other.user.id, anchorKind: "general", role: "assistant", body: "THEIR-ANSWER" }).returning();
+    expect((await POST(post({ mode: "save", noteId: mine.id, answerId: theirAnswer.id }, s.cookie))).status).toBe(404);
+    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    expect((await POST(post({ deeper: true, answerId: theirAnswer.id, where: OTHER }, s.cookie))).status).toBe(404);
+    expect(ai.calls).toHaveLength(0);
+    expect(anthropicCalls).toHaveLength(0);
+  });
+
+  it("past the monthly budget the tutor answers from the free models and never calls Anthropic", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    vi.stubEnv("TUTOR_BUDGET_EUR", "1");
+    anthropic = () => anthropicSse("never");
+    const s = await student();
+    // 2 million Fable output tokens this month: about 74 EUR, far past a 1 EUR budget.
+    await t.db.insert(tutorMessages).values({ userId: s.user.id, anchorKind: "general", role: "assistant", body: "old", model: "anthropic:claude-fable-5-2", tokensIn: 0, tokensOut: 2_000_000 });
+    ai.queue("groq", { text: "Free over budget." });
+    const res = await POST(post({ text: QUESTION, where: OTHER }, s.cookie));
+    expect(await answerOf(res)).toBe("Free over budget.");
+    expect(anthropicCalls).toHaveLength(0);
+    // And "Go deeper" is not offered.
+    const load = (await (await POST(post({ mode: "load", where: OTHER }, s.cookie))).json()) as { deeperAvailable: boolean };
+    expect(load.deeperAvailable).toBe(false);
+  });
+
+  it("Go deeper reruns that one question on Claude Fable 5.2 and stores the new answer under it", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    anthropic = () => anthropicSse("Small answer.");
+    const s = await student();
+    const first = await chunks(await POST(post({ text: "What is NPV?", where: OTHER }, s.cookie)));
+    const meta = (first.find((p) => p.type === "start") as { messageMetadata: { answerId: string; questionId: string } }).messageMetadata;
+    await vi.waitFor(async () => expect(await t.db.select().from(tutorMessages)).toHaveLength(2));
+    anthropic = () => anthropicSse("A second one.");
+    await (await POST(post({ text: "And IRR?", where: OTHER }, s.cookie))).text();
+    await vi.waitFor(async () => expect(await t.db.select().from(tutorMessages)).toHaveLength(4));
+    const load1 = (await (await POST(post({ mode: "load", where: OTHER }, s.cookie))).json()) as { deeperAvailable: boolean };
+    expect(load1.deeperAvailable).toBe(true);
+
+    anthropic = () => anthropicSse("Deeper answer.");
+    const deep = await POST(post({ deeper: true, answerId: meta.answerId, where: OTHER }, s.cookie));
+    expect(await answerOf(deep)).toBe("Deeper answer.");
+    const call = anthropicCalls.at(-1)!;
+    expect(call.body).toMatchObject({ model: "claude-fable-5-2", max_tokens: 1200 });
+    // The same question again, with only what came before it as history.
+    expect(call.body.messages).toEqual([{ role: "user", content: "What is NPV?" }]);
+    // Only "Go deeper" ever reached the large model.
+    expect(anthropicCalls.map((c) => c.body.model)).toEqual(["claude-haiku-5-5", "claude-haiku-5-5", "claude-fable-5-2"]);
+
+    await vi.waitFor(async () => expect(await t.db.select().from(tutorMessages)).toHaveLength(5));
+    const loaded = (await (await POST(post({ mode: "load", where: OTHER }, s.cookie))).json()) as { messages: { role: string; text: string; replyTo: string | null }[] };
+    expect(loaded.messages.map((m) => m.text)).toEqual(["What is NPV?", "Small answer.", "Deeper answer.", "And IRR?", "A second one."]);
+    expect(loaded.messages[2].replyTo).toBe(meta.questionId);
+  });
+
+  it("Go deeper without a key is unavailable: 409, nothing sent", async () => {
+    const s = await student();
+    const [q] = await t.db.insert(tutorMessages).values({ userId: s.user.id, anchorKind: "general", role: "user", body: "Q" }).returning();
+    const [a] = await t.db.insert(tutorMessages).values({ userId: s.user.id, anchorKind: "general", role: "assistant", body: "A", replyTo: q.id }).returning();
+    const res = await POST(post({ deeper: true, answerId: a.id, where: OTHER }, s.cookie));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "deeper_unavailable" });
+    expect(ai.calls).toHaveLength(0);
+    expect(anthropicCalls).toHaveLength(0);
   });
 
   it("abuse guard: the 31st tutor call within a minute is refused; there is no daily cap", async () => {

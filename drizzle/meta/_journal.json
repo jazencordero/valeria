@@ -29,6 +29,13 @@
       "when": 1794732887463,
       "tag": "0003_demonic_callisto",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794735670169,
+      "tag": "0004_omniscient_lucky_pierre",
+      "breakpoints": true
     }
   ]
 }

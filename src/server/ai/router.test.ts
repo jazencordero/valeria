@@ -8,7 +8,8 @@ import { PROVIDERS, type ProviderEntry, type SizeClass } from "./providers.confi
 import {
   AiBadOutput,
   AiBusy,
-  ANTHROPIC_MODEL,
+  ANTHROPIC_DEEP_MODEL,
+  ANTHROPIC_SMALL_MODEL,
   createRouter,
   fakeAiUrl,
   NotFree,
@@ -324,7 +325,7 @@ describe("streamChat", () => {
     expect((ai.calls[0].body.tools as { function: { name: string } }[]).map((x) => x.function.name)).toEqual(["look_up"]);
     expect(JSON.stringify(ai.calls[1].body.messages)).toContain("TOOL-RESULT-42");
     await vi.waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1));
-    expect(onEnd).toHaveBeenCalledWith({ text: "It is the fluid." });
+    expect(onEnd).toHaveBeenCalledWith(expect.objectContaining({ text: "It is the fluid." }));
     await vi.waitFor(async () => expect(await rows()).toHaveLength(1));
   });
 
@@ -513,18 +514,26 @@ describe("the tutor's paid path (anthropic)", () => {
   };
 
   /** Anthropic's SSE for `text`, one delta per word, as the claude-api skill's curl example shows. */
-  function sse(text: string, extra: string[] = []): string {
+  function sse(text: string, extra: string[] = [], stopReason = "end_turn"): string {
     const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
     const words = text.split(/(?<= )/);
     return [
-      ev("message_start", { type: "message_start", message: { id: "msg_1", type: "message", model: ANTHROPIC_MODEL, usage: { input_tokens: 10, output_tokens: 1 } } }),
+      ev("message_start", {
+        type: "message_start",
+        message: {
+          id: "msg_1",
+          type: "message",
+          model: ANTHROPIC_SMALL_MODEL,
+          usage: { input_tokens: 10, cache_read_input_tokens: 700, cache_creation_input_tokens: 0, output_tokens: 1 },
+        },
+      }),
       ev("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }),
       ev("content_block_stop", { type: "content_block_stop", index: 0 }),
       ev("content_block_start", { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } }),
       ...words.map((w) => ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: w } })),
       ...extra,
       ev("content_block_stop", { type: "content_block_stop", index: 1 }),
-      ev("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 12 } }),
+      ev("message_delta", { type: "message_delta", delta: { stop_reason: stopReason }, usage: { output_tokens: 12 } }),
       ev("message_stop", { type: "message_stop" }),
     ].join("");
   }
@@ -558,25 +567,29 @@ describe("the tutor's paid path (anthropic)", () => {
     return { r, sent: f.sent };
   }
 
-  it("with the key, the tutor streams from Anthropic and logs one anthropic row", async () => {
+  it("with the key, the tutor streams from the small Claude model, capped at 500, and logs one anthropic row", async () => {
+    const onEnd = vi.fn();
     const { r, sent } = paidRouter(ok("A cell is a small room."));
-    const { provider, model, result } = await r.streamChat(tutorInput);
+    const { provider, model, result } = await r.streamChat({ ...tutorInput, onEnd });
     expect(provider).toBe("anthropic");
-    expect(model).toBe("claude-fable-5-2");
+    expect(model).toBe("claude-haiku-5-5");
+    expect(ANTHROPIC_SMALL_MODEL).toBe("claude-haiku-5-5");
     expect(await result.text).toBe("A cell is a small room.");
     expect(ai.calls).toHaveLength(0);
 
     expect(sent).toHaveLength(1);
     expect(sent[0].url).toBe(`${ANTH}/v1/messages`);
-    expect(sent[0].headers).toMatchObject({
-      "x-api-key": KEY,
-      "anthropic-version": "2026-10-21",
-      "anthropic-beta": "server-side-fallback-2026-07-01",
-    });
+    expect(sent[0].headers).toMatchObject({ "x-api-key": KEY, "anthropic-version": "2026-10-21" });
+    // Claude Haiku 5.5 has no server-side fallback: no beta header, no `fallbacks`.
+    expect(sent[0].headers).not.toHaveProperty("anthropic-beta");
     const body = sent[0].body;
-    expect(body).toMatchObject({ model: "claude-fable-5-2", max_tokens: 1500, stream: true, fallbacks: "default" });
+    // The free path's cap (1500) does not apply: the paid path has its own.
+    expect(body).toMatchObject({ model: "claude-haiku-5-5", max_tokens: 500, stream: true, thinking: { type: "disabled" }, output_config: { effort: "low" } });
+    expect(body).not.toHaveProperty("fallbacks");
     expect(body).not.toHaveProperty("temperature");
-    expect(body).not.toHaveProperty("thinking");
+    // The provider's usage reaches onEnd: uncached input, cache reads and writes, output.
+    await vi.waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1));
+    expect(onEnd.mock.calls[0][0]).toEqual({ text: "A cell is a small room.", usage: { input: 10, output: 12, cacheRead: 700, cacheWrite: 0 } });
     // The breakpoint sits on the lecture text, after the stable rules, before the volatile part.
     expect(body.system).toEqual([
       { type: "text", text: "RULES-1a2b explain from zero" },
@@ -586,11 +599,83 @@ describe("the tutor's paid path (anthropic)", () => {
     expect(body.messages).toEqual([{ role: "user", content: PROMPT }]);
 
     await vi.waitFor(async () => expect(await rows()).toHaveLength(1));
-    expect(await rows()).toMatchObject([{ provider: "anthropic", model: "claude-fable-5-2", job: "tutor", ok: true }]);
+    expect(await rows()).toMatchObject([{ provider: "anthropic", model: "claude-haiku-5-5", job: "tutor", ok: true }]);
     // Never the prompt or the key in the row, and nothing printed.
     expect(JSON.stringify(await rows())).not.toContain(PROMPT);
     expect(JSON.stringify(await rows())).not.toContain(KEY);
     expect(logs).toEqual([]);
+  });
+
+  it("`deeper` reruns on Claude Fable 5.2, capped at 1,200, with the server-side refusal fallback", async () => {
+    const { r, sent } = paidRouter(ok("Deeper."));
+    const { provider, model, result } = await r.streamChat({ ...tutorInput, deeper: true });
+    expect([provider, model]).toEqual(["anthropic", "claude-fable-5-2"]);
+    expect(ANTHROPIC_DEEP_MODEL).toBe("claude-fable-5-2");
+    expect(await result.text).toBe("Deeper.");
+    expect(sent[0].headers).toMatchObject({ "anthropic-beta": "server-side-fallback-2026-07-01" });
+    expect(sent[0].body).toMatchObject({ model: "claude-fable-5-2", max_tokens: 1200, fallbacks: "default", output_config: { effort: "low" } });
+    // Claude Fable 5.2 always thinks: any `thinking` setting but adaptive is a 400, so none is sent.
+    expect(sent[0].body).not.toHaveProperty("thinking");
+  });
+
+  it("`deeper` is the only path to the large model, and it needs the paid tutor path", async () => {
+    const { r, sent } = paidRouter(ok("Small."));
+    for (let i = 0; i < 3; i++) await (await r.streamChat(tutorInput)).result.text;
+    await (await r.streamChat({ ...tutorInput, deeper: false })).result.text;
+    expect(sent.map((x) => x.body.model)).toEqual(["claude-haiku-5-5", "claude-haiku-5-5", "claude-haiku-5-5", "claude-haiku-5-5"]);
+    // Without `paid`, or from another job, `deeper` is refused before anything is sent.
+    const { paid: _paid, ...unpaid } = tutorInput;
+    void _paid;
+    await expect(r.streamChat({ ...unpaid, deeper: true })).rejects.toBeInstanceOf(PaidNotAllowed);
+    await expect(r.streamChat({ ...tutorInput, deeper: true, job: "assignment-chat" })).rejects.toBeInstanceOf(PaidNotAllowed);
+    expect(sent).toHaveLength(4);
+  });
+
+  it("`deeper` with no key goes to the free providers: nothing calls Anthropic", async () => {
+    ai.queue("groq", { text: "Free deeper." });
+    const { r, sent } = paidRouter(ok("never"), { ANTHROPIC_API_KEY: undefined });
+    const { provider, result } = await r.streamChat({ ...tutorInput, deeper: true });
+    expect(provider).toBe("groq");
+    expect(await result.text).toBe("Free deeper.");
+    expect(sent).toHaveLength(0);
+  });
+
+  it("a refusal before any text falls back to the free providers, with one line printed", async () => {
+    ai.queue("groq", { text: "Free instead." });
+    const refused = () => new Response(sse("", [], "refusal").replace(/event: content_block_delta[^\n]*\n[^\n]*\n\n/g, ""), { status: 200 });
+    const { r, sent } = paidRouter(refused);
+    const { provider, result } = await r.streamChat(tutorInput);
+    expect(provider).toBe("groq");
+    expect(await result.text).toBe("Free instead.");
+    expect(sent).toHaveLength(1);
+    expect(logs).toEqual([["tutor: anthropic refused 200 refusal"]]);
+    // A refusal is not a limit: no cool-down.
+    expect(await t.db.select().from(providerCooldowns)).toEqual([]);
+  });
+
+  it("an error event before any text is a failed attempt: free providers, a cool-down, one line", async () => {
+    ai.queue("groq", { text: "Free again." });
+    const overloaded = () =>
+      new Response(
+        `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { id: "m", usage: { input_tokens: 1 } } })}\n\n` +
+          `event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "PRIVATE" } })}\n\n`,
+        { status: 200 },
+      );
+    const { r } = paidRouter(overloaded);
+    expect((await r.streamChat(tutorInput)).provider).toBe("groq");
+    expect(logs).toEqual([["tutor: anthropic refused 200 overloaded_error"]]);
+    expect(await t.db.select().from(providerCooldowns)).toMatchObject([{ provider: "anthropic" }]);
+  });
+
+  it("the tutor on Groq's gpt-oss sends reasoning_effort low; other jobs send nothing new", async () => {
+    const LARGE = PROVIDERS.large[0];
+    expect(LARGE.model).toBe("openai/gpt-oss-120b");
+    const r = router([LARGE], { env: { ...ENV, ANTHROPIC_API_KEY: undefined } });
+    ai.queue("groq", { text: "a" }, { text: "b" });
+    await (await r.streamChat({ ...tutorInput, size: "large" })).result.text;
+    await (await r.streamChat({ ...input, size: "large", job: "assignment-chat" })).result.text;
+    expect(ai.calls[0].body).toMatchObject({ reasoning_effort: "low" });
+    expect(ai.calls[1].body).not.toHaveProperty("reasoning_effort");
   });
 
   it("with no key, nothing calls Anthropic: the tutor uses the free providers", async () => {
@@ -623,7 +708,9 @@ describe("the tutor's paid path (anthropic)", () => {
         ["anthropic", false],
         ["groq", true],
       ]);
-      expect(logs).toEqual([]);
+      // Exactly one line: the status and the error's type. Never its message, the key or the prompt.
+      expect(logs).toEqual([[`tutor: anthropic refused ${code} x`]]);
+      expect(JSON.stringify(logs)).not.toContain("PRIVATE");
 
       // While it cools down, the next message does not try the broken key again.
       ai.queue("groq", { text: "Again free." });
@@ -643,6 +730,7 @@ describe("the tutor's paid path (anthropic)", () => {
     const bad = paidRouter(status(400));
     expect((await bad.r.streamChat(tutorInput)).provider).toBe("groq");
     expect(await t.db.select().from(providerCooldowns)).toEqual([]);
+    expect(logs).toEqual([["tutor: anthropic refused none network_error"], ["tutor: anthropic refused 400 x"]]);
   });
 
   it("Anthropic and every free provider busy: AiBusy", async () => {
@@ -665,7 +753,7 @@ describe("the tutor's paid path (anthropic)", () => {
     for await (const part of result.fullStream) seen.push(part.type);
     expect(seen).toContain("error");
     expect(onEnd).not.toHaveBeenCalled();
-    expect(logs).toEqual([]);
+    expect(logs).toEqual([["tutor: anthropic refused 200 overloaded_error"]]);
   });
 
   it("no other job can reach it: paid with another job throws before anything is sent", async () => {
