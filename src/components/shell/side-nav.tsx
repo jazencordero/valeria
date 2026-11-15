@@ -6,7 +6,12 @@
  *
  * Wordmark with the tiny cap, the main links, her courses and a user chip
  * that opens Settings. Current page gets `aria-current="page"`.
- * Cut (M4, M9-13): the theme button and Notes.
+ * Cut (M9-13): Notes.
+ *
+ * Theme button (M4-05, main-flow.html CSS 592-595): at the bottom, right of
+ * the user chip. Folded, it sits above the chip, left-aligned with the icons.
+ * The switch is a container query on the bottom row, so the first paint is
+ * already right and it flips when the rail's width snaps.
  *
  * Count badges (M4-04, merged-2.html HTML 1685-1686, CSS 410): Assignments
  * shows her open assignments and Exams her upcoming exams, as a rolling
@@ -37,6 +42,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
 import { RollingNumber } from "@/components/ui/rolling-number";
+import { ThemeButton } from "@/components/ui/theme-button";
 import { Vitonen } from "@/components/vitonen";
 import { useMotionMode } from "@/lib/motion/use-calm";
 import {
@@ -269,30 +275,35 @@ export function SideNavView({
 
       <div className="flex-1" />
 
-      {user ? (
-        <Link
-          href={SETTINGS_HREF}
-          aria-current={pathname === SETTINGS_HREF ? "page" : undefined}
-          title={tip(user.firstName ?? "Settings")}
-          className="flex min-h-11 items-center gap-2.5 rounded-xl px-1.5 py-1 whitespace-nowrap text-ink no-underline transition-colors duration-quick ease-out [@media(hover:hover)]:hover:bg-surface"
-        >
-          <span
-            aria-hidden="true"
-            className="grid h-9 w-9 flex-none place-items-center rounded-full bg-accent-wash font-display text-base font-semibold text-ink"
-            style={{ fontVariationSettings: '"SOFT" 100' }}
-          >
-            {initial}
-          </span>
-          <span className={`min-w-0 ${FADE}`}>
-            <span className="block truncate text-[15px] font-semibold">
-              {user.firstName ?? "Settings"}
-            </span>
-            {user.school ? (
-              <span className="mono block truncate text-ink-3">{user.school}</span>
-            ) : null}
-          </span>
-        </Link>
-      ) : null}
+      <div className="@container">
+        <div className="flex items-center justify-between gap-2 @max-[120px]:flex-col-reverse @max-[120px]:items-start">
+          {user ? (
+            <Link
+              href={SETTINGS_HREF}
+              aria-current={pathname === SETTINGS_HREF ? "page" : undefined}
+              title={tip(user.firstName ?? "Settings")}
+              className="flex min-h-11 min-w-0 items-center gap-2.5 rounded-xl px-1.5 py-1 whitespace-nowrap text-ink no-underline transition-colors duration-quick ease-out [@media(hover:hover)]:hover:bg-surface"
+            >
+              <span
+                aria-hidden="true"
+                className="grid h-9 w-9 flex-none place-items-center rounded-full bg-accent-wash font-display text-base font-semibold text-ink"
+                style={{ fontVariationSettings: '"SOFT" 100' }}
+              >
+                {initial}
+              </span>
+              <span className={`min-w-0 ${FADE}`}>
+                <span className="block truncate text-[15px] font-semibold">
+                  {user.firstName ?? "Settings"}
+                </span>
+                {user.school ? (
+                  <span className="mono block truncate text-ink-3">{user.school}</span>
+                ) : null}
+              </span>
+            </Link>
+          ) : null}
+          <ThemeButton className="ml-auto @max-[120px]:ml-0.5" />
+        </div>
+      </div>
     </aside>
   );
 }
