@@ -24,8 +24,20 @@
  * with M3-22's Home exam card for every upcoming exam, soonest first.
  * `getHomeView` says which exam and what each card shows.
  *
- * Cut: no cap greeting bubble, week strip, grades card or Never miss one
- * (M4, M6, M7).
+ * M4-10, the complete layout (prototype main-flow.html HTML 1420-1506, CSS
+ * 421-430, 591 (.home-top), 808-810 (two columns) and 958-982):
+ * - A sticky top row with the date line; under 700 px it also holds the
+ *   theme button (on wide screens the side nav has it).
+ * - Vitonen's greeting bubble with `getHomeView`'s `greeting()` sentence. The
+ *   flash cookie (`src/server/data/flash.ts`) says when she has just handed
+ *   in or studied; it is only read here and expires on its own.
+ * - The NEW tag on queue rows comes with each row's status (`isNew`).
+ * - Main column: greeting, DO FIRST, THEN, EXAMS AND QUIZZES. Rail: THIS WEEK
+ *   (later: grades, Never miss one). One column below a 960 px wide content
+ *   area; from there (the prototype's container query, on the scrolling
+ *   main) the rail is a 340 px second column next to a main of up to 720 px.
+ *
+ * Cut: grades card and Never miss one (M6-09, M7-04).
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -34,13 +46,18 @@ import { Suspense } from "react";
 import { DoodleDefs } from "@/components/doodle";
 import { CONCEPT_ICON_NAMES, ConceptIcon, iconFor, type ConceptIconName } from "@/components/exams/concept-icons";
 import { BiteRow, HomeExamCard } from "@/components/home/bite-row";
+import { Greeting } from "@/components/home/greeting";
 import { HeroCard } from "@/components/home/hero-card";
 import { Queue, QueueRow } from "@/components/home/queue-row";
+import { WeekCard } from "@/components/home/week-card";
 import { Button } from "@/components/ui/button";
 import { DoneRow } from "@/components/ui/done-row";
+import { StickyHeader } from "@/components/ui/sticky-header";
+import { ThemeButton } from "@/components/ui/theme-button";
 import { lmsNameOf } from "@/lib/schools";
 import { dateLine, earlyBy, listDate, sameDay } from "@/lib/dates";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
+import { readFlash } from "@/server/data/flash";
 import { getHomeView, type HomeBite, type HomeDone, type HomeExam, type HomeFirst } from "@/server/data/home";
 import { syncNow } from "@/server/sync/run";
 
@@ -191,92 +208,108 @@ async function HomeBody() {
     console.error("Home sync failed", err);
   }
   const now = new Date();
-  const view = await getHomeView(user.id, { now });
+  const flash = await readFlash(now);
+  const view = await getHomeView(user.id, { now, flash });
   if (!view.connection) redirect("/connect");
 
   return (
     <>
-      <p className="mono text-ink-3">{dateLine(now)}</p>
-      <h1 className="sr-only" tabIndex={-1}>
-        Home
-      </h1>
+      <div className="flex min-w-0 flex-col">
+        <StickyHeader className="-mx-[var(--pad)] -mt-1.5 flex min-h-11 items-center justify-between pr-[calc(var(--pad)-12px)] pl-[var(--pad)]">
+          <p className="mono text-ink-3">{dateLine(now)}</p>
+          <ThemeButton className="min-[700px]:hidden" />
+        </StickyHeader>
+        <h1 className="sr-only" tabIndex={-1}>
+          Home
+        </h1>
 
-      {view.connection.status === "expired" && (
-        <Link
-          href="/connect"
-          className="mt-4 block rounded-[14px] bg-butter px-4 py-3 text-[15px] font-medium text-ink"
-        >
-          {lms} signed you out. <span className="underline underline-offset-4">Reconnect.</span>
-        </Link>
-      )}
-
-      <p className="mt-4 text-[17px]">{view.firstName ? `Hi ${view.firstName}.` : "Hi there."}</p>
-
-      <DoodleDefs />
-
-      <section className="mt-8" aria-labelledby="lbl-first">
-        <SectionLabel id="lbl-first">DO FIRST</SectionLabel>
-        {view.biteFirst && view.bite ? (
-          <>
-            {view.lastDone && <DoFirst first={null} lastDone={view.lastDone} now={now} />}
-            <BiteFor bite={view.bite} first className={view.lastDone ? "mt-3" : undefined} />
-          </>
-        ) : (
-          <>
-            <DoFirst first={view.first} lastDone={view.lastDone} now={now} />
-            {view.bite && <BiteFor bite={view.bite} className="mt-3" />}
-          </>
+        {view.connection.status === "expired" && (
+          <Link
+            href="/connect"
+            className="mt-4 block rounded-[14px] bg-butter px-4 py-3 text-[15px] font-medium text-ink"
+          >
+            {lms} signed you out. <span className="underline underline-offset-4">Reconnect.</span>
+          </Link>
         )}
-      </section>
 
-      <section className="mt-8 flex flex-col" aria-labelledby="lbl-then">
-        <SectionLabel id="lbl-then">THEN</SectionLabel>
-        {view.then.length > 0 ? (
-          <Queue>
-            {view.then.map((a, i) => (
-              <QueueRow
-                key={a.id}
-                position={i + 2}
-                title={a.title}
-                course={a.course}
-                dueAt={a.dueAt}
-                estimateMin={a.estimateMin}
-                status={a.status}
-                action={
-                  <Button size="sm" href={a.href}>
-                    Start
-                  </Button>
-                }
-              />
-            ))}
-          </Queue>
-        ) : (
-          <p className="py-3 text-[15px] text-ink-2">Nothing else is open.</p>
-        )}
-        <Link
-          href="/assignments"
-          className={
-            "mt-1 inline-flex min-h-11 items-center self-start text-[15px] font-semibold text-ink " +
-            "underline decoration-line decoration-2 underline-offset-[5px] hover:decoration-accent"
-          }
-        >
-          All assignments
-        </Link>
-      </section>
+        <Greeting sentence={view.greeting} />
 
-      {view.exams.length > 0 && (
-        <section className="mt-8" aria-labelledby="lbl-exams">
-          <SectionLabel id="lbl-exams">EXAMS AND QUIZZES</SectionLabel>
-          <ExamCards exams={view.exams} />
+        <DoodleDefs />
+
+        <section className="mt-8" aria-labelledby="lbl-first">
+          <SectionLabel id="lbl-first">DO FIRST</SectionLabel>
+          {view.biteFirst && view.bite ? (
+            <>
+              {view.lastDone && <DoFirst first={null} lastDone={view.lastDone} now={now} />}
+              <BiteFor bite={view.bite} first className={view.lastDone ? "mt-3" : undefined} />
+            </>
+          ) : (
+            <>
+              <DoFirst first={view.first} lastDone={view.lastDone} now={now} />
+              {view.bite && <BiteFor bite={view.bite} className="mt-3" />}
+            </>
+          )}
         </section>
-      )}
+
+        <section className="mt-8 flex flex-col" aria-labelledby="lbl-then">
+          <SectionLabel id="lbl-then">THEN</SectionLabel>
+          {view.then.length > 0 ? (
+            <Queue>
+              {view.then.map((a, i) => (
+                <QueueRow
+                  key={a.id}
+                  position={i + 2}
+                  title={a.title}
+                  course={a.course}
+                  dueAt={a.dueAt}
+                  estimateMin={a.estimateMin}
+                  status={a.status}
+                  action={
+                    <Button size="sm" href={a.href}>
+                      Start
+                    </Button>
+                  }
+                />
+              ))}
+            </Queue>
+          ) : (
+            <p className="py-3 text-[15px] text-ink-2">Nothing else is open.</p>
+          )}
+          <Link
+            href="/assignments"
+            className={
+              "mt-1 inline-flex min-h-11 items-center self-start text-[15px] font-semibold text-ink " +
+              "underline decoration-line decoration-2 underline-offset-[5px] hover:decoration-accent"
+            }
+          >
+            All assignments
+          </Link>
+        </section>
+
+        {view.exams.length > 0 && (
+          <section className="mt-8" aria-labelledby="lbl-exams">
+            <SectionLabel id="lbl-exams">EXAMS AND QUIZZES</SectionLabel>
+            <ExamCards exams={view.exams} />
+          </section>
+        )}
+      </div>
+
+      <aside className="mt-9 flex min-w-0 flex-col gap-4 @min-[960px]:mt-0 @min-[960px]:pt-0.5" aria-label="This week">
+        <WeekCard week={view.week} />
+      </aside>
     </>
   );
 }
 
 export default function HomePage() {
   return (
-    <div className="mx-auto max-w-[720px] px-[var(--pad)] pt-[max(16px,env(safe-area-inset-top,0px))] pb-10 min-[700px]:pt-8">
+    <div
+      className={
+        "mx-auto grid max-w-[720px] grid-cols-[minmax(0,1fr)] gap-x-10 px-[var(--pad)] pb-4 " +
+        "pt-[max(16px,env(safe-area-inset-top,0px))] min-[700px]:px-10 min-[700px]:pt-8 min-[700px]:pb-6 " +
+        "min-[700px]:[--pad:40px] @min-[960px]:max-w-[1100px] @min-[960px]:grid-cols-[minmax(0,720px)_340px]"
+      }
+    >
       <Suspense fallback={null}>
         <HomeBody />
       </Suspense>

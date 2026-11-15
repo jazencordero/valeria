@@ -38,6 +38,7 @@ vi.mock("@/server/db/client", async (importOriginal) => {
 });
 
 const { biteDay, biteFor, firstNameOf, getHomeView } = await import("./home");
+const { encodeFlash, FLASH_MAX_AGE_S, parseFlash } = await import("./flash");
 const { beginSession, endSession, saveProgress } = await import("@/server/study/actions");
 
 const DB_TIMEOUT = 90_000;
@@ -418,5 +419,209 @@ describe("firstNameOf", () => {
     expect(firstNameOf("   ")).toBeNull();
     expect(firstNameOf(null)).toBeNull();
     expect(firstNameOf(undefined)).toBeNull();
+  });
+});
+
+// M4-10: the greeting, the NEW tag and the week.
+const TONIGHT = new Date("2026-11-14T21:00:00+02:00");
+const TUESDAY = new Date("2026-11-17T23:59:00+02:00");
+const handedInFlash = { kind: "handedIn" as const, at: NOW };
+
+describe("getHomeView: greeting", () => {
+  it("names tonight's deadline and the day she is clear until", async () => {
+    const u = await user({ name: "Valeria Example" });
+    const fm = await course(u.id, "Forecasting Methods");
+    await assignment(u.id, fm.id, "Assignment 3", { dueAt: TONIGHT });
+    await assignment(u.id, fm.id, "Case memo 2", { dueAt: TUESDAY });
+
+    const view = await getHomeView(u.id, { now: NOW }, t.db);
+
+    expect(view.greeting).toBe("Hi Valeria. One thing is due tonight, then you are clear until Tuesday.");
+  });
+
+  it("starts with 'Handed in' after a hand-in, naming what is next", async () => {
+    const u = await user({ name: "Valeria Example" });
+    const fm = await course(u.id, "Forecasting Methods");
+    await assignment(u.id, fm.id, "Assignment 3", {
+      dueAt: TONIGHT,
+      submittedAt: new Date("2026-11-14T15:47:00+02:00"),
+      state: "submitted",
+    });
+    await assignment(u.id, fm.id, "Case memo 2", { dueAt: TUESDAY });
+
+    const view = await getHomeView(u.id, { now: NOW, flash: handedInFlash }, t.db);
+
+    expect(view.greeting).toBe("Handed in, 5 hours early. Next up is Tuesday's Case memo 2.");
+  });
+
+  it("ignores a hand-in flash when there is no recent hand-in to name", async () => {
+    const u = await user();
+    const fm = await course(u.id, "Forecasting Methods");
+    await assignment(u.id, fm.id, "Case memo 2", { dueAt: TUESDAY });
+
+    const view = await getHomeView(u.id, { now: NOW, flash: handedInFlash }, t.db);
+
+    expect(view.greeting).toBe("Hi there. Nothing is due before Tuesday. A good day for a bite.");
+  });
+
+  it("says nothing open when nothing is", async () => {
+    const u = await user({ name: "Valeria" });
+
+    const view = await getHomeView(u.id, { now: NOW }, t.db);
+
+    expect(view.greeting).toBe("Hi Valeria. Nothing open. Enjoy it.");
+  });
+});
+
+describe("getHomeView: greeting with exams", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+
+  it(
+    "offers the bite row's exam after the next task",
+    async () => {
+      const u = await user({ name: "Valeria" });
+      signedIn.userId = u.id;
+      const fm = await course(u.id, "Forecasting Methods");
+      await assignment(u.id, fm.id, "Assignment 3", {
+        dueAt: TONIGHT,
+        submittedAt: new Date("2026-11-14T15:47:00+02:00"),
+      });
+      await assignment(u.id, fm.id, "memo", { dueAt: TUESDAY });
+      await exam(u.id, fm.id, "Forecasting exam", FRIDAY);
+
+      const view = await getHomeView(u.id, { now: NOW, flash: handedInFlash }, t.db);
+
+      expect(view.greeting).toBe(
+        "Handed in, 5 hours early. Next up is Tuesday's memo, or a 5-minute bite for Friday's exam.",
+      );
+    },
+    DB_TIMEOUT,
+  );
+
+  it(
+    "says the new forecast after a session, and ignores one for an exam not on Home",
+    async () => {
+      const u = await user({ name: "Valeria" });
+      signedIn.userId = u.id;
+      const fm = await course(u.id, "Forecasting Methods");
+      const friday = await exam(u.id, fm.id, "Forecasting exam", FRIDAY, { cards: false });
+
+      const studied = { kind: "studied" as const, at: NOW, examId: friday.id, forecast: 67.6 };
+      const view = await getHomeView(u.id, { now: NOW, flash: studied }, t.db);
+      expect(view.greeting).toBe("Nice. Friday's exam forecast is up to 68%.");
+
+      const other = { ...studied, examId: "00000000-0000-4000-8000-000000000000" };
+      const plain = await getHomeView(u.id, { now: NOW, flash: other }, t.db);
+      expect(plain.greeting).toBe("Hi Valeria. Nothing open. Enjoy it.");
+    },
+    DB_TIMEOUT,
+  );
+});
+
+describe("getHomeView: NEW tag", () => {
+  it("marks a row New when it arrived after the first sync and she has not opened it", async () => {
+    const u = await user();
+    const fm = await course(u.id, "Forecasting Methods");
+    await assignment(u.id, fm.id, "First", { dueAt: TONIGHT });
+    await assignment(u.id, fm.id, "Arrived today", {
+      dueAt: TUESDAY,
+      firstSeenAt: new Date("2026-11-14T09:00:00+02:00"),
+    });
+    await assignment(u.id, fm.id, "Opened", {
+      dueAt: new Date("2026-11-18T12:00:00+02:00"),
+      firstSeenAt: new Date("2026-11-14T09:00:00+02:00"),
+      seenAt: new Date("2026-11-14T10:00:00+02:00"),
+    });
+    await assignment(u.id, fm.id, "From the first sync", { dueAt: new Date("2026-11-19T12:00:00+02:00") });
+
+    const view = await getHomeView(u.id, { now: NOW }, t.db);
+
+    expect(view.then.map((a) => [a.title, a.status])).toEqual([
+      ["Arrived today", "new"],
+      ["Opened", "not_started"],
+      ["From the first sync", "not_started"],
+    ]);
+  });
+});
+
+describe("getHomeView: week", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+
+  it(
+    "marks today, deadlines, hand-ins and exams on the 7 days, and lists what is ahead",
+    async () => {
+      const u = await user();
+      signedIn.userId = u.id;
+      const fm = await course(u.id, "Forecasting Methods");
+      const old = await course(u.id, "Old course", { hidden: true });
+      await assignment(u.id, fm.id, "Assignment 3", { dueAt: TONIGHT });
+      await assignment(u.id, fm.id, "Case memo 2", { dueAt: TUESDAY });
+      await assignment(u.id, fm.id, "Early one", {
+        dueAt: new Date("2026-11-19T16:00:00+02:00"),
+        submittedAt: new Date("2026-11-13T10:00:00+02:00"),
+      });
+      await assignment(u.id, fm.id, "Far away", { dueAt: new Date("2026-11-25T12:00:00+02:00") });
+      await assignment(u.id, fm.id, "Yesterday's", { dueAt: new Date("2026-11-13T12:00:00+02:00") });
+      await assignment(u.id, old.id, "Hidden", { dueAt: new Date("2026-11-16T12:00:00+02:00") });
+      await exam(u.id, fm.id, "Forecasting exam", FRIDAY, { cards: false });
+
+      const { week } = await getHomeView(u.id, { now: NOW }, t.db);
+
+      expect(week.days.map((d) => `${d.weekday} ${d.day} ${d.marker ?? "-"}`)).toEqual([
+        "SAT 14 due_today",
+        "SUN 15 -",
+        "MON 16 -",
+        "TUE 17 deadline",
+        "WED 18 -",
+        "THU 19 done",
+        "FRI 20 exam",
+      ]);
+      expect(week.agenda.map((r) => `${r.date} ${r.title}`)).toEqual([
+        "TUE 17 Case memo 2",
+        "FRI 20 Forecasting exam",
+      ]);
+      expect(week.line).toBe("Nothing else is due before Tuesday.");
+    },
+    DB_TIMEOUT,
+  );
+
+  it("says nothing is due when the week is empty", async () => {
+    const u = await user();
+
+    const { week } = await getHomeView(u.id, { now: NOW }, t.db);
+
+    expect(week.days).toHaveLength(7);
+    expect(week.agenda).toEqual([]);
+    expect(week.line).toBe("Nothing due this week.");
+  });
+});
+
+describe("parseFlash", () => {
+  it("reads back what encodeFlash wrote", () => {
+    expect(parseFlash(encodeFlash("handedIn", null, NOW), NOW)).toEqual({ kind: "handedIn", at: NOW });
+    const studied = encodeFlash("studied", { examId: "e1", forecast: 68 }, NOW);
+    expect(parseFlash(studied, new Date(NOW.getTime() + 30_000))).toEqual({
+      kind: "studied",
+      at: NOW,
+      examId: "e1",
+      forecast: 68,
+    });
+  });
+
+  it("drops a note older than the max age, from the future, or malformed", () => {
+    const raw = encodeFlash("handedIn", null, NOW);
+    expect(parseFlash(raw, new Date(NOW.getTime() + FLASH_MAX_AGE_S * 1000 + 1))).toBeNull();
+    expect(parseFlash(raw, new Date(NOW.getTime() - 60_000))).toBeNull();
+    expect(parseFlash(undefined, NOW)).toBeNull();
+    expect(parseFlash("not json", NOW)).toBeNull();
+    expect(parseFlash(JSON.stringify({ kind: "handedIn" }), NOW)).toBeNull();
+    expect(parseFlash(JSON.stringify({ kind: "studied", at: NOW.getTime(), examId: "e1" }), NOW)).toBeNull();
+    expect(parseFlash(JSON.stringify({ kind: "other", at: NOW.getTime() }), NOW)).toBeNull();
   });
 });

@@ -30,11 +30,27 @@
  *   cards, so a fresh exam shows no row instead of a done one.
  * - `biteFirst`: nothing is open, so the bite is the DO FIRST card.
  *
- * Later Home tickets (week strip, grades) extend `HomeView` here.
+ * M4-10 adds the greeting and the week:
+ * - `greeting`: M4-06's `greeting()` sentence. Its queue is the open list
+ *   above (same order), its exam the bite row's exam (the "or a 5-minute
+ *   bite" offer names the exam the bite row is for, and none when there is
+ *   no bite). `options.flash` is what she just did (`flash.ts`): a hand-in
+ *   names `lastDone`, the newest hand-in, which the hand-in has just
+ *   written; a session names its exam from the list above with the forecast
+ *   the done screen showed. A flash whose hand-in or exam is not there (a
+ *   hidden course, a past exam) is ignored and the usual sentence is shown.
+ * - `week`: M4-08's `weekModel()` for the THIS WEEK card. Items are her
+ *   visible open and handed-in assignments with a due time (handed-in ones
+ *   mark their due day done), her upcoming exams (`kind: "exam"`) and quizzes
+ *   (`"quiz"`, which count as deadlines). `weekModel` keeps the 7 days.
+ *
+ * Later Home tickets (grades) extend `HomeView` here.
  */
-import { eq } from "drizzle-orm";
+import { and, eq, gte, lt } from "drizzle-orm";
 import { TIME_ZONE } from "@/lib/dates";
-import { DONE_WINDOW_MS } from "@/lib/queue";
+import { greeting, type GreetingAssignment, type JustHandedIn, type JustStudied, type NextExam } from "@/lib/home/greeting";
+import { WEEK_DAYS, weekModel, type WeekItem, type WeekModel } from "@/lib/home/week";
+import { DONE_WINDOW_MS, type Queue } from "@/lib/queue";
 import { gradeFor } from "@/lib/study/forecast";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
@@ -44,6 +60,7 @@ import { assignments } from "@/server/db/schema/work";
 import { examView, type ExamView } from "@/server/study/actions";
 import { getAssignmentsView, type DoneAssignment, type OpenAssignment } from "./assignments";
 import { getExamsView, type ExamsTabExam, type ExamViewLoader } from "./exams";
+import type { Flash } from "./flash";
 
 export type HomeConnection = { status: (typeof MOODLE_STATUSES)[number] };
 
@@ -103,6 +120,10 @@ export type HomeView = {
   bite: HomeBite | null;
   /** True when nothing is open and there is a bite: the bite is the DO FIRST card. */
   biteFirst: boolean;
+  /** The sentence in Vitonen's bubble. */
+  greeting: string;
+  /** The THIS WEEK card. */
+  week: WeekModel;
 };
 
 /** "Valeria Example" gives "Valeria"; empty or missing gives null. */
@@ -169,12 +190,55 @@ function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>): HomeBite 
   return null;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The open list as `greeting()`'s queue. The greeting reads only the order,
+ * titles and due times; the other queue fields are filled to satisfy the type.
+ */
+function greetingQueue(open: OpenAssignment[], now: Date): Queue<GreetingAssignment> {
+  const rows: GreetingAssignment[] = open.map((a) => ({
+    id: a.id,
+    title: a.title,
+    due_at: a.dueAt,
+    submitted_at: null,
+    first_seen_at: now,
+    seen_at: null,
+    from_first_sync: true,
+  }));
+  return { first: rows[0] ?? null, then: rows.slice(1), done: [] };
+}
+
+/** What she just did, as `greeting()` takes it. Both null when the flash names nothing on Home. */
+export function reactionTo(
+  flash: Flash | null | undefined,
+  lastDone: HomeDone | null,
+  views: ReadonlyMap<string, ExamView>,
+): { justHandedIn: JustHandedIn | null; justStudied: JustStudied | null } {
+  if (flash?.kind === "handedIn" && lastDone) {
+    return {
+      justHandedIn: { title: lastDone.title, submittedAt: lastDone.submittedAt, dueAt: lastDone.dueAt },
+      justStudied: null,
+    };
+  }
+  if (flash?.kind === "studied") {
+    const v = views.get(flash.examId);
+    if (v) {
+      return {
+        justHandedIn: null,
+        justStudied: { examTitle: v.exam.title, forecast: flash.forecast, examAt: v.exam.at },
+      };
+    }
+  }
+  return { justHandedIn: null, justStudied: null };
+}
+
 export async function getHomeView(
   userId: string,
-  options: { now: Date; view?: ExamViewLoader },
+  options: { now: Date; view?: ExamViewLoader; flash?: Flash | null },
   database: Db = defaultDb,
 ): Promise<HomeView> {
-  const { now, view: load = examView } = options;
+  const { now, view: load = examView, flash = null } = options;
 
   const [me] = await database
     .select({ displayName: users.displayName })
@@ -233,6 +297,41 @@ export async function getHomeView(
   });
   const bite = pickBite(examList.exams, views);
 
+  // The greeting: the bite row's exam is the one it offers a bite for.
+  const biteView = bite?.state === "bite" ? views.get(bite.examId) : undefined;
+  const nextExam: NextExam | null = biteView ? { title: biteView.exam.title, at: biteView.exam.at } : null;
+  const sentence = greeting({
+    firstName: firstNameOf(me?.displayName),
+    queue: greetingQueue(view.open, now),
+    now,
+    nextExam,
+    ...reactionTo(flash, lastDone, views),
+  });
+
+  // The week: due times from a day before now to a day past the window
+  // (`weekModel` cuts to Helsinki days). Only rows on the visible lists count.
+  const open = new Set(view.open.map((a) => a.id));
+  const handedIn = new Set(view.done.map((a) => a.id));
+  const dueRows = await database
+    .select({ id: assignments.id, title: assignments.name, dueAt: assignments.dueAt })
+    .from(assignments)
+    .where(
+      and(
+        eq(assignments.userId, userId),
+        gte(assignments.dueAt, new Date(now.getTime() - DAY_MS)),
+        lt(assignments.dueAt, new Date(now.getTime() + (WEEK_DAYS + 1) * DAY_MS)),
+      ),
+    );
+  const weekItems: WeekItem[] = [];
+  for (const r of dueRows) {
+    if (!r.dueAt || !(open.has(r.id) || handedIn.has(r.id))) continue;
+    weekItems.push({ id: r.id, kind: "deadline", title: r.title, at: r.dueAt, done: handedIn.has(r.id) });
+  }
+  for (const card of examList.exams) {
+    const v = views.get(card.id);
+    if (v) weekItems.push({ id: card.id, kind: card.kind, title: card.title, at: v.exam.at, done: false });
+  }
+
   return {
     firstName: firstNameOf(me?.displayName),
     connection: link ? { status: link.status } : null,
@@ -242,5 +341,7 @@ export async function getHomeView(
     exams,
     bite,
     biteFirst: first === null && bite?.state === "bite",
+    greeting: sentence,
+    week: weekModel(weekItems, now),
   };
 }
