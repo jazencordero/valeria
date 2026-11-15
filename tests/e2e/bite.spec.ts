@@ -151,8 +151,8 @@ test("one bite: Start, eight cards with one miss, done, the exam's forecast is u
       case "match": {
         const q = (await card.getByRole("heading", { level: 2 }).textContent()) ?? "";
         const pairs = byQuestion(q).pairs!;
-        const terms = card.getByRole("group", { name: "Terms" });
-        const meanings = card.getByRole("group", { name: "Meanings" });
+        const terms = card.getByTestId("match-terms");
+        const meanings = card.getByTestId("match-meanings");
         for (const [term, meaning] of pairs) {
           await terms.getByRole("button", { name: term, exact: true }).focus();
           await page.keyboard.press("Enter");
