@@ -309,6 +309,7 @@ describe("getHomeView: bite row and exam cards", () => {
         examId: soon.id,
         forWhat: "Friday\u2019s exam",
         href: `/study/new?exam=${soon.id}&kind=bite`,
+        more: false,
       });
       const bite = view.bite as Extract<typeof view.bite, { state: "bite" }>;
       expect(bite.cards).toBeGreaterThan(0);
@@ -336,7 +337,8 @@ describe("getHomeView: bite row and exam cards", () => {
 
       await playBite(friday.id);
       const mid = await getHomeView(u.id, { now: NOW }, t.db);
-      expect(mid.bite).toMatchObject({ state: "bite", examId: friday.id });
+      // A bite is done today: the row says "one more", as the Today tab does.
+      expect(mid.bite).toMatchObject({ state: "bite", examId: friday.id, more: true });
 
       await playBite(friday.id);
       const done = await getHomeView(u.id, { now: NOW }, t.db);

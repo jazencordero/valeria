@@ -56,6 +56,8 @@ export type ProgressSheetProps = {
   daysLeft: number;
   /** What comes next, for example "Final review starts Tue 17." */
   phaseNext?: string;
+  /** False when exam-day bites can still bring new cards (see `PhaseStrip`). Default true. */
+  nothingNewOnExamDay?: boolean;
   /** From weekOf. */
   week: Week;
   weeksInARow: number;
@@ -84,6 +86,7 @@ export function ProgressSheet({
   focusId = null,
   daysLeft,
   phaseNext,
+  nothingNewOnExamDay,
   week,
   weeksInARow,
   freeSkipsLeft,
@@ -117,6 +120,7 @@ export function ProgressSheet({
           focusId={focusId}
           daysLeft={daysLeft}
           phaseNext={phaseNext}
+          nothingNewOnExamDay={nothingNewOnExamDay}
           week={week}
           weeksInARow={weeksInARow}
           freeSkipsLeft={freeSkipsLeft}
@@ -130,7 +134,7 @@ export function ProgressSheet({
 
 type BodyProps = Pick<
   ProgressSheetProps,
-  "concepts" | "focusId" | "daysLeft" | "phaseNext" | "week" | "weeksInARow" | "freeSkipsLeft" | "onPractise"
+  "concepts" | "focusId" | "daysLeft" | "phaseNext" | "nothingNewOnExamDay" | "week" | "weeksInARow" | "freeSkipsLeft" | "onPractise"
 > & { onClose: () => void };
 
 /** Mounts when the sheet opens, so the path draws in and nothing stays selected. */
@@ -139,6 +143,7 @@ function ProgressBody({
   focusId,
   daysLeft,
   phaseNext,
+  nothingNewOnExamDay,
   week,
   weeksInARow,
   freeSkipsLeft,
@@ -184,7 +189,7 @@ function ProgressBody({
           </ul>
         </section>
 
-        {daysLeft >= 0 && <PhaseStrip daysLeft={daysLeft} next={phaseNext} />}
+        {daysLeft >= 0 && <PhaseStrip daysLeft={daysLeft} next={phaseNext} nothingNewOnExamDay={nothingNewOnExamDay} />}
 
         <div>
           <ConceptPath

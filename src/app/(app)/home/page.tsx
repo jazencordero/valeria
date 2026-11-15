@@ -235,6 +235,7 @@ function BiteFor({ bite, first = false, className }: { bite: HomeBite; first?: b
       forWhat={bite.forWhat}
       href={bite.href}
       pace={bite.pace}
+      more={bite.more}
       first={first}
       className={className}
     />

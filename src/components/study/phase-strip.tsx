@@ -20,7 +20,15 @@ import { PHASES, phaseOf, phasePosition, type Phase } from "@/lib/study/ladder";
 /** ladder.ts says "Your weakest concepts and a mock exam."; the mock exam waits for M8-15. */
 const FINAL_REVIEW_NOW = "Your weakest concepts, one more time.";
 
-function descriptionOf(phase: Phase): string {
+/**
+ * ladder.ts says "A 10-card warm-up. Nothing new." for exam day. That is true where the plan
+ * stops new cards before the exam (a paced exam); elsewhere an exam-day bite can still bring
+ * new cards, so only the half that is true is said.
+ */
+const EXAM_DAY_WITH_NEW = "A short warm-up.";
+
+function descriptionOf(phase: Phase, nothingNew: boolean): string {
+  if (phase.index === 3 && !nothingNew) return EXAM_DAY_WITH_NEW;
   return phase.index === 2 ? FINAL_REVIEW_NOW : phase.description;
 }
 
@@ -29,10 +37,12 @@ export type PhaseStripProps = {
   daysLeft: number;
   /** What comes next, for example "Final review starts Tue 17." Empty on exam day. */
   next?: string;
+  /** False when exam-day bites can still bring new cards: the sentence then leaves "Nothing new." out. Default true. */
+  nothingNewOnExamDay?: boolean;
   className?: string;
 };
 
-export function PhaseStrip({ daysLeft, next, className = "" }: PhaseStripProps) {
+export function PhaseStrip({ daysLeft, next, nothingNewOnExamDay = true, className = "" }: PhaseStripProps) {
   const labelId = useId();
   const mode = useMotionMode();
   const animate = mode === "full";
@@ -96,7 +106,7 @@ export function PhaseStrip({ daysLeft, next, className = "" }: PhaseStripProps) 
           </span>
         </div>
         <p className="mt-3 text-[13px] text-ink-2">
-          <b className="text-ink">{phase.name}.</b> {descriptionOf(phase)}
+          <b className="text-ink">{phase.name}.</b> {descriptionOf(phase, nothingNewOnExamDay)}
           {next ? <span className="text-ink-3"> {next}</span> : null}
         </p>
       </div>

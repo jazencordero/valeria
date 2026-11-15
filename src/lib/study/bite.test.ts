@@ -231,6 +231,71 @@ describe("conceptSession", () => {
   });
 });
 
+describe("tiles move through their cards", () => {
+  const typed = (n: number): Deck => {
+    const deck = makeDeck(n, 3, 0);
+    return { ...deck, cards: deck.cards.map((c) => ({ ...c, type: "basic" as const, boss: false, conceptIds: undefined })) };
+  };
+  const play = (deck: Deck, s: Bite, at: Date): Deck => {
+    const states = { ...deck.states };
+    for (const id of ids(s)) states[id] = grade(states[id] ?? newCard(at), 4, at);
+    return { ...deck, states };
+  };
+
+  it("serves the next unseen cards instead of the same three", () => {
+    let deck = typed(8);
+    const served: string[][] = [];
+    for (let i = 0; i < 3; i++) {
+      const s = tileSession(deck, "basic")!;
+      served.push(ids(s));
+      // Graded Easy: not due again for days.
+      deck = play(deck, s, new Date(NOW.getTime() - 60 * 1000 + i * 1000));
+    }
+    expect(served).toEqual([["k0", "k1", "k2"], ["k3", "k4", "k5"], ["k6", "k7", "k0"]]);
+    // Everything is seen and nothing is due: the ones she saw longest ago come back first.
+    expect(ids(tileSession(deck, "basic")!)).toEqual(["k1", "k2", "k3"]);
+  });
+
+  it("puts due cards before unseen ones, most overdue first", () => {
+    const deck = typed(8);
+    const states = { k5: reviewed(3), k2: reviewed(9) };
+    expect(ids(tileSession({ ...deck, states }, "basic")!)).toEqual(["k2", "k5", "k0"]);
+  });
+
+  it("in a deck with core marks, unseen core cards come before the others", () => {
+    const deck = typed(8);
+    const cards = deck.cards.map((c) => ({ ...c, core: c.id === "k6" || c.id === "k4" }));
+    expect(ids(tileSession({ ...deck, cards }, "basic")!)).toEqual(["k6", "k4", "k0"]);
+  });
+});
+
+describe("concept practice order", () => {
+  const card = (id: string, extra: Partial<BiteCard> = {}): BiteCard => ({ id, conceptId: "c0", rung: 1, type: "basic", boss: false, active: true, ...extra });
+  const deck = (cards: BiteCard[], states: Record<string, MemoryState> = {}): Deck => ({
+    cards,
+    states,
+    concepts: [{ id: "c0", weight: 1, order: 0 }],
+    examAt: EXAM,
+    now: NOW,
+  });
+
+  it("starts with the concept's first card, then core cards, then the rest", () => {
+    const cards = [card("a"), card("b", { core: true }), card("c"), card("d", { core: true }), card("e", { first: true }), card("f")];
+    expect(section(conceptSession(deck(cards), "c0")!, "learn")).toEqual(["e", "b", "d", "a"]);
+  });
+
+  it("a first card she has graded no longer leads", () => {
+    const cards = [card("a"), card("b", { core: true }), card("e", { first: true })];
+    const t = new Date(NOW.getTime() - 60 * 1000);
+    expect(section(conceptSession(deck(cards, { e: grade(newCard(t), 4, t) }), "c0")!, "learn")).toEqual(["b", "a", "e"]);
+  });
+
+  it("a deck without marks keeps deck order", () => {
+    const cards = [card("a"), card("b"), card("c"), card("d"), card("e")];
+    expect(section(conceptSession(deck(cards), "c0")!, "learn")).toEqual(["a", "b", "c", "d"]);
+  });
+});
+
 describe("extraSession", () => {
   it("gives 5 available non-boss cards in deck order", () => {
     const deck = makeDeck(30, 3, 0);

@@ -103,7 +103,8 @@
  *   default) or `'anki'` (Again / Hard / Good / Easy). Other settings keys
  *   are kept.
  * - Study week: `weekOf` over her review days this week (all exams), with
- *   the fixed goal of 4, plus the streak line.
+ *   the fixed goal of 4, or every day until the exam while this exam is 1 to
+ *   14 days away (`goalFor`), plus the streak line (none at 0 weeks).
  * - Cut: no offline queue. `saveProgress` is idempotent (the store skips
  *   reviews it already has), so the screen retries a failed save three times
  *   with the same batch, then tells her.
@@ -149,7 +150,7 @@ import { isPaced, paceOf } from "@/lib/study/pace";
 import { flatPlan, keepWords, planOf, verdictOf, type Plan } from "@/lib/study/plan";
 import { GRADES, grade as gradeMemory, intervalLabel, newCard, type Grade, type MemoryState } from "@/lib/study/memory";
 import type { SessionMode } from "@/lib/study/session";
-import { DEFAULT_GOAL, freeSkipsLeft, streakLine, weekOf, weeksInARow, type Week } from "@/lib/study/week";
+import { DEFAULT_GOAL, freeSkipsLeft, goalFor, streakLine, weekOf, weeksInARow, type Week } from "@/lib/study/week";
 import { newCardsAllowed } from "./start-date";
 import {
   bitesDoneToday,
@@ -523,10 +524,11 @@ async function snapshots(userId: string, state: ExamState, now: Date, database: 
   return out;
 }
 
-async function studyWeek(userId: string, now: Date, database: Db): Promise<StudyWeek> {
+/** `examAt`: the exam this week is shown for; within 14 days of it the goal is every day (`goalFor`). */
+async function studyWeek(userId: string, now: Date, database: Db, examAt: Date | null = null): Promise<StudyWeek> {
   // Weeks in a row looks back week by week; a year of review days is plenty.
   const days = await reviewDays(userId, new Date(startOfWeek(now).getTime() - 53 * 7 * DAY_MS), database);
-  const week = weekOf(days, DEFAULT_GOAL, now);
+  const week = weekOf(days, goalFor(days, examAt, now), now);
   const weeks = weeksInARow(days, DEFAULT_GOAL, now);
   const skips = freeSkipsLeft(days, DEFAULT_GOAL, now);
   return { ...week, weeksInARow: weeks, freeSkipsLeft: skips, streakLine: streakLine(weeks, skips) };
@@ -561,7 +563,7 @@ async function buildExamView(userId: string, examId: string, now: Date, database
     countsToday(userId, examId, now, database),
     upcoming(userId, examId, now, database),
     last14(userId, examId, now, database),
-    studyWeek(userId, now, database),
+    studyWeek(userId, now, database, exam.at),
     gradeModeOf(userId, database),
     snapshots(userId, state, now, database),
   ]);
@@ -801,7 +803,7 @@ async function end(userId: string, sessionId: string, now: Date, database: Db): 
   // After the finish, so this session counts as done today.
   const [done, week] = await Promise.all([
     bitesDoneToday(userId, session.examId, now, database),
-    studyWeek(userId, now, database),
+    studyWeek(userId, now, database, state.exam.at),
   ]);
 
   const plan = planFor(state, now, done);

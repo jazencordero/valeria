@@ -36,6 +36,15 @@
  *   it is met; 0 once the week can only be kept by using the skip (or cannot
  *   be kept at all). Label "1 FREE SKIP LEFT" is the prototype's; the 0 case
  *   has no prototype copy, so "FREE SKIP USED" is ours.
+ * - No weeks in a row yet: the streak line is left out (`streakLine` gives
+ *   ""), not "0 WEEKS IN A ROW".
+ * - With an exam in sight (`goalFor`): from 14 days before the exam to the day
+ *   before it, the week's goal is every day until the exam, because the plan
+ *   asks for bites every day. That is the days she has studied this week plus
+ *   every day still open this week (today, if she has not studied yet, to
+ *   Sunday or the day before the exam, whichever comes first). Days already
+ *   missed are not held against her. Otherwise the usual goal. Weeks in a
+ *   row and the free skip keep the usual goal either way.
  */
 import { daysBetween, startOfWeek, type DateInput } from "../dates";
 
@@ -93,6 +102,32 @@ function countsByWeek(offsets: Set<number>): Map<number, number> {
     out.set(w, (out.get(w) ?? 0) + 1);
   }
   return out;
+}
+
+/** From this many days before an exam, the week's goal is every day until the exam. */
+export const EVERY_DAY_WITHIN = 14;
+
+/**
+ * The week's goal for `weekOf`: every day until the exam while one is 1 to 14
+ * days away (see the header), else `fallback`.
+ */
+export function goalFor(
+  reviewDays: readonly DateInput[],
+  examAt: DateInput | null | undefined,
+  now: DateInput,
+  fallback: number = DEFAULT_GOAL,
+): number {
+  if (examAt == null) return fallback;
+  const daysToExam = daysBetween(now, examAt);
+  if (daysToExam < 1 || daysToExam > EVERY_DAY_WITHIN) return fallback;
+  const today = daysBetween(startOfWeek(now), now);
+  const offsets = dayOffsets(reviewDays, now);
+  let done = 0;
+  for (let i = 0; i <= today; i++) if (offsets.has(i)) done++;
+  // The last day that counts: Sunday, or the day before the exam.
+  const last = Math.min(6, today + daysToExam - 1);
+  const open = last - today + (offsets.has(today) ? 0 : 1);
+  return clampGoal(done + open);
 }
 
 /** A finished week counts toward the streak, using the free skip if needed. */
@@ -162,8 +197,9 @@ export function freeSkipLabel(left: number): string {
   return left > 0 ? `${left} FREE SKIP LEFT` : "FREE SKIP USED";
 }
 
-/** The line under the sentence: "3 WEEKS IN A ROW · 1 FREE SKIP LEFT". */
+/** The line under the sentence: "3 WEEKS IN A ROW · 1 FREE SKIP LEFT". Empty with no week in a row yet. */
 export function streakLine(weeks: number, skipsLeft: number): string {
+  if (weeks <= 0) return "";
   const w = weeks === 1 ? "1 WEEK IN A ROW" : `${weeks} WEEKS IN A ROW`;
   return `${w} · ${freeSkipLabel(skipsLeft)}`;
 }

@@ -1,6 +1,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BiteRow } from "@/components/home/bite-row";
+import { BiteRow, biteTitle } from "@/components/home/bite-row";
+import { PhaseStrip } from "./phase-strip";
+import { StudyDays } from "./study-days";
+import { weekOf } from "@/lib/study/week";
 import { BiteCard } from "./bite-card";
 import { forecastChartLabel, forecastChartLayout, type ForecastChartData } from "./forecast-chart";
 import { GainMost } from "./gain-most";
@@ -103,5 +106,36 @@ describe("a concept's percent", () => {
     render(<GainMost concepts={[{ id: "c1", name: "Sample concept", weight: 1, mastery: 0.2 }]} />);
     expect(document.body.textContent).toContain("20% now");
     expect(document.body.textContent).not.toContain("on exam day");
+  });
+});
+
+describe("small true things", () => {
+  it("Home says one more bite once a bite is done today, like the Today tab", () => {
+    expect(biteTitle(5, "Monday’s exam")).toBe("Or a 5-minute bite for Monday’s exam");
+    expect(biteTitle(5, "Monday’s exam", true)).toBe("A 5-minute bite for Monday’s exam");
+    expect(biteTitle(5, "Monday’s exam", false, true)).toBe("Or one more 5-minute bite for Monday’s exam");
+    expect(biteTitle(5, "Monday’s exam", true, true)).toBe("One more 5-minute bite for Monday’s exam");
+    render(<BiteRow state="bite" minutes={5} cards={8} gain={0.7} forWhat="Monday’s exam" href="/study/new" more />);
+    expect(document.body.textContent).toContain("Or one more 5-minute bite for Monday’s exam");
+  });
+
+  it("the phase sentence says 'Nothing new' on exam day only where that is true", () => {
+    const { rerender } = render(<PhaseStrip daysLeft={0} />);
+    expect(document.body.textContent).toContain("A 10-card warm-up. Nothing new.");
+    rerender(<PhaseStrip daysLeft={0} nothingNewOnExamDay={false} />);
+    expect(document.body.textContent).toContain("A short warm-up.");
+    expect(document.body.textContent).not.toContain("Nothing new");
+    // Other phases are the same either way.
+    rerender(<PhaseStrip daysLeft={8} nothingNewOnExamDay={false} />);
+    expect(document.body.textContent).toContain("More reviews and exam-style questions.");
+  });
+
+  it("the streak line is left out in week one", () => {
+    const now = "2026-11-16T08:00:00+02:00";
+    const { rerender } = render(<StudyDays week={weekOf([], 7, now)} weeksInARow={0} freeSkipsLeft={1} />);
+    expect(document.body.textContent).toContain("0 of 7 days this week. 7 more to go.");
+    expect(document.body.textContent).not.toMatch(/IN A ROW|FREE SKIP/);
+    rerender(<StudyDays week={weekOf([], 4, now)} weeksInARow={2} freeSkipsLeft={1} />);
+    expect(document.body.textContent).toContain("2 WEEKS IN A ROW · 1 FREE SKIP LEFT");
   });
 });

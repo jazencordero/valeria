@@ -366,6 +366,8 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
         focusId: view.focusConcept?.id ?? null,
         daysLeft: view.daysLeft,
         phaseNext: phaseNext(view.daysLeft, examDay),
+        // Only a paced exam stops new cards before the exam; elsewhere "Nothing new." would not be true.
+        nothingNewOnExamDay: view.pace !== undefined,
         week: { days: view.week.days, count: view.week.count, goal: view.week.goal, met: view.week.met, sentence: view.week.sentence },
         weeksInARow: view.week.weeksInARow,
         freeSkipsLeft: view.week.freeSkipsLeft,

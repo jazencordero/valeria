@@ -157,6 +157,8 @@ export type ExamPageProps = {
     daysLeft: number;
     /** "Final review starts Tue 17." */
     phaseNext?: string;
+    /** False when exam-day bites can still bring new cards: the phase sentence leaves "Nothing new." out. */
+    nothingNewOnExamDay?: boolean;
     /** Said instead of the grade and plan sentence, when there is no plan to promise. */
     note?: string;
     week: Week;
@@ -543,6 +545,7 @@ export function ExamPage({
         focusId={progress.focusId}
         daysLeft={progress.daysLeft}
         phaseNext={progress.phaseNext}
+        nothingNewOnExamDay={progress.nothingNewOnExamDay}
         week={progress.week}
         weeksInARow={progress.weeksInARow}
         freeSkipsLeft={progress.freeSkipsLeft}

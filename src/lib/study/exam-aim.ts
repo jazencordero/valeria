@@ -15,17 +15,32 @@
  *   that moment. Recall falls with time and wanted recall rises toward the
  *   exam, so their difference only falls: a bisection over time finds the
  *   crossing in about 30 steps (to the minute).
- * - Clamp: a due date after the exam moves to `examAt - FINAL_MARGIN` (12 h
- *   before, the evening before a morning exam), which sits inside the final
- *   72 h window. If that moment has already passed, the card is not scheduled
- *   again (null). From the exam on, nothing is scheduled (null): the Cut says
+ * - Clamp: a graded card whose due date is after the exam, and whose recall
+ *   holds until then, gets one last review inside the final window (72 h to
+ *   12 h before the exam). Its place in the window (`finalSlot`) is spread:
+ *   a fixed share of the window worked out from the card's own memory (its
+ *   last review time and stability), so the cards do not all fall due on the
+ *   evening before, and the same state always gives the same date. A slot
+ *   that has passed means due now. A card already reviewed inside the window
+ *   has had that review: it is not scheduled again (null).
+ *   Before this, every such card moved to `examAt - FINAL_MARGIN`: on a real
+ *   400-card deck 397 cards fell due on the one evening before the exam.
+ *   A card never graded keeps the old clamp (12 h before; null once that has
+ *   passed). From the exam on, nothing is scheduled (null): the Cut says
  *   cards simply stop.
+ * - `dueNow` answers "is it due now?" with one recall prediction; a bite and
+ *   the plan simulation ask nothing else.
  * - `finalPass`: per concept, if no card is due in the final 72 h window, one
  *   card is moved to the start of that window (or now, if the window has
  *   begun). The card picked is the one with the lowest predicted recall on
  *   exam day, preferring cards that would not otherwise be seen before the
  *   exam (no due date, or due after it), so moving it only adds a review.
  *   Ties go to the smaller id.
+ * - `finalPass` and `spreadBacklog` are still called by nothing. They answer
+ *   other questions (does every concept get a card in the window; how many of
+ *   an overdue pile to do today) and neither moves the date the pile was
+ *   made by. Spreading the clamp removes the pile at its source, in the one
+ *   function every due date already goes through.
  * - `spreadBacklog`: today's share is exactly
  *   `min(perDay, ceil(n / daysLeft))`, with `daysLeft = max(1, ceil(time to
  *   exam in days))`. Cards are ordered weakest concept first (lowest mean
@@ -98,8 +113,35 @@ export function aimedDue(
   }
 
   if (due <= exam) return due;
-  const clamped = exam - FINAL_MARGIN_MS;
-  return clamped > t0 ? clamped : null;
+  if (!graded) {
+    const clamped = exam - FINAL_MARGIN_MS;
+    return clamped > t0 ? clamped : null;
+  }
+  const slot = finalSlot(state, exam);
+  return slot === null ? null : Math.max(slot, t0);
+}
+
+/**
+ * Where in the final window a graded card gets its last review: a fixed share
+ * of the stretch from 72 h to 12 h before the exam, from the card's own
+ * memory. Null when it was last reviewed inside the window already.
+ */
+export function finalSlot(state: MemoryState, examAt: Time): number | null {
+  const exam = ms(examAt);
+  const open = exam - FINAL_WINDOW_MS;
+  const close = exam - FINAL_MARGIN_MS;
+  const last = state.lastReviewAt ?? 0;
+  if (last >= open) return null;
+  return Math.round(open + share(last, state.stability) * (close - open));
+}
+
+/** A fixed, well-mixed number in [0, 1) for a card's last review time and stability. */
+function share(lastReviewAt: number, stability: number): number {
+  let x = (Math.floor(lastReviewAt / 1000) ^ Math.floor(stability * 1e6)) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b);
+  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b);
+  x ^= x >>> 16;
+  return (x >>> 0) / 2 ** 32;
 }
 
 /**
@@ -116,8 +158,12 @@ export function dueNow(state: MemoryState, examAt: Time, now: Time): number | nu
   if (t0 >= exam) return null;
   const graded = state.lastReviewAt !== null && state.state !== 0;
   if (!graded) return null;
-  // Not due by its own date: due now only if recall has already fallen to the wanted recall.
-  return recallAt(state, new Date(t0)) - wantedRecall((exam - t0) / DAY) <= 0 ? t0 : null;
+  // Not due by its own date: due now if recall has already fallen to the wanted recall,
+  if (recallAt(state, new Date(t0)) - wantedRecall((exam - t0) / DAY) <= 0) return t0;
+  // or if it holds past the exam and its slot in the final window has come.
+  if (state.dueAt <= exam || recallAt(state, new Date(exam)) - wantedRecall(0) <= 0) return null;
+  const slot = finalSlot(state, exam);
+  return slot !== null && slot <= t0 ? t0 : null;
 }
 
 /** A card as the final pass sees it: `dueAt` is its planned due (or null). */

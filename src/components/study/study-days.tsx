@@ -119,12 +119,14 @@ export function StudyDays({
         })}
       </div>
       <p className="mt-3 text-[13px] text-ink">{week.sentence}</p>
-      <p className="mono mt-1.5 flex items-center gap-1.5 !text-[11px] text-ink-3">
-        <svg className="ic !size-3.5 text-accent" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 3c1 4 5 5.5 5 10a5 5 0 0 1-10 0c0-2.2 1-3.6 2.2-4.6.2 1.6 1 2.6 2.3 3.1C11 9 10.6 6 12 3z" />
-        </svg>
-        {streakLine(weeksInARow, freeSkipsLeft)}
-      </p>
+      {streakLine(weeksInARow, freeSkipsLeft) ? (
+        <p className="mono mt-1.5 flex items-center gap-1.5 !text-[11px] text-ink-3">
+          <svg className="ic !size-3.5 text-accent" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3c1 4 5 5.5 5 10a5 5 0 0 1-10 0c0-2.2 1-3.6 2.2-4.6.2 1.6 1 2.6 2.3 3.1C11 9 10.6 6 12 3z" />
+          </svg>
+          {streakLine(weeksInARow, freeSkipsLeft)}
+        </p>
+      ) : null}
     </section>
   );
 }

@@ -3,6 +3,7 @@ import {
   DEFAULT_GOAL,
   freeSkipLabel,
   freeSkipsLeft,
+  goalFor,
   streakLine,
   weekOf,
   weekSentence,
@@ -217,5 +218,49 @@ describe("free skip", () => {
     expect(freeSkipLabel(0)).toBe("FREE SKIP USED");
     expect(streakLine(3, 1)).toBe("3 WEEKS IN A ROW · 1 FREE SKIP LEFT");
     expect(streakLine(1, 0)).toBe("1 WEEK IN A ROW · FREE SKIP USED");
+  });
+
+  it("leaves the streak line out with no week in a row yet", () => {
+    expect(streakLine(0, 1)).toBe("");
+    expect(streakLine(0, 0)).toBe("");
+  });
+});
+
+describe("goalFor: every day until the exam", () => {
+  // "Now" is Saturday 14 Nov; this week is Mon 9 to Sun 15.
+  const EXAM_23 = "2026-11-23T09:00:00+02:00"; // 9 days away
+  const EXAM_DEC = "2026-12-04T09:00:00+02:00"; // 20 days away
+
+  it("keeps the usual goal with no exam, one more than 14 days away, on exam day or after it", () => {
+    expect(goalFor([MON], null, NOW)).toBe(DEFAULT_GOAL);
+    expect(goalFor([MON], EXAM_DEC, NOW)).toBe(DEFAULT_GOAL);
+    expect(goalFor([MON], "2026-11-29T09:00:00+02:00", NOW)).toBe(DEFAULT_GOAL); // 15 days
+    expect(goalFor([MON], "2026-11-14T18:00:00+02:00", NOW)).toBe(DEFAULT_GOAL); // today
+    expect(goalFor([MON], "2026-11-12T09:00:00+02:00", NOW)).toBe(DEFAULT_GOAL); // past
+  });
+
+  it("within 14 days is the days she studied plus every day still open this week", () => {
+    // Saturday, nothing studied this week: today and Sunday are open.
+    expect(goalFor([], EXAM_23, NOW)).toBe(2);
+    // Studied Monday and Wednesday (missed days are not held against her): 2 done, 2 open.
+    expect(goalFor([MON, WED], EXAM_23, NOW)).toBe(4);
+    // Studied today already: today is done, Sunday is open.
+    expect(goalFor([MON, WED, SAT], EXAM_23, NOW)).toBe(4);
+    // 14 days away exactly counts.
+    expect(goalFor([], "2026-11-28T09:00:00+02:00", NOW)).toBe(2);
+    // On a Monday with the exam the Monday after: every day of the week.
+    expect(goalFor([], EXAM_23, "2026-11-16T08:00:00+02:00")).toBe(7);
+    expect(weekOf([], goalFor([], EXAM_23, "2026-11-16T08:00:00+02:00"), "2026-11-16T08:00:00+02:00").sentence).toBe(
+      "0 of 7 days this week. 7 more to go.",
+    );
+  });
+
+  it("stops at the day before the exam", () => {
+    // Monday 16 Nov, exam on Thursday 19: Monday, Tuesday, Wednesday.
+    expect(goalFor([], "2026-11-19T09:00:00+02:00", "2026-11-16T08:00:00+02:00")).toBe(3);
+    // The day before the exam, already studied today and Monday: nothing more is open.
+    const wed = "2026-11-18T20:00:00+02:00";
+    expect(goalFor(["2026-11-16T10:00:00+02:00", "2026-11-18T10:00:00+02:00"], "2026-11-19T09:00:00+02:00", wed)).toBe(2);
+    expect(weekOf(["2026-11-16T10:00:00+02:00", "2026-11-18T10:00:00+02:00"], 2, wed).met).toBe(true);
   });
 });

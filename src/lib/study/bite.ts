@@ -368,26 +368,53 @@ export function biteSections(input: BiteInput): Section[] | null {
 }
 
 /**
- * A tile session: the first 3 active, non-boss cards of one type, in deck
- * order, all in learn. Null when the deck has none ("No … for this one yet.").
+ * A tile session: 3 active, non-boss cards of one type, all in learn. Null
+ * when the deck has none ("No … for this one yet.").
+ *
+ * Which three: cards that are due first (most overdue first), then cards she
+ * has never met, then the rest, the one she saw longest ago first. So a tile
+ * moves through its cards instead of serving the same three every time. On a
+ * fresh deck that is the first three in deck order. Never-met cards come in
+ * deck order, or, in a deck with core or first marks, in the plan's order
+ * (`newQueue`: core cards first).
  */
 export function tileSession(whole: Deck, type: CardType): Bite | null {
   const deck = practiceDeck(whole);
+  const now = ms(deck.now);
+  const index = new Map(deck.cards.map((c, i) => [c.id, i]));
+  const place = usesStudyOrder(deck) ? new Map(newQueue(deck).map((c, i) => [c.id, i])) : index;
+  // 0 due, 1 never met, 2 seen and not due.
+  const group = (c: BiteCard) => (!isGraded(deck, c.id) ? 1 : dueOf(deck, c.id) <= now ? 0 : 2);
+  const key = (c: BiteCard) => {
+    const g = group(c);
+    return g === 0 ? dueOf(deck, c.id) : g === 1 ? place.get(c.id)! : stateOf(deck, c.id).lastReviewAt!;
+  };
   const ids = deck.cards
     .filter((c) => c.active && !c.boss && c.type === type)
+    .sort((a, b) => group(a) - group(b) || key(a) - key(b) || index.get(a.id)! - index.get(b.id)!)
     .slice(0, 3)
     .map((c) => c.id);
   return session(whole, kept([["learn", ids]]));
 }
 
 /**
- * A concept session: the first 4 active cards touching the concept, in deck
- * order. Boss cards go in boss, the rest in learn (learn shown first).
+ * A concept session: 4 active cards touching the concept. Boss cards go in
+ * boss, the rest in learn (learn shown first).
+ *
+ * Which four, as in a bite: the concept's `first` card while she has never
+ * graded it, then core cards, then the others, each in deck order. A deck
+ * with no marks gives the first four in deck order.
  */
 export function conceptSession(whole: Deck, conceptId: string): Bite | null {
   const deck = practiceDeck(whole);
+  const index = new Map(deck.cards.map((c, i) => [c.id, i]));
+  const opens = (c: BiteCard) => Number(c.first === true && !isGraded(deck, c.id));
   const cards = deck.cards
     .filter((c) => c.active && conceptsOf(c).includes(conceptId))
+    .sort(
+      (a, b) =>
+        opens(b) - opens(a) || Number(b.core === true) - Number(a.core === true) || index.get(a.id)! - index.get(b.id)!,
+    )
     .slice(0, 4);
   return session(
     whole,

@@ -388,6 +388,11 @@ describe("a paced exam (core marks)", () => {
     const start = await examView(paced.examId);
     // 60 core cards over 5 days: 12 a day, in 3 bites of up to 5 new cards.
     expect(start.pace).toMatchObject({ open: true, budget: 12, left: 12, bites: 3, impossible: false, done: false });
+    // An exam within 14 days: the week's goal is every day until it (Saturday and Sunday are left this week).
+    expect(start.week.goal).toBe(2);
+    expect((await examView(examId)).week.goal).toBe(4); // her other exam is 20 days out
+    // No week in a row yet: no streak line.
+    expect(start.week.streakLine).toBe("");
     // One plan for every screen: the core-first pace, its projection, and a verdict that agrees with it.
     expect(start.plan.pace).toEqual({ kind: "core", open: true, perDay: 3, bitesToday: 3 });
     expect(start.plan.curve).toHaveLength(8);

@@ -145,6 +145,8 @@ export type HomeBite =
       href: string;
       /** A paced exam: "3 bites today keeps you on track for Monday". */
       pace?: string;
+      /** A bite is already done today for this exam: the row says "one more". */
+      more: boolean;
     }
   | {
       state: "done";
@@ -287,6 +289,7 @@ function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>, now: Date)
       gain: v.bite.gain,
       forWhat: biteFor(card.kind, v.exam.at, v.daysLeft),
       href: biteHref(card.id),
+      more: v.bitesDoneToday > 0,
       ...(pace ? { pace } : {}),
     };
   }

@@ -10,7 +10,8 @@
  *   "8 CARDS · +0.6% FORECAST" and "Start" (the gain is measured; under half
  *   a point it is left out: "8 CARDS"). The whole row links to the session.
  *   `first` (nothing is open, so the bite is the DO FIRST card) drops the
- *   "Or": "A 5-minute bite for Friday's exam". A paced exam adds one line
+ *   "Or": "A 5-minute bite for Friday's exam". Once a bite is done today
+ *   (`more`): "Or one more 5-minute bite for Friday's exam". A paced exam adds one line
  *   under it: "3 bites today keeps you on track for Monday".
  * - "done": the cup doodle, "Today's bites are done", "FORECAST 68% · FRIDAY"
  *   and "Open", linking to the exam.
@@ -41,6 +42,8 @@ export type BiteRowProps =
       href: string;
       /** The bite is the DO FIRST card: no "Or". */
       first?: boolean;
+      /** A bite is already done today: "one more", as the exam's Today tab says. */
+      more?: boolean;
       /** A paced exam: how many bites today keeps her on plan, one sentence. */
       pace?: string;
       className?: string;
@@ -74,13 +77,14 @@ function Chevron() {
   );
 }
 
-export function biteTitle(minutes: number, forWhat: string, first = false): string {
+export function biteTitle(minutes: number, forWhat: string, first = false, more = false): string {
+  if (more) return `${first ? "One" : "Or one"} more ${minutes}-minute bite for ${forWhat}`;
   return `${first ? "A" : "Or a"} ${minutes}-minute bite for ${forWhat}`;
 }
 
 export function BiteRow(props: BiteRowProps) {
   const done = props.state === "done";
-  const title = done ? "Today’s bites are done" : biteTitle(props.minutes, props.forWhat, props.first);
+  const title = done ? "Today’s bites are done" : biteTitle(props.minutes, props.forWhat, props.first, props.more);
   const gain = done ? null : gainLabel(props.gain);
   const meta = done
     ? `FORECAST ${props.forecast}% · ${props.day}`

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   aimedDue,
   dueNow,
+  finalSlot,
   FINAL_MARGIN_MS,
   FINAL_WINDOW_MS,
   finalPass,
@@ -89,10 +90,61 @@ describe("aimedDue", () => {
     expect(recallAt(state, new Date(due))).toBeCloseTo(want, 3);
   });
 
-  it("clamps to 12 h before the exam when recall stays high", () => {
+  it("a card that holds past the exam gets one review inside the final window", () => {
+    const { state, at } = history([3, 3, 4, 4]);
+    const examAt = at + 8 * DAY;
+    expect(state.dueAt).toBeGreaterThan(examAt);
+    const due = aimedDue(state, examAt, at)!;
+    expect(due).toBeGreaterThanOrEqual(examAt - FINAL_WINDOW_MS);
+    expect(due).toBeLessThanOrEqual(examAt - FINAL_MARGIN_MS);
+    expect(due).toBe(finalSlot(state, examAt));
+    // The same state gives the same date, whenever it is asked.
+    expect(aimedDue(state, examAt, at + 2 * DAY)).toBe(due);
+    // Once its slot has passed it is due now.
+    expect(aimedDue(state, examAt, due + HOUR)).toBe(due + HOUR);
+    expect(dueNow(state, examAt, due + HOUR)).toBe(due + HOUR);
+    expect(dueNow(state, examAt, due - HOUR)).toBeNull();
+  });
+
+  it("a card already reviewed inside the final window is not scheduled again", () => {
     const { state, at } = history([3, 3, 4, 4]);
     const examAt = at + 2 * DAY;
-    expect(aimedDue(state, examAt, at)).toBe(examAt - FINAL_MARGIN_MS);
+    expect(state.dueAt).toBeGreaterThan(examAt);
+    expect(finalSlot(state, examAt)).toBeNull();
+    expect(aimedDue(state, examAt, at)).toBeNull();
+    expect(dueNow(state, examAt, examAt - HOUR)).toBeNull();
+  });
+
+  it("spreads those last reviews over the final window instead of one evening", () => {
+    // 300 cards, each learned at its own moment on days 9 to 6 before the exam and holding past it.
+    const examAt = new Date("2026-11-23T07:00:00Z").getTime(); // Monday 09:00 in Helsinki
+    const helsinkiDay = (t: number) => new Date(t + 2 * HOUR).toISOString().slice(0, 10);
+    const perDay = new Map<string, number>();
+    const slots: number[] = [];
+    for (let i = 0; i < 300; i++) {
+      const start = examAt - 9 * DAY + i * 14 * MIN;
+      let state = newCard(new Date(start));
+      state = grade(state, 4, new Date(start));
+      state = grade(state, 4, new Date(start + 20 * MIN + (i % 7) * 1000));
+      expect(state.dueAt).toBeGreaterThan(examAt);
+      const due = aimedDue(state, examAt, state.lastReviewAt!)!;
+      expect(due).toBeGreaterThanOrEqual(examAt - FINAL_WINDOW_MS);
+      expect(due).toBeLessThanOrEqual(examAt - FINAL_MARGIN_MS);
+      slots.push(due);
+      perDay.set(helsinkiDay(due), (perDay.get(helsinkiDay(due)) ?? 0) + 1);
+    }
+    // The window runs Friday 09:00 to Sunday 21:00: three calendar days, none with most of the cards.
+    expect([...perDay.keys()].sort()).toEqual(["2026-11-20", "2026-11-21", "2026-11-22"]);
+    for (const n of perDay.values()) {
+      expect(n).toBeGreaterThan(300 * 0.15);
+      expect(n).toBeLessThan(300 * 0.5);
+    }
+    // Not bunched inside a day either: no single hour holds more than a tenth of them.
+    const perHour = new Map<number, number>();
+    for (const t of slots) perHour.set(Math.floor(t / HOUR), (perHour.get(Math.floor(t / HOUR)) ?? 0) + 1);
+    expect(Math.max(...perHour.values())).toBeLessThan(30);
+    // Before the change every one of them fell due at this one moment.
+    expect(slots.filter((t) => t === examAt - FINAL_MARGIN_MS).length).toBeLessThan(3);
   });
 
   it("leaves the FSRS due date alone far from the exam", () => {
