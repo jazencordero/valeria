@@ -203,9 +203,9 @@ describe("planImport (pure)", () => {
   it("reads the AI permission and the exam documents of a course", async () => {
     const [mapped] = (await loadBundle(root, { courses: ["TST-E0001"] })).courses;
     const p = planImport(mapped);
-    expect(p.aiPolicy).toBe("not_allowed");
+    expect(p.aiPolicy).toEqual({ aiAssignments: "off", aiStudy: "allowed" });
     const notes = p.notes.join("\n");
-    expect(notes).toContain('AI scope "assignments" is not stored');
+    expect(notes).not.toContain("AI scope");
     expect(notes).toContain("exam/ holds 1 valid file that is not Markdown (1 pdf), not imported");
     expect(p.problems).toContainEqual({ file: "exam/broken.json", reason: "is not valid JSON." });
     // The seed lists study-plan.md, so it comes first; essentials.md follows in file-name order.
@@ -643,10 +643,37 @@ describe("applyImport", () => {
       const p = planImport(mapped);
       expect((await applyImport(t.db, her, p, { now: NOW })).counts.aiPolicy).toEqual({ created: 0, skipped: 0, updated: 1 });
       const [row] = await t.db.select().from(courses).where(eq(courses.id, herCourse));
-      expect(row).toMatchObject({ aiAssignments: "explain", aiStudy: "not_allowed" });
+      // aiAllowed false + scope "assignments": no assignment help, studying the slides is fine.
+      expect(row).toMatchObject({ aiAssignments: "off", aiStudy: "allowed" });
       expect((await applyImport(t.db, her, p, { now: NOW })).counts.aiPolicy).toEqual({ created: 0, skipped: 1, updated: 0 });
       const [theirs] = await t.db.select().from(courses).where(eq(courses.id, otherCourse));
       expect(theirs).toMatchObject({ aiAssignments: "unknown", aiStudy: "unknown" });
+    },
+    T,
+  );
+
+  it(
+    "maps aiAllowed true to both allowed, and never overwrites her answer when it is unknown or missing",
+    async () => {
+      const [mapped] = (await loadBundle(root, { courses: ["TST-E0001"] })).courses;
+      expect(planImport({ ...mapped, account: { aiAllowed: true, other: [] } }).aiPolicy).toEqual({
+        aiAssignments: "allowed",
+        aiStudy: "allowed",
+      });
+      expect(planImport({ ...mapped, account: { aiAllowed: false, other: [] } }).aiPolicy).toEqual({
+        aiAssignments: "off",
+        aiStudy: "not_allowed",
+      });
+
+      // She answered herself; an "unknown" or missing aiAllowed leaves it alone.
+      await t.db.update(courses).set({ aiAssignments: "explain", aiStudy: "not_allowed" }).where(eq(courses.id, herCourse));
+      for (const account of [{ aiAllowed: "unknown" as const, other: [] }, { other: [] }, null]) {
+        const p = planImport({ ...mapped, account });
+        expect(p.aiPolicy).toBeNull();
+        await applyImport(t.db, her, p, { now: NOW });
+        const [row] = await t.db.select().from(courses).where(eq(courses.id, herCourse));
+        expect(row).toMatchObject({ aiAssignments: "explain", aiStudy: "not_allowed" });
+      }
     },
     T,
   );

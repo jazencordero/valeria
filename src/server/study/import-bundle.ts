@@ -52,7 +52,8 @@
  *   Helsinki). Sessions hold new cards back until that day (`./start-date`).
  * - Exam documents: same exam + same slug. Same title, text and position -> skipped; else
  *   updated. A document no longer in the bundle is left.
- * - AI policy: account.json `aiAllowed` true/false -> `courses.ai_policy` allowed/not_allowed.
+ * - AI rules (M2-27): account.json `aiAllowed` true -> both allowed; false + scope "assignments" ->
+ *   ai_assignments off, ai_study allowed; false otherwise -> off + not_allowed; "unknown"/missing -> untouched.
  *
  * Problems (a card skipped, and why) name the file and the card's position, never its text.
  * Notes say what the bundle holds that is not stored, and how some things were read. Writes are batched;
@@ -218,7 +219,9 @@ export const AccountSchema = z.object({
     .record(
       z.string(),
       z.looseObject({
-        aiAllowed: z.boolean({ error: "aiAllowed must be true or false." }).optional(),
+        aiAllowed: z
+          .union([z.boolean(), z.literal("unknown")], { error: 'aiAllowed must be true, false or "unknown".' })
+          .optional(),
         scope: z.string().optional(),
       }),
     )
@@ -246,7 +249,7 @@ export type CourseBundle = {
   /** Exam documents that could not be used: file and reason. */
   examDocProblems: { file: string; reason: string }[];
   /** From account.json, when it names this course. */
-  account: { aiAllowed?: boolean; scope?: string; other: string[] } | null;
+  account: { aiAllowed?: boolean | "unknown"; scope?: string; other: string[] } | null;
 };
 
 export type Bundle = { root: string; courses: CourseBundle[] };
@@ -526,7 +529,8 @@ export type ImportPlan = {
   /** New cards are not due before this instant (startNewOn, 00:00 Helsinki), or null. */
   startNewAt: Date | null;
   /** account.json for this course: the AI policy to write, or null to leave it. */
-  aiPolicy: "allowed" | "not_allowed" | null;
+  /** M2-27's two columns to write, or null to leave her own answers alone. */
+  aiPolicy: { aiAssignments: "off" | "allowed"; aiStudy: "allowed" | "not_allowed" } | null;
   problems: ImportProblem[];
   /** What the bundle holds that is not stored, and how some things were read. */
   notes: string[];
@@ -685,9 +689,17 @@ export function planImport(course: CourseBundle): ImportPlan {
 
   let aiPolicy: ImportPlan["aiPolicy"] = null;
   if (course.account) {
-    if (course.account.aiAllowed !== undefined) aiPolicy = course.account.aiAllowed ? "allowed" : "not_allowed";
-    if (course.account.scope !== undefined) {
-      notes.push(`account.json AI scope "${course.account.scope}" is not stored: courses.ai_policy has no scope.`);
+    // account.json -> M2-27's columns. Missing or "unknown" leaves both as they are, so her own
+    // answer is never overwritten. Importing a bundle does not by itself set ai_study.
+    const { aiAllowed, scope } = course.account;
+    if (aiAllowed === true) aiPolicy = { aiAssignments: "allowed", aiStudy: "allowed" };
+    else if (aiAllowed === false && scope === "assignments") {
+      // No help with assignments; studying the slides with AI is fine.
+      aiPolicy = { aiAssignments: "off", aiStudy: "allowed" };
+    } else if (aiAllowed === false) {
+      // No scope (or one we do not know): the safe reading is no AI at all for this course.
+      aiPolicy = { aiAssignments: "off", aiStudy: "not_allowed" };
+      if (scope !== undefined) notes.push(`account.json AI scope "${scope}" is not known; treated as no AI for this course.`);
     }
     if (course.account.other.length) notes.push(`account.json fields ${course.account.other.join(", ")} are not stored.`);
   }
@@ -882,11 +894,7 @@ export async function applyImport(
       const courseId = course.id;
 
       if (plan.aiPolicy) {
-        // M2-27 split `ai_policy` in two; same carry-over as the migration (drizzle/0001_*.sql).
-        const rules =
-          plan.aiPolicy === "allowed"
-            ? ({ aiAssignments: "allowed", aiStudy: "allowed" } as const)
-            : ({ aiAssignments: "explain", aiStudy: "not_allowed" } as const);
+        const rules = plan.aiPolicy;
         if (course.aiAssignments === rules.aiAssignments && course.aiStudy === rules.aiStudy) counts.aiPolicy.skipped += 1;
         else {
           await tx.update(courses).set(rules).where(eq(courses.id, courseId));
