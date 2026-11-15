@@ -1,0 +1,58 @@
+/*
+ * Sorting scene. Source: prototype main-flow.html CSS 293-330 and HTML
+ * 1346-1375. Everything sits under .sorting so the prototype's generic names
+ * (.progress, .house, .ticker) cannot clash with other screens.
+ * The wipe and confetti (CSS 327-329) belong to M5-11.
+ */
+.sorting{ position: relative; display: flex; flex-direction: column; width: 100%; max-width: 440px; min-height: 100dvh; margin: 0 auto; padding: 0 var(--pad) 32px; overflow-x: clip; }
+
+/* Thin rose line across the top that follows the script's length. */
+.sorting .sort-progress{ position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--accent); transform: scaleX(0); transform-origin: left center; z-index: 2; animation: sort-progress var(--sort-ms, 12000ms) linear forwards; }
+@keyframes sort-progress{ from{ transform: scaleX(0); } to{ transform: scaleX(1); } }
+
+.sorting .sort-top{ display: flex; justify-content: flex-end; min-height: 44px; margin-right: -12px; }
+.sorting .btn-skip{ min-height: 44px; padding: 0 14px; border: 0; background: none; border-radius: 999px; color: var(--ink-2); font: inherit; font-size: 15px; font-weight: 500; cursor: pointer; }
+.sorting .btn-skip:hover{ color: var(--ink); }
+.sorting .btn-skip:focus-visible{ outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.sorting .sort-bubble{ width: 100%; max-width: 320px; margin: 4px auto 0; min-height: 92px; display: grid; place-items: center; text-align: center; font-size: 17px; line-height: 1.4; text-wrap: balance; }
+.sorting .house{ min-height: 52px; margin-top: 10px; text-align: center; font-family: var(--display); font-weight: 600; font-size: 40px; line-height: 52px; letter-spacing: 0.01em; font-variation-settings: "SOFT" 100; }
+
+.sorting .sort-stage{ position: relative; width: 180px; height: 180px; margin: 40px auto 0; flex: none; }
+.sorting .bust{ display: block; width: 180px; height: 180px; }
+.sorting .b-bg{ fill: var(--butter); }
+.sorting .b-hair{ fill: var(--hair); }
+.sorting .b-skin{ fill: var(--skin); }
+.sorting .b-mint{ fill: var(--mint); }
+.sorting .b-line{ fill: none; stroke: var(--cap-band); stroke-width: 2.2; stroke-linecap: round; }
+
+.sorting .hat-slot{ position: absolute; left: 50%; top: -34px; margin-left: -60px; width: 120px; transform-origin: 50% 90%; z-index: 1; }
+.sorting .hat{ display: block; width: 120px; height: 111px; overflow: visible; }
+.sorting .hat g, .sorting .hat path{ transform-box: view-box; }
+.sorting .hat-fill{ fill: var(--hat); stroke: var(--cap-line); stroke-width: 1.5; stroke-linejoin: round; }
+.sorting .hat-shade{ fill: var(--hat-shade); stroke: var(--cap-line); stroke-width: 1.5; stroke-linejoin: round; }
+.sorting .hat-stitch{ fill: none; stroke: var(--cap-band); stroke-width: 1; stroke-dasharray: 3 3; stroke-linecap: round; }
+.sorting .hat-ink{ fill: var(--cap-band); }
+.sorting .hat-mouth{ fill: none; stroke: var(--cap-band); stroke-width: 2; stroke-linecap: round; }
+.sorting .hat-mouth-o{ fill: var(--cap-band); opacity: 0; }
+.sorting .hat-tip{ transform-origin: 72px 38px; }
+.sorting .hat.thinking .hat-tip{ animation: hat-sway 1.2s ease-in-out infinite; }
+.sorting .hat.talking .hat-mouth{ animation: talk-a 0.26s steps(1) infinite; }
+.sorting .hat.talking .hat-mouth-o{ animation: talk-b 0.26s steps(1) infinite; }
+@keyframes hat-sway{ 0%, 100%{ transform: rotate(-6deg); } 50%{ transform: rotate(6deg); } }
+/* Closed smile, then open mouth, every other step. */
+@keyframes talk-a{ 0%{ opacity: 1; } 50%{ opacity: 0; } }
+@keyframes talk-b{ 0%{ opacity: 0; } 50%{ opacity: 1; } }
+
+.sorting .ticker{ margin-top: 28px; text-align: center; }
+.sorting .ticker-label{ color: var(--ink-3); }
+.sorting .ticker-chips{ display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 12px; min-height: 66px; align-content: flex-start; }
+.sorting .tchip{ display: inline-flex; align-items: center; gap: 5px; height: 30px; max-width: 100%; padding: 0 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.sorting .tchip-name{ min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sorting .tchip svg{ flex: none; color: var(--accent); width: 14px; height: 14px; }
+.sorting .ticker-count{ margin-top: 12px; color: var(--ink-3); }
+
+/* Calm (reduced motion or the test switch): nothing sways, talks or flickers. */
+.sorting[data-calm] .hat .hat-tip,
+.sorting[data-calm] .hat .hat-mouth,
+.sorting[data-calm] .hat .hat-mouth-o{ animation: none; }
