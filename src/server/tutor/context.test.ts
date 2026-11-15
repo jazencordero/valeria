@@ -17,8 +17,10 @@ import {
   tutorAnchor,
   SECTION_MAX_CHARS,
   tutorEnabled,
+  tutorPlace,
   type TutorWhere,
 } from "./context";
+import { setStudyRule } from "./store";
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
@@ -348,6 +350,23 @@ describe("a highlighted passage (M2-28 step A)", () => {
     expect(all(ctx.parts)).not.toContain("SECTION-ONE-TEXT");
   });
 
+  it("while the study rule is unknown a real passage is withheld; after her yes it is sent", async () => {
+    const s = await student({ study: "unknown" });
+    const before = await buildTutorContext(s.user.id, lecture(s, 0), { now: NOW, quote: "money today is worth more" }, t.db);
+    expect(before.courseText).toBe(false);
+    expect(before.quote).toEqual({ text: "money today is worth more", course: true, sent: false });
+    expect(all(before.parts)).not.toContain("money today is worth more");
+    expect(all(before.parts)).not.toContain("SECTION-ONE-TEXT");
+    expect(all(before.parts)).toContain("You do not have her course material here");
+
+    expect(await setStudyRule(s.user.id, s.course.id, "allowed", t.db)).toBe("allowed");
+    const after = await buildTutorContext(s.user.id, lecture(s, 0), { now: NOW, quote: "money today is worth more" }, t.db);
+    expect(after.courseText).toBe(true);
+    expect(after.quote).toEqual({ text: "money today is worth more", course: true, sent: true });
+    expect(all(after.parts)).toContain("SECTION-ONE-TEXT");
+    expect(all(after.parts)).not.toContain("You do not have her course material here");
+  });
+
   it("findPassage matches across spaces and case, and refuses tiny or foreign text", async () => {
     const sections = [
       { heading: "A", blocks: [{ kind: "p" as const, text: "Alpha beta gamma." }], terms: [], source: "" },
@@ -378,5 +397,34 @@ describe("tutorAnchor", () => {
     expect(
       await tutorAnchor(s.user.id, { kind: "study", sessionId: s.session.id, cardId: other.card.id, revealed: true }, t.db, NOW),
     ).toEqual({ kind: "general", id: null });
+  });
+});
+
+describe("tutorPlace", () => {
+  it("names the course in view and its study rule on a lecture, an exam and a study session; null elsewhere or not hers", async () => {
+    const s = await student({ study: "unknown", name: "Finance 101" });
+    const other = await student({ study: "unknown" });
+    const study = { courseId: s.course.id, courseName: "Finance 101", rule: "unknown" };
+    expect((await tutorPlace(s.user.id, { kind: "lecture", courseId: s.course.id, n: 3 }, t.db, NOW)).study).toEqual(study);
+    expect((await tutorPlace(s.user.id, { kind: "exam", examId: s.exam.id }, t.db, NOW)).study).toEqual(study);
+    expect((await tutorPlace(s.user.id, { kind: "study", sessionId: s.session.id, cardId: s.card.id, revealed: true }, t.db, NOW)).study).toEqual(study);
+    expect((await tutorPlace(s.user.id, { kind: "study", sessionId: s.session.id, revealed: false }, t.db, NOW)).study).toEqual(study);
+    expect((await tutorPlace(s.user.id, { kind: "assignment", assignmentId: s.assignment.id }, t.db, NOW)).study).toBeNull();
+    expect((await tutorPlace(s.user.id, { kind: "other" }, t.db, NOW)).study).toBeNull();
+    expect((await tutorPlace(s.user.id, { kind: "lecture", courseId: other.course.id, n: 3 }, t.db, NOW)).study).toBeNull();
+    expect((await tutorPlace(s.user.id, { kind: "exam", examId: other.exam.id }, t.db, NOW)).study).toBeNull();
+    expect((await tutorPlace(s.user.id, { kind: "study", sessionId: other.session.id, revealed: false }, t.db, NOW)).study).toBeNull();
+
+    await setStudyRule(s.user.id, s.course.id, "not_allowed", t.db);
+    expect((await tutorPlace(s.user.id, { kind: "exam", examId: s.exam.id }, t.db, NOW)).study?.rule).toBe("not_allowed");
+  });
+
+  it("setStudyRule changes only her own course", async () => {
+    const s = await student({ study: "unknown" });
+    const other = await student({ study: "unknown" });
+    expect(await setStudyRule(s.user.id, other.course.id, "allowed", t.db)).toBeNull();
+    expect(await setStudyRule(s.user.id, "not-a-uuid", "allowed", t.db)).toBeNull();
+    const [row] = await t.db.select({ aiStudy: courses.aiStudy }).from(courses).where(eq(courses.id, other.course.id));
+    expect(row.aiStudy).toBe("unknown");
   });
 });

@@ -55,7 +55,7 @@
  */
 import { and, asc, eq, gte, inArray, isNull, lte, not } from "drizzle-orm";
 import { z } from "zod";
-import { assignmentHelp, type AiAssignments } from "@/lib/ai-policy";
+import { assignmentHelp, type AiAssignments, type AiStudy } from "@/lib/ai-policy";
 import { listDate } from "@/lib/dates";
 import { conceptMastery } from "@/lib/study/ladder";
 import { newCard } from "@/lib/study/memory";
@@ -284,7 +284,7 @@ export function cardText(body: unknown, why: string | null): string {
 // ---------------------------------------------------------------------------
 // Loading what she is on
 
-type CourseRow = { id: string; name: string; aiAssignments: AiAssignments; hidden: boolean };
+type CourseRow = { id: string; name: string; aiAssignments: AiAssignments; aiStudy: AiStudy; hidden: boolean };
 
 /** What one place gives: the course, a line for "where she is", and course text (unchecked). */
 type Place = {
@@ -503,7 +503,7 @@ async function placeOf(userId: string, where: TutorWhere, list: CourseRow[], dat
 async function coursesOf(userId: string, database: Db): Promise<CourseRow[]> {
   if (!z.uuid().safeParse(userId).success) return [];
   return database
-    .select({ id: courses.id, name: courses.name, aiAssignments: courses.aiAssignments, hidden: courses.hidden })
+    .select({ id: courses.id, name: courses.name, aiAssignments: courses.aiAssignments, aiStudy: courses.aiStudy, hidden: courses.hidden })
     .from(courses)
     .where(eq(courses.userId, userId))
     .orderBy(asc(courses.name));
@@ -523,8 +523,31 @@ async function checkedPlace(userId: string, where: TutorWhere, database: Db, now
 
 /** The chat a place belongs to when there is no note (only ids that are hers count). */
 export async function tutorAnchor(userId: string, where: TutorWhere, database: Db = defaultDb, now: Date = new Date()): Promise<TutorAnchor> {
+  return (await tutorPlace(userId, where, database, now)).anchor;
+}
+
+/**
+ * The course in view and its study rule (`courses.ai_study`), for the tutor's one question
+ * "May Ready use this course's slides ...". Only on a lecture, an exam or a study session of
+ * HER course (every id checked as for the context); null anywhere else (Home, an assignment).
+ */
+export type TutorStudy = { courseId: string; courseName: string; rule: AiStudy };
+
+/** The anchor and the course in view, from one look at the place. */
+export async function tutorPlace(
+  userId: string,
+  where: TutorWhere,
+  database: Db = defaultDb,
+  now: Date = new Date(),
+): Promise<{ anchor: TutorAnchor; study: TutorStudy | null }> {
   const list = await coursesOf(userId, database);
-  return (await placeOf(userId, where, list, database, now)).anchor;
+  const place = await placeOf(userId, where, list, database, now);
+  const asks = where.kind === "lecture" || where.kind === "exam" || where.kind === "study";
+  const course = asks && place.courseId ? list.find((c) => c.id === place.courseId) : undefined;
+  return {
+    anchor: place.anchor,
+    study: course ? { courseId: course.id, courseName: course.name, rule: course.aiStudy } : null,
+  };
 }
 
 export type BuildOptions = {

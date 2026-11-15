@@ -5,6 +5,7 @@ import { ensureSessionFor, SESSION_COOKIE } from "@/server/auth/session";
 import type { Db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { lectureContent, lectures, notes, tutorMessages } from "@/server/db/schema/learn";
+import { cards, exams, studySessions } from "@/server/db/schema/study";
 import { aiCalls, providerCooldowns } from "@/server/db/schema/system";
 import { users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
@@ -449,6 +450,86 @@ describe("POST /api/ai/tutor", () => {
     expect(body.note).toBeNull();
     expect(ai.calls).toHaveLength(0);
     expect(await t.db.select().from(aiCalls)).toHaveLength(0);
+  });
+
+  describe("the course's study rule (asked once in the chat)", () => {
+    /** An exam of her course, a study session for it and one card. */
+    async function examOf(s: { user: { id: string }; course: { id: string } }) {
+      const [exam] = await t.db.insert(exams).values({ userId: s.user.id, courseId: s.course.id, title: "Midterm", at: new Date("2026-12-01T09:00:00Z") }).returning();
+      const [card] = await t.db
+        .insert(cards)
+        .values({ userId: s.user.id, examId: exam.id, type: "basic", body: { type: "basic", q: "Q", a: "A" }, origin: "ai", contentHash: `c-${s.user.id}` })
+        .returning();
+      const [session] = await t.db.insert(studySessions).values({ userId: s.user.id, examId: exam.id, mode: "bite" }).returning();
+      return { exam, card, session };
+    }
+    const ruleOf = async (courseId: string) =>
+      (await t.db.select({ aiStudy: courses.aiStudy }).from(courses).where(eq(courses.id, courseId)))[0].aiStudy;
+
+    it("load returns the course in view and its rule for a lecture, an exam and a card; null elsewhere", async () => {
+      const s = await student({ study: "unknown" });
+      const { exam, card, session } = await examOf(s);
+      const study = { courseId: s.course.id, courseName: "Corporate Finance", rule: "unknown" };
+      const load = async (where: unknown) => ((await (await POST(post({ mode: "load", where }, s.cookie))).json()) as { study: unknown }).study;
+      expect(await load({ kind: "lecture", courseId: s.course.id, n: 1, section: 0 })).toEqual(study);
+      expect(await load({ kind: "exam", examId: exam.id })).toEqual(study);
+      expect(await load({ kind: "study", sessionId: session.id, cardId: card.id, revealed: true })).toEqual(study);
+      expect(await load({ kind: "assignment", assignmentId: s.assignment.id })).toBeNull();
+      expect(await load(OTHER)).toBeNull();
+      expect(ai.calls).toHaveLength(0);
+    });
+
+    it("someone else's course is not in view, and setting its rule is 404 and changes nothing", async () => {
+      const s = await student({ study: "unknown" });
+      const them = await student({ study: "unknown" });
+      const theirs = await examOf(them);
+      const load = (await (await POST(post({ mode: "load", where: { kind: "exam", examId: theirs.exam.id } }, s.cookie))).json()) as { study: unknown };
+      expect(load.study).toBeNull();
+      const lecture = (await (await POST(post({ mode: "load", where: { kind: "lecture", courseId: them.course.id, n: 1 } }, s.cookie))).json()) as {
+        study: unknown;
+      };
+      expect(lecture.study).toBeNull();
+      const res = await POST(post({ mode: "study-rule", courseId: them.course.id, rule: "allowed" }, s.cookie));
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: "not_found" });
+      expect(await ruleOf(them.course.id)).toBe("unknown");
+    });
+
+    it("study-rule stores allowed or not_allowed for her course, with no AI call; anything else is refused", async () => {
+      const s = await student({ study: "unknown" });
+      const yes = await POST(post({ mode: "study-rule", courseId: s.course.id, rule: "allowed" }, s.cookie));
+      expect(yes.status).toBe(200);
+      expect(await yes.json()).toEqual({ ok: true, rule: "allowed" });
+      expect(await ruleOf(s.course.id)).toBe("allowed");
+      const no = await POST(post({ mode: "study-rule", courseId: s.course.id, rule: "not_allowed" }, s.cookie));
+      expect(await no.json()).toEqual({ ok: true, rule: "not_allowed" });
+      expect(await ruleOf(s.course.id)).toBe("not_allowed");
+      expect((await POST(post({ mode: "study-rule", courseId: s.course.id, rule: "unknown" }, s.cookie))).status).toBe(400);
+      expect((await POST(post({ mode: "study-rule", courseId: "nope", rule: "allowed" }, s.cookie))).status).toBe(400);
+      expect((await POST(post({ mode: "study-rule", rule: "allowed" }, s.cookie))).status).toBe(400);
+      expect(await ruleOf(s.course.id)).toBe("not_allowed");
+      expect(ai.calls).toHaveLength(0);
+      expect(await t.db.select().from(aiCalls)).toHaveLength(0);
+    });
+
+    it("without the tutor switch, study-rule is 404 and changes nothing", async () => {
+      const s = await student({ tutor: false, study: "unknown" });
+      const res = await POST(post({ mode: "study-rule", courseId: s.course.id, rule: "allowed" }, s.cookie));
+      expect(res.status).toBe(404);
+      expect(await ruleOf(s.course.id)).toBe("unknown");
+    });
+
+    it("after her yes, the next answer gets the course text", async () => {
+      const s = await student({ study: "unknown" });
+      const where = { kind: "lecture", courseId: s.course.id, n: 1, section: 0 };
+      ai.queue("groq", { text: "General answer." });
+      await (await POST(post({ text: QUESTION, where }, s.cookie))).text();
+      expect(sent(0)[0].content).not.toContain("LECTURE-TEXT-8a1f");
+      await POST(post({ mode: "study-rule", courseId: s.course.id, rule: "allowed" }, s.cookie));
+      ai.queue("groq", { text: "Course answer." });
+      await (await POST(post({ text: QUESTION, where }, s.cookie))).text();
+      expect(sent(1)[0].content).toContain("LECTURE-TEXT-8a1f");
+    });
   });
 
   it("copy mode for a course that does not allow AI for study: no course text, and a note", async () => {

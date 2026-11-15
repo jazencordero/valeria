@@ -18,6 +18,7 @@
 import { and, asc, desc, eq, isNull, lt, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db as defaultDb, type Db } from "@/server/db/client";
+import { courses } from "@/server/db/schema/courses";
 import { notes, tutorMessages } from "@/server/db/schema/learn";
 import { HISTORY_MAX_CHARS, HISTORY_MESSAGES, type TutorAnchor } from "./context";
 
@@ -228,4 +229,25 @@ export async function appendAnswerToNote(userId: string, noteId: string, answerI
     .set({ body, updatedAt: new Date() })
     .where(and(eq(notes.id, note.id), eq(notes.userId, userId)));
   return body;
+}
+
+/**
+ * Her answer to the tutor's question "May Ready use this course's slides ...": stores
+ * `courses.ai_study` for HER course only. Returns the stored rule, or null when the course is
+ * not hers (or the id is malformed). The same update as the exam page's own question
+ * (src/app/(app)/exams/[id]/page.tsx), without its concepts job (out of scope here).
+ */
+export async function setStudyRule(
+  userId: string,
+  courseId: string,
+  rule: "allowed" | "not_allowed",
+  database: Db = defaultDb,
+): Promise<"allowed" | "not_allowed" | null> {
+  if (!isUuid(userId) || !isUuid(courseId)) return null;
+  const [row] = await database
+    .update(courses)
+    .set({ aiStudy: rule })
+    .where(and(eq(courses.id, courseId), eq(courses.userId, userId)))
+    .returning({ aiStudy: courses.aiStudy });
+  return row ? (row.aiStudy as "allowed" | "not_allowed") : null;
 }

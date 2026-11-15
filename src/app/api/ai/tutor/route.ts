@@ -10,8 +10,8 @@ import {
   buildTutorContext,
   MESSAGE_MAX_CHARS,
   TUTOR_RESTING,
-  tutorAnchor,
   tutorEnabled,
+  tutorPlace,
   whereSchema,
 } from "@/server/tutor/context";
 import {
@@ -21,6 +21,7 @@ import {
   ownAnswer,
   ownNote,
   recentTurns,
+  setStudyRule,
   storeTurn,
   type ChatKey,
   type TokenCounts,
@@ -47,8 +48,16 @@ import {
  *   "Go deeper": the question that answer belongs to is asked again on the large Claude model
  *   (the only way to it), with the history before that question. The new answer is stored under
  *   the same question. 409 `{error:'deeper_unavailable'}` when there is no key or no budget left.
- * load `{ mode: "load", where, noteId? }` -> `{ messages, deeperAvailable }`
+ * load `{ mode: "load", where, noteId? }` -> `{ messages, deeperAvailable, study }`
  *   The stored chat, oldest first (each question followed by its answers). No AI call.
+ *   `study` is the course in view and its study rule, `{ courseId, courseName, rule }` with
+ *   rule 'unknown' | 'allowed' | 'not_allowed', derived here from `where` (a lecture, an exam
+ *   or a study session of her own course; null anywhere else). The chat asks its one question
+ *   ("May Ready use this course's slides ...") while the rule is 'unknown'.
+ * study-rule `{ mode: "study-rule", courseId, rule: "allowed" | "not_allowed" }` -> `{ ok: true, rule }`
+ *   Her answer to that question: stores `courses.ai_study` for HER course only (404 for any
+ *   other id). No AI call. Unlike the exam page's own question it does not queue the concepts
+ *   job.
  * copy `{ mode: "copy", text, where }` -> `{ text, note }`
  *   The "Copy for Claude" text. No AI call, nothing sent anywhere.
  * save `{ mode: "save", noteId, answerId }` -> `{ ok: true, body }`
@@ -72,13 +81,16 @@ const STREAM_ERROR_TEXT = "The answer stopped early. Try again.";
 const Turn = z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(MESSAGE_MAX_CHARS * 2) });
 
 const Body = z.object({
-  mode: z.enum(["chat", "copy", "load", "save"]).optional(),
+  mode: z.enum(["chat", "copy", "load", "save", "study-rule"]).optional(),
   text: z.string().max(MESSAGE_MAX_CHARS).optional(),
   where: whereSchema.optional(),
   noteId: z.uuid().optional(),
   quote: z.string().max(MESSAGE_MAX_CHARS).optional(),
   deeper: z.boolean().optional(),
   answerId: z.uuid().optional(),
+  /** study-rule: her course and her answer. */
+  courseId: z.uuid().optional(),
+  rule: z.enum(["allowed", "not_allowed"]).optional(),
   /** Sent by the step-1 drawer; ignored (history comes from storage). */
   history: z.array(Turn).max(100).optional(),
 });
@@ -107,6 +119,13 @@ export const POST = aiRoute(
     if (!tutorEnabled(user.settings)) return notFound();
     const mode = body.mode ?? "chat";
 
+    if (mode === "study-rule") {
+      if (!body.courseId) return bad("courseId", "Required.");
+      if (!body.rule) return bad("rule", "Required.");
+      const stored = await setStudyRule(user.id, body.courseId, body.rule);
+      return stored === null ? notFound() : json(200, { ok: true, rule: stored });
+    }
+
     const note = body.noteId ? await ownNote(user.id, body.noteId) : null;
     if (body.noteId && !note) return notFound();
 
@@ -124,7 +143,7 @@ export const POST = aiRoute(
       return json(200, { text: copy.text, note: copy.note });
     }
 
-    const anchor = await tutorAnchor(user.id, where);
+    const { anchor, study } = await tutorPlace(user.id, where);
     const placeKey: ChatKey = note ? { noteId: note.id, anchor } : { noteId: null, anchor };
 
     if (mode === "load") {
@@ -132,6 +151,7 @@ export const POST = aiRoute(
       return json(200, {
         messages: messages.map((m) => ({ ...m, createdAt: m.createdAt.toISOString() })),
         deeperAvailable: await claudeAllowed(),
+        study,
       });
     }
 

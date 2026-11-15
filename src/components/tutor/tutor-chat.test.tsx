@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GRADE_GROUP_LABEL } from "@/components/session/grade-buttons";
 import {
@@ -11,6 +11,8 @@ import {
   RESTING_LINE,
   STARTERS,
   STOPPED_LINE,
+  STUDY_ASK_LINE,
+  studyAskedKey,
   TutorChat,
   TutorChatView,
   whereFromPage,
@@ -331,5 +333,119 @@ describe("TutorChat about a study card (Ask about this card)", () => {
     await screen.findByText("Because.");
     expect(calls[1]).toEqual({ text: STARTERS[0], where: STUDY });
     expect(props.resolveNoteId).not.toHaveBeenCalled();
+  });
+});
+
+describe("TutorChat: the course's study rule, asked once", () => {
+  const COURSE = { courseId: C, courseName: "Finance 101" };
+  const withStudy = (rule: string | null, messages: unknown[] = []) =>
+    Response.json({ messages, deeperAvailable: false, study: rule ? { ...COURSE, rule } : null });
+  const question = () => screen.queryByRole("group", { name: STUDY_ASK_LINE });
+
+  beforeEach(() => window.localStorage.clear());
+  afterEach(() => window.localStorage.clear());
+
+  it("shows the question, as a labelled group with three named buttons, only while the rule is unknown", async () => {
+    const { api } = fakeApi(() => withStudy("unknown"));
+    renderChat(api);
+    const group = await screen.findByRole("group", { name: STUDY_ASK_LINE });
+    expect(STUDY_ASK_LINE).toBe("May Ready use this course's slides to explain things to you? Check the course's rules on AI.");
+    expect(within(group).getAllByRole("button")).toHaveLength(3);
+    for (const name of ["Yes", "No", "Not sure"]) expect(within(group).getByRole("button", { name })).toBeTruthy();
+  });
+
+  for (const rule of ["allowed", "not_allowed", null]) {
+    it(`no question when the rule is ${rule ?? "not there (no course in view)"}`, async () => {
+      const { api, calls } = fakeApi(() => withStudy(rule));
+      renderChat(api, { quote: null, where: () => ({ kind: "other" }) });
+      await waitFor(() => expect(calls).toHaveLength(1));
+      await act(async () => {});
+      expect(question()).toBeNull();
+    });
+  }
+
+  for (const [label, rule] of [
+    ["Yes", "allowed"],
+    ["No", "not_allowed"],
+  ] as const) {
+    it(`${label} stores '${rule}' for the course in view and the question goes away`, async () => {
+      const { api, calls } = fakeApi((b) => (b.mode === "load" ? withStudy("unknown") : Response.json({ ok: true, rule })));
+      renderChat(api);
+      await screen.findByRole("group", { name: STUDY_ASK_LINE });
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      await waitFor(() => expect(question()).toBeNull());
+      expect(calls[1]).toEqual({ mode: "study-rule", courseId: C, rule });
+      expect(window.localStorage.getItem(studyAskedKey(C))).toBeNull();
+    });
+  }
+
+  it("a refused save keeps the question and says so", async () => {
+    const { api } = fakeApi((b) => (b.mode === "load" ? withStudy("unknown") : Response.json({ error: "not_found" }, { status: 404 })));
+    renderChat(api);
+    await screen.findByRole("group", { name: STUDY_ASK_LINE });
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    await waitFor(() => expect(screen.getByTestId("tutor-status").textContent).toMatch(/Something went wrong/));
+    expect(question()).not.toBeNull();
+  });
+
+  it("Not sure stores nothing, hides it, and this device does not ask again for that course (another course still asks)", async () => {
+    const { api, calls } = fakeApi(() => withStudy("unknown"));
+    renderChat(api);
+    await screen.findByRole("group", { name: STUDY_ASK_LINE });
+    fireEvent.click(screen.getByRole("button", { name: "Not sure" }));
+    expect(question()).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(window.localStorage.getItem(studyAskedKey(C))).toBe("1");
+    cleanup();
+
+    renderChat(api);
+    await waitFor(() => expect(calls).toHaveLength(2));
+    await act(async () => {});
+    expect(question()).toBeNull();
+    cleanup();
+
+    const OTHER_COURSE = "66666666-6666-4666-8666-666666666666";
+    const other = fakeApi(() => Response.json({ messages: [], deeperAvailable: false, study: { courseId: OTHER_COURSE, courseName: "Stats", rule: "unknown" } }));
+    renderChat(other.api);
+    expect(await screen.findByRole("group", { name: STUDY_ASK_LINE })).toBeTruthy();
+  });
+
+  it("storage that throws: the question still works and is simply asked again", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    const { api } = fakeApi(() => withStudy("unknown"));
+    renderChat(api);
+    await screen.findByRole("group", { name: STUDY_ASK_LINE });
+    fireEvent.click(screen.getByRole("button", { name: "Not sure" }));
+    expect(question()).toBeNull();
+    vi.restoreAllMocks();
+  });
+
+  it("after Yes, the next question is sent as usual and nothing in the chat says there is no material", async () => {
+    const { api, calls } = fakeApi((b) =>
+      b.mode === "load" ? withStudy("unknown") : b.mode === "study-rule" ? Response.json({ ok: true, rule: "allowed" }) : streamResponse(["From your slides."]),
+    );
+    renderChat(api);
+    await screen.findByRole("group", { name: STUDY_ASK_LINE });
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    await waitFor(() => expect(question()).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: STARTERS[0] }));
+    await screen.findByText("From your slides.");
+    expect(calls[2]).toEqual({ text: STARTERS[0], where: WHERE, noteId: NOTE, quote: QUOTE });
+    expect(screen.getByTestId("tutor-chat").textContent).not.toMatch(/course material|no material/i);
+  });
+
+  it("works in the study card mode too (the panel over a session)", async () => {
+    const STUDY = { kind: "study" as const, sessionId: NOTE, cardId: CARD, revealed: true };
+    const { api, calls } = fakeApi((b) => (b.mode === "load" ? withStudy("unknown") : Response.json({ ok: true, rule: "not_allowed" })));
+    renderChat(api, { card: true, quote: "What is PV?", where: () => STUDY });
+    await screen.findByRole("group", { name: STUDY_ASK_LINE });
+    fireEvent.click(screen.getByRole("button", { name: "No" }));
+    await waitFor(() => expect(question()).toBeNull());
+    expect(calls[1]).toEqual({ mode: "study-rule", courseId: C, rule: "not_allowed" });
   });
 });

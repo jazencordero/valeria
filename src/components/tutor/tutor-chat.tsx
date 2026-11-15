@@ -33,6 +33,13 @@
  * shows even with the quote) and the quote is never sent: the server reads the card from `where`,
  * and only when she has answered or revealed it and her course allows its text.
  *
+ * The course's study rule: on a lecture, an exam or a study session of a course whose study rule
+ * is still "unknown" (the load answer's `study`), one question sits above the chat, once per
+ * course: `STUDY_ASK_LINE` with "Yes" (stores 'allowed', so the next answer may use the course
+ * text), "No" (stores 'not_allowed') and "Not sure" (stores nothing; this device remembers it was
+ * asked, `studyAskedKey`, so it is not asked again here). Until she says yes, the server answers
+ * from general knowledge and says so once.
+ *
  * `TutorChatView` is the pure view (plain props); `TutorChat` talks to POST /api/ai/tutor
  * (src/app/api/ai/tutor/route.ts) and reads its UI message stream by hand (the AI SDK stays in
  * src/server/ai, tests/arch/ai-boundary.test.ts).
@@ -50,6 +57,7 @@ export const PROBLEM_LINE = "Something went wrong, so nothing was sent. Try agai
 export const EMPTY_LINE = "Ask anything you are studying. I explain it from the start, one idea at a time.";
 export const COPIED_LINE = "Copied. Paste it into your own Claude chat.";
 export const COPY_BLOCKED_LINE = "Copying was blocked by the browser. Try again.";
+export const STUDY_ASK_LINE = "May Ready use this course's slides to explain things to you? Check the course's rules on AI.";
 export const STARTERS = ["Explain this simply", "Give me an example", "Quiz me on this"] as const;
 export const MESSAGE_MAX = 4000;
 const ROUTE = "/api/ai/tutor";
@@ -85,7 +93,13 @@ export type TutorChatViewProps = {
   onSaveToNote: (turnId: string) => void;
   onDeeper: (turnId: string) => void;
   onCopy: () => void;
+  /** The one question about the course's study rule, while it is unknown (null: none). */
+  studyAsk?: { courseName: string; saving: boolean } | null;
+  onStudyAnswer?: (answer: StudyAnswer) => void;
 };
+
+/** Her answer to `STUDY_ASK_LINE`. */
+export type StudyAnswer = "allowed" | "not_allowed" | "unsure";
 
 /** "groq:openai/gpt-oss-120b" -> "groq · gpt-oss-120b". */
 export function modelLabel(model: string | null | undefined): string {
@@ -102,8 +116,9 @@ const LINK =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]";
 
 export function TutorChatView(props: TutorChatViewProps) {
-  const { turns, busy, draft, status, deeperAvailable, aboutQuote } = props;
+  const { turns, busy, draft, status, deeperAvailable, aboutQuote, studyAsk } = props;
   const headingId = useId();
+  const askId = useId();
   const boxId = useId();
   const logRef = useRef<HTMLDivElement>(null);
   const streaming = busy ? [...turns].reverse().find((t) => t.role === "assistant") : undefined;
@@ -126,6 +141,30 @@ export function TutorChatView(props: TutorChatViewProps) {
       <h3 id={headingId} className="sr-only">
         Tutor
       </h3>
+      {studyAsk ? (
+        <div
+          role="group"
+          aria-labelledby={askId}
+          aria-busy={studyAsk.saving}
+          className="mb-2 flex-none rounded-[14px] border border-line bg-paper px-3.5 py-3"
+          data-testid="tutor-study-ask"
+        >
+          <p id={askId} className="m-0 text-[14px] leading-[1.45] text-ink">
+            {STUDY_ASK_LINE}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" size="sm" disabled={studyAsk.saving} onClick={() => props.onStudyAnswer?.("allowed")}>
+              Yes
+            </Button>
+            <Button type="button" variant="secondary" size="sm" disabled={studyAsk.saving} onClick={() => props.onStudyAnswer?.("not_allowed")}>
+              No
+            </Button>
+            <Button type="button" variant="text" size="sm" disabled={studyAsk.saving} onClick={() => props.onStudyAnswer?.("unsure")}>
+              Not sure
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <div
         ref={logRef}
         role="log"
@@ -379,7 +418,33 @@ export async function askTutor(
   return { ok: true, meta };
 }
 
-type Loaded = { messages: { id: string; role: "user" | "assistant"; text: string; model: string | null }[]; deeperAvailable: boolean };
+/** The course in view and its study rule (the route derives it from `where`). */
+export type StudyInView = { courseId: string; courseName: string; rule: "unknown" | "allowed" | "not_allowed" };
+
+type Loaded = {
+  messages: { id: string; role: "user" | "assistant"; text: string; model: string | null }[];
+  deeperAvailable: boolean;
+  study?: StudyInView | null;
+};
+
+/** This device's note that she answered "Not sure" for a course (so it is asked once). */
+export const studyAskedKey = (courseId: string) => `ready.tutor.studyAsked.${courseId}`;
+
+function studyAsked(courseId: string): boolean {
+  try {
+    return window.localStorage.getItem(studyAskedKey(courseId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberStudyAsked(courseId: string): void {
+  try {
+    window.localStorage.setItem(studyAskedKey(courseId), "1");
+  } catch {
+    // Storage blocked: it is asked again next time, which is harmless.
+  }
+}
 
 async function postJson<T>(fetcher: typeof fetch, body: Record<string, unknown>, signal?: AbortSignal): Promise<T | null> {
   try {
@@ -436,6 +501,8 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
   const [busy, setBusy] = useState(preview?.busy ?? false);
   const [status, setStatus] = useState<string | null>(preview?.status ?? null);
   const [deeperAvailable, setDeeperAvailable] = useState(preview?.deeperAvailable ?? false);
+  const [study, setStudy] = useState<StudyInView | null>(null);
+  const [studySaving, setStudySaving] = useState(false);
   const key = useRef<Key>(noteId ? { decided: true, noteId } : card ? { decided: true, noteId: null } : { decided: false });
   const aborter = useRef<AbortController | null>(null);
   const busyRef = useRef(busy);
@@ -457,6 +524,8 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
     void postJson<Loaded>(api.fetch, body, controller.signal).then((loaded) => {
       if (!loaded || controller.signal.aborted) return;
       setDeeperAvailable(loaded.deeperAvailable === true);
+      const s = loaded.study;
+      if (s && typeof s.courseId === "string" && s.rule === "unknown" && !studyAsked(s.courseId)) setStudy(s);
       // A new highlight starts empty; otherwise show the stored chat (note's or place's).
       if (quote && !noteId && !card) return;
       const messages = Array.isArray(loaded.messages) ? loaded.messages : [];
@@ -576,6 +645,27 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
     }
   }, [api, draft, where]);
 
+  const answerStudy = useCallback(
+    async (answer: StudyAnswer) => {
+      if (!study) return;
+      if (answer === "unsure") {
+        rememberStudyAsked(study.courseId);
+        setStudy(null);
+        return;
+      }
+      setStudySaving(true);
+      const out = await postJson<{ ok: boolean }>(api.fetch, { mode: "study-rule", courseId: study.courseId, rule: answer });
+      setStudySaving(false);
+      if (out?.ok) {
+        setStudy(null);
+        setStatus(null);
+      } else {
+        setStatus(PROBLEM_LINE);
+      }
+    },
+    [api.fetch, study],
+  );
+
   const save = (turnId: string) => {
     const turn = turns.find((t) => t.id === turnId);
     if (!turn || turn.saved || !turn.text.trim()) return;
@@ -600,6 +690,8 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
       onSaveToNote={save}
       onDeeper={(id) => void deeper(id)}
       onCopy={() => void copy()}
+      studyAsk={study ? { courseName: study.courseName, saving: studySaving } : null}
+      onStudyAnswer={(a) => void answerStudy(a)}
     />
   );
 }
