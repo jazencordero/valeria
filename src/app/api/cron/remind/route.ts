@@ -1,7 +1,9 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { startOfDay } from "@/lib/dates";
 import { dueReminders, helsinkiDay, isNudgeHour, nudge, type NudgeExam, type Reminder } from "@/lib/remind/plan";
 import { itemsForUser } from "@/server/calendar/feed";
+import { examNotPast } from "@/server/data/exams";
 import { db, type Db } from "@/server/db/client";
 import { pushSubscriptions, reminderLog } from "@/server/db/schema/calendar";
 import { courses } from "@/server/db/schema/courses";
@@ -88,15 +90,24 @@ function remindersOn(settings: Record<string, unknown>): boolean {
   return !(value === false || value === null || value === "none");
 }
 
+/** The last millisecond of the Helsinki day of `at`. */
+function endOfDay(at: Date): Date {
+  // Noon the next day is always inside the next Helsinki day, whatever the clocks did.
+  return new Date(startOfDay(new Date(startOfDay(at).getTime() + 36 * 60 * 60 * 1000)).getTime() - 1);
+}
+
 /** Her exams and quizzes that have not started, in courses she has not hidden, each with its deck. */
 async function nudgeExams(userId: string, now: Date, database: Db): Promise<NudgeExam[]> {
   const rows = await database
-    .select({ id: exams.id, title: exams.title, at: exams.at })
+    .select({ id: exams.id, title: exams.title, at: exams.at, wholeDay: exams.timeIsPlaceholder })
     .from(exams)
     .innerJoin(courses, eq(courses.id, exams.courseId))
-    .where(and(eq(exams.userId, userId), eq(courses.hidden, false), gt(exams.at, now)));
+    .where(and(eq(exams.userId, userId), eq(courses.hidden, false), examNotPast(now)));
   const out: NudgeExam[] = [];
-  for (const exam of rows) {
+  for (const row of rows) {
+    // A whole-day exam (its clock time is a stand-in) is still ahead all of its Helsinki day, so
+    // the 17:00 nudge on that day counts it: it is aimed at the end of the day.
+    const exam = { id: row.id, title: row.title, at: row.wholeDay ? endOfDay(row.at) : row.at };
     const deck = await loadDeck(userId, exam.id, database);
     out.push({ exam, concepts: deck.concepts, cards: deck.cards });
   }

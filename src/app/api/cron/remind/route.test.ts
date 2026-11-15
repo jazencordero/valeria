@@ -4,7 +4,9 @@ import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { pushSubscriptions, reminderLog } from "@/server/db/schema/calendar";
 import { courses } from "@/server/db/schema/courses";
+import { cardConcepts, cards, cardStates, concepts, exams } from "@/server/db/schema/study";
 import { users } from "@/server/db/schema/users";
+import { newCard } from "@/lib/study/memory";
 import { assignments } from "@/server/db/schema/work";
 import { enqueue } from "@/server/jobs/queue";
 
@@ -113,5 +115,39 @@ describe("POST /api/cron/remind", () => {
     holder.send.mockResolvedValue({ status: "sent", sent: 0, removed: 0, failed: 1 });
     expect((await run()).body).toMatchObject({ ok: true, sent: 0, unsent: 1 });
     expect(await t.db.select().from(reminderLog).where(eq(reminderLog.userId, userId))).toEqual([]);
+  });
+  it("still nudges at 17:00 on the day of a whole-day exam, and not for one with a real time that has passed", { timeout: SLOW }, async () => {
+    // Mon 16 Nov 2026, 17:05 Helsinki: the nudge hour. Both exams are "at" 09:00 that morning.
+    const now = new Date("2026-11-16T15:05:00Z");
+    vi.setSystemTime(now);
+    const morning = new Date("2026-11-16T07:00:00Z");
+    const [user] = await t.db.insert(users).values({}).returning();
+    const [course] = await t.db.insert(courses).values({ userId: user.id, moodleId: 1, name: "Course", code: "C-1" }).returning();
+    await t.db.insert(pushSubscriptions).values({ userId: user.id, endpoint: `https://fcm.googleapis.com/fcm/send/${user.id}`, keys: { p256dh: "p", auth: "a" } });
+
+    // One exam with a slipping card (graded, due yesterday).
+    const slipping = async (title: string, timeIsPlaceholder: boolean) => {
+      const [exam] = await t.db.insert(exams).values({ userId: user.id, courseId: course.id, title, kind: "exam", at: morning, timeIsPlaceholder }).returning();
+      const [concept] = await t.db.insert(concepts).values({ userId: user.id, examId: exam.id, name: `${title} idea`, position: 1 }).returning();
+      const [card] = await t.db
+        .insert(cards)
+        .values({ userId: user.id, examId: exam.id, type: "basic", body: { front: "Q", back: "A" }, origin: "manual", contentHash: `h-${title}` })
+        .returning();
+      await t.db.insert(cardConcepts).values({ cardId: card.id, conceptId: concept.id });
+      const reviewed = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+      const due = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      await t.db.insert(cardStates).values({ cardId: card.id, fsrs: { ...newCard(reviewed), state: 2, reps: 2, dueAt: due.getTime(), lastReviewAt: reviewed.getTime() }, dueAt: due, lapses: 0, lastReviewAt: reviewed });
+      return exam;
+    };
+    await slipping("Timed exam", false);
+    expect((await run()).body).toMatchObject({ nudges: 0 });
+
+    const whole = await slipping("Whole-day exam", true);
+    const second = await run();
+    expect(second.body).toMatchObject({ nudges: 1 });
+    const sent = holder.send.mock.calls.map((c: unknown[]) => JSON.stringify(c));
+    expect(sent.some((c: string) => c.includes("Whole-day exam idea"))).toBe(true);
+    expect(sent.some((c: string) => c.includes("Timed exam idea"))).toBe(false);
+    expect(whole.timeIsPlaceholder).toBe(true);
   });
 });
