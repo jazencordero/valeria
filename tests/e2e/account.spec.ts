@@ -12,6 +12,13 @@
  *   can only be made with the seed tool, which needs the database the dev server holds; the
  *   route's own test covers that path (src/app/open/route.test.ts).
  *
+ * M5-15: an account without a login sets one in Settings ("Log in": username, password, Save,
+ * then "You can now log in as <name>."), logs out, and logs in with it, landing on Home. The
+ * account is one with no username and no password, as an /open link opens: a working /open code
+ * can only be minted where the dev server's database is (the dev server holds the local
+ * database's lock), so the test makes the same kind of account the other way the app does: a
+ * browser holding a cookie from before accounts gets a fresh device user with no login.
+ *
  * Runs with the READY_FAST cookie (every animation instant), on the phone and laptop projects.
  */
 import { randomBytes } from "node:crypto";
@@ -123,4 +130,50 @@ test("the demo and an /open link still work signed out", async ({ page, context,
   expect(open.status()).toBe(403);
   expect(await open.text()).toBe("This link does not work any more. Ask for a new one.");
   await fresh.close();
+});
+
+test("an account without a login sets one in Settings, logs out and logs in with it", async ({ page, context, baseURL }) => {
+  await fastOn(context, baseURL!);
+  const username = `test.own.${randomBytes(5).toString("hex")}`;
+  // A cookie from before accounts: the app makes a device user for it, with no username or password.
+  await context.addCookies([{ name: "ready_session", value: randomBytes(32).toString("base64url"), url: baseURL! }]);
+
+  // Started the first run (picked a school), so log in later lands on Home.
+  await page.goto("/school");
+  const aalto = page.getByRole("radio", { name: /Aalto/ });
+  await expect(async () => {
+    await aalto.click();
+    await expect(aalto).toHaveAttribute("aria-checked", "true", { timeout: 1_000 });
+  }).toPass({ timeout: 30_000 });
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page).toHaveURL(/\/connect$/);
+
+  // Settings: no login yet, so no Log out, and the "Log in" section asks for one.
+  await page.goto("/settings");
+  const section = page.getByRole("region", { name: "Log in" });
+  await expect(section.getByText("Set a username and password so you can log in on any device.")).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByRole("button", { name: "Log out" })).toHaveCount(0);
+  await expect(async () => {
+    await section.getByLabel("Username").fill(username);
+    await section.getByLabel("Password", { exact: true }).fill(PASSWORD);
+    await section.getByRole("button", { name: "Save", exact: true }).click({ timeout: 2_000 });
+    await expect(section.getByText(`You can now log in as ${username}.`)).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
+  // Now a login: the change-password form, and Log out in Account.
+  await expect(section.getByLabel("Current password", { exact: true })).toBeVisible();
+  await expect(page.getByText(`Logged in as ${username}`)).toBeVisible({ timeout: 10_000 });
+
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page).toHaveURL(/\/welcome$/);
+
+  // Log in with the new login: Home.
+  await page.goto("/login");
+  await expect(async () => {
+    await fillLogin(page, username);
+    await page.getByRole("button", { name: "Log in", exact: true }).click({ timeout: 2_000 });
+    await expect(page).toHaveURL(/\/home$/, { timeout: 10_000 });
+  }).toPass({ timeout: 30_000 });
+  await expect(page.getByRole("region", { name: "DO FIRST" })).toBeVisible({ timeout: 30_000 });
 });

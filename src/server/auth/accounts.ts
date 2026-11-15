@@ -33,10 +33,16 @@
  * written. Two tries at the same instant can both pass the check, so the limit can be overrun by
  * the number of tries in flight; that is accepted.
  *
+ * M5-15: a signed-in account gives itself a login in Settings (`setLogin` with `firstOnly`: only
+ * a user with neither a name nor a password, never a demo, and never a second name) and changes
+ * its password (`changePassword`). The current password is checked behind the same brake as log
+ * in: the same per-name and per-address counts, a wrong one counts as a failed try for that name,
+ * and the right one clears the name's count.
+ *
  * Nothing here logs a username, a password, a hash or an address.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { and, count, eq, gt, inArray, lt, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { moodleConnections } from "@/server/db/schema/moodle";
@@ -49,6 +55,10 @@ export const NO_MATCH = "That username and password do not match.";
 export const TOO_MANY = "Too many tries. Wait 15 minutes.";
 export const TAKEN = "That username is taken. Pick another one.";
 export const BAD_USERNAME = "Use 3 to 32 letters, numbers, dots, dashes or underscores, with no spaces.";
+export const WRONG_CURRENT = "That is not your current password.";
+export const HAS_LOGIN = "This account already has a username.";
+export const NO_LOGIN = "This account has no password yet.";
+export const DEMO_NO_LOGIN = "The demo cannot have a username and password.";
 
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 export const FAILS_PER_USERNAME = 5;
@@ -58,6 +68,11 @@ export const FAIL_ADDRESS_KIND = "login_fail_addr";
 const KEEP_FAILS_MS = 24 * 60 * 60 * 1000;
 
 const USERNAME = new RegExp(USERNAME_SQL_PATTERN);
+/**
+ * The `users.settings` key that marks a demo user: `DEMO_FLAG` in src/server/demo/seed.ts. Not
+ * imported from there, as that module pulls the whole demo seed (and the Moodle fake) into log in.
+ */
+const DEMO_FLAG = "demo";
 
 /** The stored form of a typed username (trimmed, lower-case), or null when it breaks the rule. */
 export function normalizeUsername(raw: string): string | null {
@@ -149,6 +164,49 @@ async function failsSince(database: Db, kind: string, key: string, since: Date):
   return row?.n ?? 0;
 }
 
+/** The brake's key for a client address, or null when the host reported none. */
+function addressKeyOf(raw: string | null | undefined): string | null {
+  const address = raw?.trim().toLowerCase().slice(0, 64) || null;
+  return address ? keyFor("addr", address) : null;
+}
+
+/** True when this name, or this address, has used up its tries for the last 15 minutes. */
+async function braked(database: Db, nameKey: string, addressKey: string | null, now: Date): Promise<boolean> {
+  const since = new Date(now.getTime() - LOGIN_WINDOW_MS);
+  if ((await failsSince(database, FAIL_USER_KIND, nameKey, since)) >= FAILS_PER_USERNAME) return true;
+  return addressKey !== null && (await failsSince(database, FAIL_ADDRESS_KIND, addressKey, since)) >= FAILS_PER_ADDRESS;
+}
+
+/** Counts one failed try for the name (and the address), and drops fails older than a day. */
+async function recordFail(database: Db, nameKey: string, addressKey: string | null, now: Date): Promise<void> {
+  const fail = (kind: string, key: string) => ({
+    kind,
+    status: "done" as const,
+    payload: { key },
+    createdAt: now,
+    runAfter: now,
+  });
+  await database
+    .insert(jobs)
+    .values([fail(FAIL_USER_KIND, nameKey), ...(addressKey ? [fail(FAIL_ADDRESS_KIND, addressKey)] : [])]);
+  await database
+    .delete(jobs)
+    .where(
+      and(
+        eq(jobs.status, "done"),
+        lt(jobs.runAfter, new Date(now.getTime() - KEEP_FAILS_MS)),
+        inArray(jobs.kind, [FAIL_USER_KIND, FAIL_ADDRESS_KIND]),
+      ),
+    );
+}
+
+/** A right password: this name's earlier fails stop counting (the address's stay). */
+async function clearNameFails(database: Db, nameKey: string): Promise<void> {
+  await database
+    .delete(jobs)
+    .where(and(eq(jobs.kind, FAIL_USER_KIND), sql`${jobs.payload} ->> 'key' = ${nameKey}`));
+}
+
 /**
  * Logs in to an account and makes a device session for it.
  *
@@ -163,19 +221,12 @@ export async function logIn(
   const database = opts.db ?? defaultDb;
   const verify = opts.verify ?? verifyPassword;
   const now = opts.now ?? new Date();
-  const since = new Date(now.getTime() - LOGIN_WINDOW_MS);
   // Not checked against the rule here: a malformed name takes the same path as an unknown one.
   const name = username.trim().toLowerCase().slice(0, 64);
   const nameKey = keyFor("user", name);
-  const address = opts.address?.trim().toLowerCase().slice(0, 64) || null;
-  const addressKey = address ? keyFor("addr", address) : null;
+  const addressKey = addressKeyOf(opts.address);
 
-  if ((await failsSince(database, FAIL_USER_KIND, nameKey, since)) >= FAILS_PER_USERNAME) {
-    return { ok: false, error: TOO_MANY };
-  }
-  if (addressKey && (await failsSince(database, FAIL_ADDRESS_KIND, addressKey, since)) >= FAILS_PER_ADDRESS) {
-    return { ok: false, error: TOO_MANY };
-  }
+  if (await braked(database, nameKey, addressKey, now)) return { ok: false, error: TOO_MANY };
 
   const [row] = await database
     .select({ id: users.id, passwordHash: users.passwordHash })
@@ -186,32 +237,12 @@ export async function logIn(
   const matches = await verify(password, stored ?? (await dummyHash()));
 
   if (!row || !stored || !matches) {
-    const fail = (kind: string, key: string) => ({
-      kind,
-      status: "done" as const,
-      payload: { key },
-      createdAt: now,
-      runAfter: now,
-    });
-    await database
-      .insert(jobs)
-      .values([fail(FAIL_USER_KIND, nameKey), ...(addressKey ? [fail(FAIL_ADDRESS_KIND, addressKey)] : [])]);
-    await database
-      .delete(jobs)
-      .where(
-        and(
-          eq(jobs.status, "done"),
-          lt(jobs.runAfter, new Date(now.getTime() - KEEP_FAILS_MS)),
-          inArray(jobs.kind, [FAIL_USER_KIND, FAIL_ADDRESS_KIND]),
-        ),
-      );
+    await recordFail(database, nameKey, addressKey, now);
     return { ok: false, error: NO_MATCH };
   }
 
   // Right password: this name's earlier fails stop counting.
-  await database
-    .delete(jobs)
-    .where(and(eq(jobs.kind, FAIL_USER_KIND), sql`${jobs.payload} ->> 'key' = ${nameKey}`));
+  await clearNameFails(database, nameKey);
   const token = await startDeviceSession(database, row.id, { userAgent: opts.userAgent, now });
   return { ok: true, userId: row.id, token };
 }
@@ -237,14 +268,33 @@ export async function landingFor(database: Db, userId: string): Promise<"/home" 
 }
 
 /**
- * Sets (or changes) the username and password of an existing user: the seed tool (M3-57). A name
- * held by another user is refused; the password is hashed here and never returned.
+ * Sets (or changes) the username and password of an existing user. A name held by another user is
+ * refused; the password is hashed here and never returned.
+ *
+ * Two callers:
+ * - the seed tool (M3-57): any of the two, on any user, set or changed;
+ * - Settings (M5-15), with `firstOnly`: both are required, and only a user with neither a name
+ *   nor a password gets them (`HAS_LOGIN` otherwise: no name change once set, and no new
+ *   password without the current one, see `changePassword`). A demo is refused. The UPDATE
+ *   itself checks the user still has no name, so two saves at once cannot both win.
  */
 export async function setLogin(
   database: Db,
   userId: string,
   login: { username?: string; password?: string },
+  opts: { firstOnly?: boolean } = {},
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (opts.firstOnly) {
+    if (login.username === undefined || login.password === undefined) return { ok: false, error: BAD_USERNAME };
+    const [user] = await database
+      .select({ username: users.username, passwordHash: users.passwordHash, settings: users.settings })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!user) return { ok: false, error: "That user does not exist." };
+    if ((user.settings as Record<string, unknown> | null)?.[DEMO_FLAG] === true) return { ok: false, error: DEMO_NO_LOGIN };
+    if (user.username !== null || user.passwordHash !== null) return { ok: false, error: HAS_LOGIN };
+  }
   const set: { username?: string; passwordHash?: string } = {};
   if (login.username !== undefined) {
     const name = normalizeUsername(login.username);
@@ -259,14 +309,61 @@ export async function setLogin(
     set.passwordHash = await hashPassword(login.password);
   }
   if (Object.keys(set).length === 0) return { ok: true };
+  const where = opts.firstOnly
+    ? and(eq(users.id, userId), isNull(users.username), isNull(users.passwordHash))
+    : eq(users.id, userId);
   try {
-    const updated = await database.update(users).set(set).where(eq(users.id, userId)).returning({ id: users.id });
-    if (updated.length === 0) return { ok: false, error: "That user does not exist." };
+    const updated = await database.update(users).set(set).where(where).returning({ id: users.id });
+    if (updated.length === 0) return { ok: false, error: opts.firstOnly ? HAS_LOGIN : "That user does not exist." };
   } catch (err) {
     // A parallel run took the name between the check and the update.
     const e = err as { code?: string; cause?: { code?: string } };
     if (e.code === "23505" || e.cause?.code === "23505") return { ok: false, error: TAKEN };
     throw err;
   }
+  return { ok: true };
+}
+
+/**
+ * Changes the password of a user that has a login (M5-15), after checking the current one behind
+ * the log-in brake: refused with `TOO_MANY` while the name (or the address) is braked, without
+ * checking anything; a wrong current password counts as a failed log-in try for that name (and
+ * address) and gets `WRONG_CURRENT`; the right one clears the name's count. A new password that
+ * breaks the rule is refused before the current one is checked, so it costs no try. Other device
+ * sessions stay signed in.
+ */
+export async function changePassword(
+  database: Db,
+  userId: string,
+  current: string,
+  next: string,
+  opts: { now?: Date; address?: string | null; verify?: typeof verifyPassword } = {},
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const verify = opts.verify ?? verifyPassword;
+  const now = opts.now ?? new Date();
+  const [user] = await database
+    .select({ username: users.username, passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!user?.username || !user.passwordHash) return { ok: false, error: NO_LOGIN };
+  const nameKey = keyFor("user", user.username);
+  const addressKey = addressKeyOf(opts.address);
+
+  if (await braked(database, nameKey, addressKey, now)) return { ok: false, error: TOO_MANY };
+  const problem = passwordProblem(next);
+  if (problem) return { ok: false, error: problem };
+  if (!(await verify(current, user.passwordHash))) {
+    await recordFail(database, nameKey, addressKey, now);
+    return { ok: false, error: WRONG_CURRENT };
+  }
+  await clearNameFails(database, nameKey);
+  // Only over the hash just checked: a change made in between is not overwritten.
+  const updated = await database
+    .update(users)
+    .set({ passwordHash: await hashPassword(next) })
+    .where(and(eq(users.id, userId), eq(users.passwordHash, user.passwordHash)))
+    .returning({ id: users.id });
+  if (updated.length === 0) return { ok: false, error: WRONG_CURRENT };
   return { ok: true };
 }

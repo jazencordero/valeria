@@ -6,7 +6,10 @@ import { jobs } from "@/server/db/schema/system";
 import { sessions, users } from "@/server/db/schema/users";
 import {
   BAD_USERNAME,
+  changePassword,
+  DEMO_NO_LOGIN,
   endDeviceSession,
+  HAS_LOGIN,
   landingFor,
   logIn,
   LOGIN_WINDOW_MS,
@@ -16,6 +19,7 @@ import {
   signUp,
   TAKEN,
   TOO_MANY,
+  WRONG_CURRENT,
 } from "./accounts";
 import { verifyPassword } from "./password";
 import { currentUserFor, hashToken } from "./session";
@@ -174,5 +178,119 @@ describe("setLogin", () => {
     const [other] = await t.db.insert(users).values({}).returning();
     expect(await setLogin(t.db, other.id, { username: "seeded.one" })).toEqual({ ok: false, error: TAKEN });
     expect(await setLogin(t.db, other.id, { password: "four" })).toEqual({ ok: false, error: "Use at least 5 characters." });
+  });
+});
+
+describe("setLogin, first only (M5-15)", () => {
+  it("gives an account without a login a name and a hashed password", { timeout: T }, async () => {
+    const [plain] = await t.db.insert(users).values({ settings: { seededFrom: { key: "k" } } }).returning();
+    expect(await setLogin(t.db, plain.id, { username: " Own.Name ", password: PASSWORD }, { firstOnly: true })).toEqual({ ok: true });
+    const [row] = await t.db.select().from(users).where(eq(users.id, plain.id));
+    expect(row.username).toBe("own.name");
+    expect(row.passwordHash).toMatch(/^scrypt\$/);
+    expect(row.passwordHash).not.toContain(PASSWORD);
+    expect(row.settings).toEqual({ seededFrom: { key: "k" } });
+    const r = await logIn("own.name", PASSWORD, { db: t.db });
+    expect(r.ok && r.userId).toBe(plain.id);
+  });
+
+  it("refuses a taken name with sign up's sentence, and the sign-up rules", { timeout: T }, async () => {
+    expect((await signUp(NAME, PASSWORD, { db: t.db })).ok).toBe(true);
+    const [plain] = await t.db.insert(users).values({}).returning();
+    const first = { firstOnly: true };
+    expect(await setLogin(t.db, plain.id, { username: "TEST.student", password: PASSWORD }, first)).toEqual({ ok: false, error: TAKEN });
+    expect(await setLogin(t.db, plain.id, { username: "no", password: PASSWORD }, first)).toEqual({ ok: false, error: BAD_USERNAME });
+    expect(await setLogin(t.db, plain.id, { username: "free.name", password: "four" }, first)).toEqual({
+      ok: false,
+      error: "Use at least 5 characters.",
+    });
+    const [row] = await t.db.select().from(users).where(eq(users.id, plain.id));
+    expect(row).toMatchObject({ username: null, passwordHash: null });
+  });
+
+  it("never gives a second name or a password without the current one", { timeout: T }, async () => {
+    const r = await signUp(NAME, PASSWORD, { db: t.db });
+    if (!r.ok) throw new Error("setup");
+    expect(await setLogin(t.db, r.userId, { username: "other.name", password: WRONG }, { firstOnly: true })).toEqual({
+      ok: false,
+      error: HAS_LOGIN,
+    });
+    const [row] = await t.db.select().from(users).where(eq(users.id, r.userId));
+    expect(row.username).toBe(NAME);
+    expect((await logIn(NAME, PASSWORD, { db: t.db })).ok).toBe(true);
+    // A password without a name (as the seed tool can leave one) is a login too.
+    const [half] = await t.db.insert(users).values({}).returning();
+    await setLogin(t.db, half.id, { password: PASSWORD });
+    expect(await setLogin(t.db, half.id, { username: "half.name", password: WRONG }, { firstOnly: true })).toEqual({
+      ok: false,
+      error: HAS_LOGIN,
+    });
+  });
+
+  it("refuses a demo", { timeout: T }, async () => {
+    const [demo] = await t.db.insert(users).values({ settings: { demo: true } }).returning();
+    expect(await setLogin(t.db, demo.id, { username: "demo.name", password: PASSWORD }, { firstOnly: true })).toEqual({
+      ok: false,
+      error: DEMO_NO_LOGIN,
+    });
+    const [row] = await t.db.select().from(users).where(eq(users.id, demo.id));
+    expect(row).toMatchObject({ username: null, passwordHash: null });
+  });
+});
+
+describe("changePassword (M5-15)", () => {
+  let userId: string;
+  beforeEach(async () => {
+    const r = await signUp(NAME, PASSWORD, { db: t.db, now: NOW });
+    if (!r.ok) throw new Error("setup");
+    userId = r.userId;
+  });
+  const NEW = "a new one";
+
+  it("needs the right current password", { timeout: T }, async () => {
+    expect(await changePassword(t.db, userId, WRONG, NEW, { now: NOW })).toEqual({ ok: false, error: WRONG_CURRENT });
+    expect((await logIn(NAME, PASSWORD, { db: t.db, now: NOW })).ok).toBe(true);
+    expect(await changePassword(t.db, userId, PASSWORD, "four", { now: NOW })).toEqual({
+      ok: false,
+      error: "Use at least 5 characters.",
+    });
+    expect(await changePassword(t.db, userId, PASSWORD, NEW, { now: NOW })).toEqual({ ok: true });
+    expect(await logIn(NAME, PASSWORD, { db: t.db, now: NOW })).toEqual({ ok: false, error: NO_MATCH });
+    expect((await logIn(NAME, NEW, { db: t.db, now: NOW })).ok).toBe(true);
+    // Never the passwords in what is stored or counted.
+    const stored = JSON.stringify([await t.db.select().from(users), await t.db.select().from(jobs)]);
+    for (const secret of [PASSWORD, WRONG, NEW]) expect(stored).not.toContain(secret);
+  });
+
+  it("is throttled with log in: the sixth wrong try is refused, even a right one", { timeout: T }, async () => {
+    for (let i = 0; i < 5; i++) {
+      expect(await changePassword(t.db, userId, WRONG, NEW, { now: at(i * 60_000) })).toEqual({ ok: false, error: WRONG_CURRENT });
+    }
+    expect(await changePassword(t.db, userId, PASSWORD, NEW, { now: at(5 * 60_000) })).toEqual({ ok: false, error: TOO_MANY });
+    // The same count as log in: her name is braked there too.
+    expect(await logIn(NAME, PASSWORD, { db: t.db, now: at(5 * 60_000) })).toEqual({ ok: false, error: TOO_MANY });
+    // After the wait the right one works.
+    expect(await changePassword(t.db, userId, PASSWORD, NEW, { now: at(4 * 60_000 + LOGIN_WINDOW_MS + 1) })).toEqual({ ok: true });
+  });
+
+  it("counts wrong log ins, and a right current password clears the name's count", { timeout: T }, async () => {
+    for (let i = 0; i < 4; i++) await logIn(NAME, WRONG, { db: t.db, now: NOW });
+    expect(await changePassword(t.db, userId, PASSWORD, NEW, { now: NOW })).toEqual({ ok: true });
+    for (let i = 0; i < 5; i++) {
+      expect(await changePassword(t.db, userId, WRONG, PASSWORD, { now: NOW })).toEqual({ ok: false, error: WRONG_CURRENT });
+    }
+    expect(await logIn(NAME, NEW, { db: t.db, now: NOW })).toEqual({ ok: false, error: TOO_MANY });
+  });
+
+  it("counts the address too", { timeout: T }, async () => {
+    const address = "203.0.113.9";
+    for (let i = 0; i < 20; i++) await logIn(`guess.${i}`, WRONG, { db: t.db, now: NOW, address });
+    expect(await changePassword(t.db, userId, PASSWORD, NEW, { now: NOW, address })).toEqual({ ok: false, error: TOO_MANY });
+    expect(await changePassword(t.db, userId, PASSWORD, NEW, { now: NOW, address: "198.51.100.3" })).toEqual({ ok: true });
+  });
+
+  it("refuses an account without a login", { timeout: T }, async () => {
+    const [plain] = await t.db.insert(users).values({}).returning();
+    expect((await changePassword(t.db, plain.id, PASSWORD, NEW)).ok).toBe(false);
   });
 });

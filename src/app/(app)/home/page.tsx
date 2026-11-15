@@ -77,6 +77,11 @@
  * alone in the same place, without the EXAMS AND QUIZZES label; with nothing
  * unread anywhere there is no row.
  *
+ * M5-15: an account without a login (not a demo) gets one quiet line under the greeting, "Set a
+ * username and password so you can get back in.", linking to Settings' "Log in" section. "Not
+ * now" hides it on this device; `LoginNudge` (src/components/settings/login-section.tsx) keeps
+ * that in localStorage and renders nothing until it has read it, so it never flashes.
+ *
  * Cut: the week markers' pulse after turning on. `WeekCard` exposes `pulse()`
  * through a ref, which needs a client component holding both cards; none of this
  * ticket's files can be one.
@@ -102,6 +107,7 @@ import {
 import { GradesCard } from "@/components/home/grades-card";
 import { NeverMiss } from "@/components/home/never-miss";
 import { Pickup } from "@/components/home/pickup";
+import { LoginNudge } from "@/components/settings/login-section";
 import { HeroCard } from "@/components/home/hero-card";
 import { Queue, QueueRow } from "@/components/home/queue-row";
 import { WeekCard } from "@/components/home/week-card";
@@ -116,6 +122,7 @@ import { landingFor } from "@/server/auth/accounts";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { db } from "@/server/db/client";
 import { readFlash } from "@/server/data/flash";
+import { isDemo } from "@/server/demo/seed";
 import { getHomeView, type HomeBite, type HomeDone, type HomeExam, type HomeFirst } from "@/server/data/home";
 import { syncNow } from "@/server/sync/run";
 import { dismissNeverMiss, turnOnNeverMiss } from "./never-miss-actions";
@@ -329,6 +336,8 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
         <div {...part(1)}>
           <HandedInGreeting sentence={view.greeting} />
         </div>
+
+        {!user.username && !isDemo(user) && <LoginNudge className="mt-2" />}
 
         <DoodleDefs />
 

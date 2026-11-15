@@ -8,6 +8,9 @@
  * (M8-03 turns it into the designed switch).
  * M2-28 adds one plain line, "Tutor this month: about N EUR of M", only for an account with the
  * tutor switched on and only when the Claude path exists (ANTHROPIC_API_KEY is set).
+ * M5-15 adds "Log in" under Account (`src/components/settings/login-section.tsx`, actions in
+ * ./login-actions.ts): an account without a login sets a username and password there, one with a
+ * login changes its password. Not for a demo. Home links to it (`#log-in`).
  *
  * Built from existing pieces only; no design pass (M8-01 designs it). Works
  * with or without the (app) frame from M1-25: it is an ordinary page in the
@@ -16,15 +19,18 @@
 import { eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { cache, Suspense } from "react";
+import { LoginSection } from "@/components/settings/login-section";
 import { Button } from "@/components/ui/button";
 import { dateLine } from "@/lib/dates";
 import { filesSwitchOn } from "@/server/ai/consent";
 import { ensureSession } from "@/server/auth/session";
 import { db } from "@/server/db/client";
+import { isDemo } from "@/server/demo/seed";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import { tutorBudgetLine } from "@/server/tutor/budget";
 import { tutorEnabled } from "@/server/tutor/context";
 import { DELETE_PHRASE, deleteAccountAction, disconnectAction, setUseFilesAction } from "./actions";
+import { changePasswordAction, setLoginAction } from "./login-actions";
 
 // src/lib/schools.ts (the school's `lms` name) does not exist on this branch
 // yet; swap this for it when it lands.
@@ -46,6 +52,8 @@ type AccountProps = {
   confirmWrong: boolean;
   /** "Tutor this month: about N EUR of M", or null when it is not hers to see. */
   tutorLine?: string | null;
+  /** True for a demo: no "Log in" section. */
+  demo?: boolean;
 };
 
 /** The visitor's user, read once per request for both parts that need it. */
@@ -95,11 +103,12 @@ async function AccountSections({ searchParams }: { searchParams: SearchParams })
       connection={row ? { name: user.displayName, ...row } : null}
       confirmWrong={confirm === "wrong"}
       tutorLine={tutorLine}
+      demo={isDemo(user)}
     />
   );
 }
 
-function Account({ username, connection, confirmWrong, tutorLine = null }: AccountProps) {
+function Account({ username, connection, confirmWrong, tutorLine = null, demo = false }: AccountProps) {
   return (
     <>
       <section aria-labelledby="lms-title" className="space-y-3">
@@ -160,6 +169,10 @@ function Account({ username, connection, confirmWrong, tutorLine = null }: Accou
           <p className="ink-2">Ready knows you by this device only, so there is no account to log out of.</p>
         )}
       </section>
+
+      {demo ? null : (
+        <LoginSection username={username} setLoginAction={setLoginAction} changePasswordAction={changePasswordAction} />
+      )}
 
       <section id="your-data" aria-labelledby="data-title" className="space-y-3">
         <h2 id="data-title" className="type-h22">
