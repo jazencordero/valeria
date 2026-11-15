@@ -15,13 +15,25 @@
  * - Nothing open: DO FIRST shows her newest hand-in of the last 7 days.
  *
  * Everything depends on her cookie and the clock, so the page streams inside
- * Suspense (cacheComponents is on). Cut: no cap greeting bubble, bite row,
- * exam cards, week strip, grades card or Never miss one (M3, M4, M6, M7).
+ * Suspense (cacheComponents is on).
+ *
+ * M3-44: under the DO FIRST card, the bite row (prototype main-flow.html HTML
+ * 1459, JS 2897-2902): today's bite for the soonest exam that has one, or
+ * "Today's bites are done". When nothing is open the bite is the DO FIRST
+ * card itself. After THEN, the EXAMS AND QUIZZES section (HTML 1479-1482)
+ * with M3-22's Home exam card for every upcoming exam, soonest first.
+ * `getHomeView` says which exam and what each card shows.
+ *
+ * Cut: no cap greeting bubble, week strip, grades card or Never miss one
+ * (M4, M6, M7).
  */
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { DoodleDefs } from "@/components/doodle";
+import { CONCEPT_ICON_NAMES, ConceptIcon, iconFor, type ConceptIconName } from "@/components/exams/concept-icons";
+import { BiteRow, HomeExamCard } from "@/components/home/bite-row";
 import { HeroCard } from "@/components/home/hero-card";
 import { Queue, QueueRow } from "@/components/home/queue-row";
 import { Button } from "@/components/ui/button";
@@ -29,7 +41,7 @@ import { DoneRow } from "@/components/ui/done-row";
 import { lmsNameOf } from "@/lib/schools";
 import { dateLine, earlyBy, listDate, sameDay } from "@/lib/dates";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
-import { getHomeView, type HomeDone, type HomeFirst } from "@/server/data/home";
+import { getHomeView, type HomeBite, type HomeDone, type HomeExam, type HomeFirst } from "@/server/data/home";
 import { syncNow } from "@/server/sync/run";
 
 /** The hero card turns urgent (due colour, time left) under this much time. */
@@ -116,6 +128,58 @@ function DoFirst({ first, lastDone, now }: { first: HomeFirst | null; lastDone: 
   return <p className="py-3 text-[15px] text-ink-2">Nothing open. Enjoy it.</p>;
 }
 
+function BiteFor({ bite, first = false, className }: { bite: HomeBite; first?: boolean; className?: string }) {
+  return bite.state === "bite" ? (
+    <BiteRow
+      state="bite"
+      minutes={bite.minutes}
+      cards={bite.cards}
+      gain={bite.gain}
+      forWhat={bite.forWhat}
+      href={bite.href}
+      first={first}
+      className={className}
+    />
+  ) : (
+    <BiteRow state="done" forecast={bite.forecast} day={bite.day} href={bite.href} className={className} />
+  );
+}
+
+const iconName = (icon: string | null, name: string): ConceptIconName =>
+  (CONCEPT_ICON_NAMES as readonly string[]).includes(icon ?? "") ? (icon as ConceptIconName) : iconFor(name);
+
+function ExamCards({ exams }: { exams: HomeExam[] }) {
+  return (
+    <ul className="grid list-none gap-3.5 p-0">
+      {exams.map((e) => (
+        <li key={e.id}>
+          <HomeExamCard
+            href={e.href}
+            biteHref={e.biteHref}
+            kind={e.kind}
+            title={e.title}
+            course={e.course}
+            when={e.when}
+            forecast={e.forecast}
+            spark={e.spark}
+            target={e.target}
+            grade={e.grade}
+            verdict={e.verdict}
+            concepts={e.concepts.map((c) => ({
+              id: c.id,
+              name: c.name,
+              rung: c.rung,
+              icon: <ConceptIcon name={iconName(c.icon, c.name)} />,
+            }))}
+            biteMinutes={e.biteMinutes}
+            making={e.making}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 async function HomeBody() {
   await connection();
   const user = await signedInUser();
@@ -148,9 +212,21 @@ async function HomeBody() {
 
       <p className="mt-4 text-[17px]">{view.firstName ? `Hi ${view.firstName}.` : "Hi there."}</p>
 
+      <DoodleDefs />
+
       <section className="mt-8" aria-labelledby="lbl-first">
         <SectionLabel id="lbl-first">DO FIRST</SectionLabel>
-        <DoFirst first={view.first} lastDone={view.lastDone} now={now} />
+        {view.biteFirst && view.bite ? (
+          <>
+            {view.lastDone && <DoFirst first={null} lastDone={view.lastDone} now={now} />}
+            <BiteFor bite={view.bite} first className={view.lastDone ? "mt-3" : undefined} />
+          </>
+        ) : (
+          <>
+            <DoFirst first={view.first} lastDone={view.lastDone} now={now} />
+            {view.bite && <BiteFor bite={view.bite} className="mt-3" />}
+          </>
+        )}
       </section>
 
       <section className="mt-8 flex flex-col" aria-labelledby="lbl-then">
@@ -187,6 +263,13 @@ async function HomeBody() {
           All assignments
         </Link>
       </section>
+
+      {view.exams.length > 0 && (
+        <section className="mt-8" aria-labelledby="lbl-exams">
+          <SectionLabel id="lbl-exams">EXAMS AND QUIZZES</SectionLabel>
+          <ExamCards exams={view.exams} />
+        </section>
+      )}
     </>
   );
 }

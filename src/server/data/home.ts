@@ -13,16 +13,37 @@
  * - `connection`: `null` when she has never connected (the page sends her to
  *   /connect), else its status ('expired' shows the sign-in banner).
  *
- * Later Home tickets (exams, week strip, grades) extend `HomeView` here.
+ * M3-44 adds the bite row and the exam cards:
+ * - `exams`: her upcoming exams and quizzes, soonest first, past ones left
+ *   out. They are the Exams tab's list (`getExamsView`, M3-41), so Home,
+ *   /exams and /exams/<id> show the same forecast, phase and counts: every
+ *   number comes from M3-18's `examView`, read once per exam. Home adds what
+ *   its card shows on top: the grade the target earns, the verdict, the
+ *   concept icons and today's bite minutes.
+ * - `bite`: which exam the row is for. The soonest upcoming exam whose
+ *   `examView` has a bite today (it has cards and today's plan is not done)
+ *   gets "Or a 5-minute bite for Friday's exam". With none, the soonest exam
+ *   whose plan is done today (`bitesDoneToday >= bitesPerDay`, M3-08) gets
+ *   "Today's bites are done". Otherwise there is no row: no exam has cards,
+ *   or the deck has nothing for a bite yet. That covers M3-53's study start
+ *   too: before `start_new_on` `examView` builds no bite from never-graded
+ *   cards, so a fresh exam shows no row instead of a done one.
+ * - `biteFirst`: nothing is open, so the bite is the DO FIRST card.
+ *
+ * Later Home tickets (week strip, grades) extend `HomeView` here.
  */
 import { eq } from "drizzle-orm";
+import { TIME_ZONE } from "@/lib/dates";
 import { DONE_WINDOW_MS } from "@/lib/queue";
+import { gradeFor } from "@/lib/study/forecast";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { MOODLE_STATUSES, moodleConnections } from "@/server/db/schema/moodle";
 import { users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
+import { examView, type ExamView } from "@/server/study/actions";
 import { getAssignmentsView, type DoneAssignment, type OpenAssignment } from "./assignments";
+import { getExamsView, type ExamsTabExam, type ExamViewLoader } from "./exams";
 
 export type HomeConnection = { status: (typeof MOODLE_STATUSES)[number] };
 
@@ -36,6 +57,41 @@ export type HomeDone = DoneAssignment & {
   dueAt: Date | null;
 };
 
+export type HomeExam = Omit<ExamsTabExam, "concepts"> & {
+  /** The whole grade her target earns: "A 4 needs 80%". */
+  grade: number;
+  verdict: { text: string; ok: boolean };
+  /** `examView`'s concept icon name, or null (the page picks one by name). */
+  concepts: { id: string; name: string; rung: number; icon: string | null }[];
+  /** Minutes of today's bite, or null when there is none (the card says "Open the exam"). */
+  biteMinutes: number | null;
+  /** Where today's bite starts: `/study/new?exam=<id>&kind=bite` (M3-42's convention). */
+  biteHref: string;
+};
+
+export type HomeBite =
+  | {
+      state: "bite";
+      examId: string;
+      minutes: number;
+      cards: number;
+      /** Forecast gain in percentage points (M3-08's `gainEstimate`). */
+      gain: number;
+      /** "Friday's exam", "tomorrow's quiz", "the exam on 4 Dec". */
+      forWhat: string;
+      href: string;
+    }
+  | {
+      state: "done";
+      examId: string;
+      /** Forecast shown today, a whole percent. */
+      forecast: number;
+      /** "FRIDAY", "TOMORROW", "4 DEC". */
+      day: string;
+      /** `/exams/<id>`. */
+      href: string;
+    };
+
 export type HomeView = {
   /** First word of her display name, or `null` when we have none. */
   firstName: string | null;
@@ -43,6 +99,10 @@ export type HomeView = {
   first: HomeFirst | null;
   then: OpenAssignment[];
   lastDone: HomeDone | null;
+  exams: HomeExam[];
+  bite: HomeBite | null;
+  /** True when nothing is open and there is a bite: the bite is the DO FIRST card. */
+  biteFirst: boolean;
 };
 
 /** "Valeria Example" gives "Valeria"; empty or missing gives null. */
@@ -51,12 +111,70 @@ export function firstNameOf(displayName: string | null | undefined): string | nu
   return first ? first : null;
 }
 
+const weekdayOf = new Intl.DateTimeFormat("en-GB", { timeZone: TIME_ZONE, weekday: "long" });
+const dayMonthOf = new Intl.DateTimeFormat("en-GB", { timeZone: TIME_ZONE, day: "numeric", month: "short" });
+
+/** Within a week the weekday names the exam; further out, its date. */
+function dayWord(at: Date, daysLeft: number): { word: string; date: boolean } {
+  if (daysLeft <= 0) return { word: "today", date: false };
+  if (daysLeft === 1) return { word: "tomorrow", date: false };
+  if (daysLeft < 7) return { word: weekdayOf.format(at), date: false };
+  return { word: dayMonthOf.format(at), date: true };
+}
+
+/** "Friday's exam", "today's quiz", "the exam on 4 Dec". */
+export function biteFor(kind: "exam" | "quiz", at: Date, daysLeft: number): string {
+  const { word, date } = dayWord(at, daysLeft);
+  return date ? `the ${kind} on ${word}` : `${word}\u2019s ${kind}`;
+}
+
+/** "FRIDAY", "TODAY", "4 DEC". */
+export function biteDay(at: Date, daysLeft: number): string {
+  return dayWord(at, daysLeft).word.toUpperCase();
+}
+
+const biteHref = (examId: string) => `/study/new?exam=${encodeURIComponent(examId)}&kind=bite`;
+
+function homeExam(card: ExamsTabExam, v: ExamView): HomeExam {
+  const icons = new Map(v.concepts.map((c) => [c.id, c.icon]));
+  return {
+    ...card,
+    grade: gradeFor(card.target),
+    verdict: { text: v.verdict.text, ok: v.verdict.ok },
+    concepts: card.concepts.map((c) => ({ ...c, icon: icons.get(c.id) ?? null })),
+    biteMinutes: v.bite?.minutes ?? null,
+    biteHref: biteHref(card.id),
+  };
+}
+
+function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>): HomeBite | null {
+  for (const card of list) {
+    const v = views.get(card.id);
+    if (!v?.bite) continue;
+    return {
+      state: "bite",
+      examId: card.id,
+      minutes: v.bite.minutes,
+      cards: v.bite.cards,
+      gain: v.bite.gainEstimate,
+      forWhat: biteFor(card.kind, v.exam.at, v.daysLeft),
+      href: biteHref(card.id),
+    };
+  }
+  for (const card of list) {
+    const v = views.get(card.id);
+    if (!v || v.bitesDoneToday < v.bitesPerDay) continue;
+    return { state: "done", examId: card.id, forecast: v.forecastShown, day: biteDay(v.exam.at, v.daysLeft), href: card.href };
+  }
+  return null;
+}
+
 export async function getHomeView(
   userId: string,
-  options: { now: Date },
+  options: { now: Date; view?: ExamViewLoader },
   database: Db = defaultDb,
 ): Promise<HomeView> {
-  const { now } = options;
+  const { now, view: load = examView } = options;
 
   const [me] = await database
     .select({ displayName: users.displayName })
@@ -95,11 +213,34 @@ export async function getHomeView(
     lastDone = { ...newest, dueAt: a?.dueAt ?? null };
   }
 
+  // The Exams tab's list, keeping each `examView` it reads for the bite row and the cards.
+  const views = new Map<string, ExamView>();
+  const examList = await getExamsView(
+    userId,
+    {
+      now,
+      view: async (examId) => {
+        const v = await load(examId);
+        views.set(examId, v);
+        return v;
+      },
+    },
+    database,
+  );
+  const exams = examList.exams.flatMap((card) => {
+    const v = views.get(card.id);
+    return v ? [homeExam(card, v)] : [];
+  });
+  const bite = pickBite(examList.exams, views);
+
   return {
     firstName: firstNameOf(me?.displayName),
     connection: link ? { status: link.status } : null,
     first,
     then,
     lastDone,
+    exams,
+    bite,
+    biteFirst: first === null && bite?.state === "bite",
   };
 }
