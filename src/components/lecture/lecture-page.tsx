@@ -7,7 +7,10 @@
  * renderLecNotes, setLecMode, lecProgress) and CSS 1039-1041 (.lec-head,
  * .lec-prog).
  *
- * - Header: "Back to <course>" (the course page), the course name in mono
+ * - Header: "Back to <course>" (the course page), or "Back to exam" when the
+ *   page was opened from an exam's Lectures tab (M9-23, `?from=exam:<uuid>`;
+ *   anything else in `from` is ignored and the back link is built here from
+ *   the id, never taken from the query), the course name in mono
  *   capitals and a 3 px reading progress bar along its bottom edge, the
  *   scroll fraction of the app's `<main id="main">` (M9-10's hook).
  * - The reader is M9-09's `LectureReader`. It keeps its own view; this page
@@ -41,7 +44,7 @@
  * (M9-22).
  */
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { markLectureRead, type MarkReadResult } from "@/app/(app)/courses/[id]/lectures/[n]/actions";
 import {
   lectureHighlights,
@@ -77,6 +80,26 @@ export type LecturePageProps = {
 };
 
 const VIEWS: readonly LectureView[] = ["read", "slides", "notes"];
+
+const EXAM_FROM = /^exam:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/** `?from=exam:<uuid>` gives that exam page; anything else gives null. */
+export function examBackHref(search: string): string | null {
+  const from = new URLSearchParams(search).get("from");
+  const id = from?.match(EXAM_FROM)?.[1];
+  return id ? `/exams/${id.toLowerCase()}` : null;
+}
+
+const noSubscribe = () => () => {};
+
+/** Where Back goes when the page was opened from an exam; null on the server and otherwise. */
+function useExamBack(): string | null {
+  return useSyncExternalStore(
+    noSubscribe,
+    () => examBackHref(window.location.search),
+    () => null,
+  );
+}
 
 /** The selected tab of the reader inside `root`. */
 function selectedView(root: HTMLElement): LectureView | null {
@@ -143,6 +166,7 @@ export function LecturePage({
   };
 
   const notes = useLectureNotes(lecture.notes, remove);
+  const examBack = useExamBack();
   const highlights = useHighlights(lecture.lectureId, saveHl, loadHl);
 
   return (
@@ -152,7 +176,11 @@ export function LecturePage({
         padTop="4px"
         className="-mx-[var(--pad)] flex min-h-[52px] items-center gap-1 pr-[var(--pad)] pb-1 pl-[calc(var(--pad)-12px)]"
       >
-        <Button variant="icon" href={lecture.backHref} aria-label={`Back to ${lecture.course}`}>
+        <Button
+          variant="icon"
+          href={examBack ?? lecture.backHref}
+          aria-label={examBack ? "Back to exam" : `Back to ${lecture.course}`}
+        >
           <svg className="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path d="M14.5 5.5L8 12l6.5 6.5" />
           </svg>

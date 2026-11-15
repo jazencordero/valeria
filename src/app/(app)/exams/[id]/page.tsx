@@ -1,5 +1,7 @@
 /**
- * One exam (M3-42): the header and the tabs Today, Progress, Practise. The
+ * One exam (M3-42): the header and the tabs Today, Progress, Lectures,
+ * Practise, Notes (M9-23: `getExamTabs` reads the last two's lectures and
+ * notes). The
  * client part is `ExamPage`; this page reads her data and turns M3-18's
  * `examView` into what the page shows. An unknown id, a malformed one,
  * another user's exam or an exam of a course she has hidden is a 404.
@@ -46,6 +48,7 @@ import { biteMinutes } from "@/lib/study/bite";
 import { gradeFor } from "@/lib/study/forecast";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { shortNameOf } from "@/server/data/courses";
+import { getExamTabs } from "@/server/data/exam-tabs";
 import { getExamsView } from "@/server/data/exams";
 import { db } from "@/server/db/client";
 import { AI_STUDY, courses } from "@/server/db/schema/courses";
@@ -281,18 +284,23 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
   const today = dayKey(now);
   const examDay = dayKey(exam.at);
   const at = partsOf(examDay);
+  const courseName = shortNameOf(course.name);
+  const tabs = await getExamTabs(user.id, { examId: exam.id, courseId: exam.courseId, courseName, now });
   const from = typeof query.from === "string" && /^\d{1,3}$/.test(query.from) ? Math.min(100, Number(query.from)) : undefined;
 
   return (
     <ExamPage
       examId={exam.id}
-      course={shortNameOf(course.name)}
+      kind={exam.kind}
+      course={courseName}
       sub={`${exam.title} · ${at.weekday} ${at.day} ${at.month} ${clockOf.format(exam.at)}`}
       forecast={view.forecastShown}
       verdict={view.verdict.text}
       rollFrom={from !== undefined && from !== view.forecastShown ? from : undefined}
       today={await todayOf(user, view, deck, course.aiStudy, now)}
       documents={await loadExamDocuments(db, user.id, exam.id)}
+      lectures={tabs.lectures}
+      notes={tabs.notes}
       progress={{
         grade: gradeFor(view.forecastShown),
         planEnd: view.planEnd,

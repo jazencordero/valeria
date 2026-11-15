@@ -1,23 +1,27 @@
 "use client";
 
 /**
- * Exam page (M3-42): one 760 px column with the header (M3-23), then three
- * tabs (M3-47) remembered per exam: Today, Progress, Practise. M9-23 adds
- * Lectures and Notes.
+ * Exam page (M3-42): one 760 px column with the header (M3-23), then five
+ * tabs (M3-47) remembered per exam: Today, Progress, Lectures, Practise,
+ * Notes, with counts on Lectures and Notes (M9-23).
  * Source: prototype merged-2.html JS 3264-3271 (the page), 6029-6040
- * (progressHTML), 6063-6079 (practiseHTML) and CSS 1505-1513 (from 1000 px
+ * (progressHTML), 6049-6062 (lecturesHTML), 6063-6079 (practiseHTML),
+ * 6081-6096 (notesTabHTML) and CSS 1505-1513 (from 1000 px
  * the page fits one screen and each panel scrolls inside itself).
  *
  *  - Today: the bite block (M3-24). While the cards are still being made
  *    it says so; while the course has no answer about AI tools it asks
  *    (`StudyAsk`, the M2-21 card for the course's study rule, `ai_study`).
- *    At its end, the exam's documents (M3-54, `ExamDocuments`), when it has
- *    any; M9-23 moves them into the Notes tab.
  *  - Progress: the big percent, its sentence and the chart (side by side 5:7
  *    from 1000 px), WHERE YOU GAIN MOST, and the button that opens the "How
  *    it is going" sheet (M3-48).
+ *  - Lectures: `ExamLecturesTab` (exam-lectures.tsx); a lecture opened there
+ *    comes back here on Back (`?from=exam:<id>`), on this same tab.
  *  - Practise: WAYS TO PRACTISE tiles; beside them from 1000 px (below on
  *    phones) next reviews, the 14-day heatmap and how you grade.
+ *  - Notes: `ExamNotesTab` (exam-notes.tsx): her notes for the course and
+ *    this exam, "New note" (attached to this exam), and at its end the exam's
+ *    documents (M3-54, `ExamDocuments`), when it has any.
  *
  * Plain data in. Starting anything goes to `/study/new?exam=..&kind=..`
  * (M3-43 builds that route). The two things this page saves are passed in as
@@ -52,11 +56,14 @@ import {
 } from "react";
 import { DoodleDefs } from "@/components/doodle";
 import { makingLine } from "@/components/exams/exam-card";
-import { ExamDocuments, type ExamDocumentRow } from "@/components/exams/exam-documents";
+import type { ExamDocumentRow } from "@/components/exams/exam-documents";
+import { ExamLecturesTab, type ExamLectures } from "@/components/exams/exam-lectures";
+import { ExamNotesTab, useExamNotes } from "@/components/exams/exam-notes";
 import { BiteCard, type BiteCardNext } from "@/components/study/bite-card";
 import { ExamHeader } from "@/components/study/exam-header";
 import type { ForecastChartData } from "@/components/study/forecast-chart";
 import { GainMost, type GainConcept } from "@/components/study/gain-most";
+import type { NoteCardData } from "@/components/notes/note-card";
 import { GradeMode, type GradeModeValue } from "@/components/study/grade-mode";
 import { Heatmap, type HeatDay } from "@/components/study/heatmap";
 import { NextReviews, type ReviewDay } from "@/components/study/next-reviews";
@@ -106,6 +113,8 @@ export type ExamPageToday =
 
 export type ExamPageProps = {
   examId: string;
+  /** "exam" or "quiz": the Notes tab says "this exam" or "this quiz". */
+  kind?: "exam" | "quiz";
   /** Course name, the page heading and the name the AI question uses. */
   course: string;
   /** Mono line under the heading, for example "Exam · Fri 20 Nov 09:00". */
@@ -119,6 +128,10 @@ export type ExamPageProps = {
   today: ExamPageToday;
   /** Her bundle's documents for this exam, in position order. None: no list. */
   documents?: readonly ExamDocumentRow[];
+  /** The Lectures tab: the course's lectures this exam covers. */
+  lectures?: ExamLectures;
+  /** The Notes tab: her notes for the course and this exam, newest first. */
+  notes?: readonly NoteCardData[];
   progress: {
     /** Today's grade, 0..5. */
     grade: number;
@@ -150,7 +163,7 @@ export type ExamPageProps = {
   /** Saves the answer to the AI question. Usually the page's bound action. */
   setStudyRule?: (rule: StudyRule) => Promise<StudyRuleResult>;
   /** Tab shown first when nothing is remembered (previews). */
-  defaultTab?: "today" | "progress" | "practise";
+  defaultTab?: "today" | "progress" | "lectures" | "practise" | "notes";
 };
 
 const CARD = "rounded-[20px] border border-solid border-line bg-surface p-5 shadow-[var(--shadow-card)]";
@@ -311,12 +324,14 @@ function Making({ lectures }: { lectures: number }) {
 // ---------------------------------------------------------------------------
 
 const NO_DOCUMENTS: readonly ExamDocumentRow[] = [];
+const NO_NOTES: readonly NoteCardData[] = [];
 
 /** Where "Back to exams" goes when the page was not opened from a card. */
 const BACK_HREF = "/exams";
 
 export function ExamPage({
   examId,
+  kind = "exam",
   course,
   sub,
   forecast,
@@ -324,6 +339,8 @@ export function ExamPage({
   rollFrom,
   today,
   documents = NO_DOCUMENTS,
+  lectures,
+  notes: initialNotes = NO_NOTES,
   progress,
   practise,
   setGradeMode,
@@ -429,6 +446,8 @@ export function ExamPage({
       BACK_HREF,
     );
   };
+
+  const notes = useExamNotes(initialNotes);
 
   // The Progress chart draws the first time its tab is shown.
   const [progressShown, setProgressShown] = useState(false);
@@ -560,15 +579,30 @@ export function ExamPage({
           {
             id: "today",
             label: "Today",
+            content: <Panel>{todayPanel}</Panel>,
+          },
+          { id: "progress", label: "Progress", content: <Panel>{progressPanel}</Panel> },
+          {
+            id: "lectures",
+            label: "Lectures",
+            count: lectures?.rows.length ?? 0,
             content: (
               <Panel>
-                {todayPanel}
-                <ExamDocuments examId={examId} documents={documents} />
+                {lectures && <ExamLecturesTab examId={examId} lectures={lectures} />}
               </Panel>
             ),
           },
-          { id: "progress", label: "Progress", content: <Panel>{progressPanel}</Panel> },
           { id: "practise", label: "Practise", content: <Panel>{practisePanel}</Panel> },
+          {
+            id: "notes",
+            label: "Notes",
+            count: notes.list.length,
+            content: (
+              <Panel>
+                <ExamNotesTab examId={examId} course={course} kind={kind} notes={notes} documents={documents} />
+              </Panel>
+            ),
+          },
         ]}
         className={
           "min-[1000px]:flex min-[1000px]:min-h-0 min-[1000px]:flex-1 min-[1000px]:flex-col " +
