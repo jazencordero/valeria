@@ -757,7 +757,7 @@ export async function applyImport(
 
       // Course: found, never created.
       const hers = await tx
-        .select({ id: courses.id, code: courses.code, name: courses.name, hidden: courses.hidden, aiPolicy: courses.aiPolicy })
+        .select({ id: courses.id, code: courses.code, name: courses.name, hidden: courses.hidden, aiAssignments: courses.aiAssignments, aiStudy: courses.aiStudy })
         .from(courses)
         .where(eq(courses.userId, userId));
       let matches = hers.filter((c) => c.code !== null && normCode(c.code) === normCode(plan.exam.courseCode));
@@ -776,9 +776,14 @@ export async function applyImport(
       const courseId = course.id;
 
       if (plan.aiPolicy) {
-        if (course.aiPolicy === plan.aiPolicy) counts.aiPolicy.skipped += 1;
+        // M2-27 split `ai_policy` in two; same carry-over as the migration (drizzle/0001_*.sql).
+        const rules =
+          plan.aiPolicy === "allowed"
+            ? ({ aiAssignments: "allowed", aiStudy: "allowed" } as const)
+            : ({ aiAssignments: "explain", aiStudy: "not_allowed" } as const);
+        if (course.aiAssignments === rules.aiAssignments && course.aiStudy === rules.aiStudy) counts.aiPolicy.skipped += 1;
         else {
-          await tx.update(courses).set({ aiPolicy: plan.aiPolicy }).where(eq(courses.id, courseId));
+          await tx.update(courses).set(rules).where(eq(courses.id, courseId));
           counts.aiPolicy.updated += 1;
         }
       }

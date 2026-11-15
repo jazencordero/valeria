@@ -405,10 +405,10 @@ describe("applyImport", () => {
       const p = planImport(mapped);
       expect((await applyImport(t.db, her, p, { now: NOW })).counts.aiPolicy).toEqual({ created: 0, skipped: 0, updated: 1 });
       const [row] = await t.db.select().from(courses).where(eq(courses.id, herCourse));
-      expect(row.aiPolicy).toBe("not_allowed");
+      expect(row).toMatchObject({ aiAssignments: "explain", aiStudy: "not_allowed" });
       expect((await applyImport(t.db, her, p, { now: NOW })).counts.aiPolicy).toEqual({ created: 0, skipped: 1, updated: 0 });
       const [theirs] = await t.db.select().from(courses).where(eq(courses.id, otherCourse));
-      expect(theirs.aiPolicy).toBe("unknown");
+      expect(theirs).toMatchObject({ aiAssignments: "unknown", aiStudy: "unknown" });
     },
     T,
   );
@@ -541,7 +541,7 @@ describe("CLI", () => {
       expect(text).not.toContain("smoothing constant"); // no card text
       expect(await rowCounts()).toEqual(before);
       const [row] = await t.db.select().from(courses).where(eq(courses.id, herCourse));
-      expect(row.aiPolicy).toBe("unknown");
+      expect(row).toMatchObject({ aiAssignments: "unknown", aiStudy: "unknown" });
     },
     T,
   );

@@ -72,14 +72,16 @@ afterEach(async () => {
   await t.close();
 });
 
-type Policy = "allowed" | "unknown" | "not_allowed";
+/** `courses.ai_assignments`. */
+type Policy = "allowed" | "explain" | "off" | "unknown";
+type Study = "unknown" | "allowed" | "not_allowed";
 
 /** A signed-in user with one course, one assignment and one attached file of two pages. */
-async function student(policy: Policy, word: string) {
+async function student(policy: Policy, word: string, aiStudy: Study = "unknown") {
   const { user, token } = await ensureSessionFor(t.db, undefined);
   const [course] = await t.db
     .insert(courses)
-    .values({ userId: user.id, moodleId: 1, name: "Cell Biology", aiPolicy: policy })
+    .values({ userId: user.id, moodleId: 1, name: "Cell Biology", aiAssignments: policy, aiStudy })
     .returning();
   const [assignment] = await t.db
     .insert(assignments)
@@ -342,7 +344,7 @@ describe("POST /api/ai/assignment-chat", () => {
     const pending = POST(post({ assignmentId: s.assignment.id, text: "Draft it, please." }, s.cookie));
     // The context was built while the course allowed AI; the policy changes before the tool runs.
     await vi.waitFor(() => expect(ai.calls).toHaveLength(1));
-    await t.db.update(courses).set({ aiPolicy: "not_allowed" });
+    await t.db.update(courses).set({ aiAssignments: "explain" });
     const parts = await chunks(await pending);
 
     const output = parts.find((p) => p.type === "tool-output-available");
@@ -427,8 +429,59 @@ describe("POST /api/ai/assignment-chat", () => {
     expect(ai.calls).toHaveLength(0);
   });
 
-  it.each(["not_allowed", "unknown"] as const)("a '%s' course gets no tools and no material", async (policy) => {
-    const s = await student(policy, "ALPHA");
+  it.each([
+    ["off", "unknown"],
+    ["off", "allowed"],
+    ["unknown", "unknown"],
+    ["unknown", "allowed"],
+    ["unknown", "not_allowed"],
+  ] as const)(
+    "assignment help '%s' (study '%s'): 403, and nothing is stored, built or sent",
+    async (policy, aiStudy) => {
+      const s = await student(policy, "ALPHA", aiStudy);
+      // If a provider were called after all, the test would see the call.
+      ai.setDefault("groq", { rawBody: toolCallStream("write_draft", { title: "Essay 1", markdown: "## One\n\ntext" }) });
+
+      const res = await POST(post({ assignmentId: s.assignment.id, text: "Please draft it from my notes." }, s.cookie));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "ai_off_for_assignments" });
+      expect(res.headers.get("cache-control")).toBe("no-store");
+
+      // No provider was called: no prompt, no brief, no file text and no write_draft left the app.
+      await new Promise((r) => setTimeout(r, 200));
+      expect(ai.calls).toHaveLength(0);
+      expect(await t.db.select().from(aiCalls)).toHaveLength(0);
+      // Nothing was stored either: no chat, no message, no draft.
+      expect(await stored()).toHaveLength(0);
+      expect(await t.db.select().from(chats)).toHaveLength(0);
+      expect(await t.db.select().from(drafts)).toHaveLength(0);
+    },
+  );
+
+  it("the course turns AI help off between two messages: the second is 403 and is not stored", async () => {
+    const s = await student("allowed", "ALPHA");
+    ai.queue("groq", { text: "Hello." });
+    await chunks(await POST(post({ assignmentId: s.assignment.id, text: "Hi" }, s.cookie)));
+    await vi.waitFor(async () => expect(await stored()).toHaveLength(2));
+
+    await t.db.update(courses).set({ aiAssignments: "off" });
+    const res = await POST(post({ assignmentId: s.assignment.id, text: "Draft it, please." }, s.cookie));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "ai_off_for_assignments" });
+    expect(ai.calls).toHaveLength(1);
+    expect(await stored()).toHaveLength(2);
+  });
+
+  it("another user's assignment is 404, not 403, even when her own course has AI help off", async () => {
+    const s = await student("off", "ALPHA");
+    const other = await student("off", "BRAVO");
+    const res = await POST(post({ assignmentId: other.assignment.id, text: "Let me in." }, s.cookie));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_found" });
+  });
+
+  it("an 'explain' course gets no tools and no material", async () => {
+    const s = await student("explain", "ALPHA", "allowed");
     ai.queue("groq", { text: "I have not been given the brief." });
 
     const res = await POST(post({ assignmentId: s.assignment.id, text: "What does the brief say?" }, s.cookie));
@@ -450,7 +503,7 @@ describe("POST /api/ai/assignment-chat", () => {
   });
 
   it("sends the last 20 messages, starting with one of hers, and drops old ones over the budget", async () => {
-    const s = await student("not_allowed", "ALPHA");
+    const s = await student("explain", "ALPHA");
     const chat = await getOrCreateChat(s.user.id, s.assignment.id, t.db);
     for (let i = 0; i < 12; i++) {
       await appendMessage(s.user.id, chat.id, "user", [{ type: "text", text: `question ${i}` }], t.db);

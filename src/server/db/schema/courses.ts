@@ -14,7 +14,13 @@ import { createdAt, id, oneOf, tstz, userId } from "./users";
 import { assignments } from "./work";
 
 export const COURSE_COLORS = ["butter", "mint", "sky", "blush"] as const;
-export const AI_POLICIES = ["unknown", "allowed", "not_allowed"] as const;
+/**
+ * AI help on assignments, per course (M2-27). "unknown" (she has not said) counts as "off";
+ * read it through `assignmentHelp` in src/lib/ai-policy.ts.
+ */
+export const AI_ASSIGNMENTS = ["unknown", "off", "explain", "allowed"] as const;
+/** May the course's study material (slides, handouts) go to an AI model? Read it through `studyAllowed`. */
+export const AI_STUDY = ["unknown", "allowed", "not_allowed"] as const;
 export const TEXT_STATUSES = ["none", "queued", "done", "failed"] as const;
 
 const tsvector = customType<{ data: string }>({
@@ -35,14 +41,16 @@ export const courses = pgTable(
     shortName: text("short_name"),
     color: text("color", { enum: COURSE_COLORS }).notNull().default("butter"),
     target: integer("target").notNull().default(5),
-    aiPolicy: text("ai_policy", { enum: AI_POLICIES }).notNull().default("unknown"),
+    aiAssignments: text("ai_assignments", { enum: AI_ASSIGNMENTS }).notNull().default("unknown"),
+    aiStudy: text("ai_study", { enum: AI_STUDY }).notNull().default("unknown"),
     hidden: boolean("hidden").notNull().default(false),
   },
   (t) => [
     index("courses_user_id_idx").on(t.userId),
     unique("courses_user_moodle_key").on(t.userId, t.moodleId),
     oneOf("courses_color_check", t.color, COURSE_COLORS),
-    oneOf("courses_ai_policy_check", t.aiPolicy, AI_POLICIES),
+    oneOf("courses_ai_assignments_check", t.aiAssignments, AI_ASSIGNMENTS),
+    oneOf("courses_ai_study_check", t.aiStudy, AI_STUDY),
   ],
 );
 

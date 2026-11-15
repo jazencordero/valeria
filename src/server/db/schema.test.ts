@@ -39,7 +39,8 @@ describe("schema", () => {
       name: "Test Course",
       color: "mint",
       target: 5,
-      aiPolicy: "unknown",
+      aiAssignments: "unknown",
+      aiStudy: "unknown",
       hidden: false,
     });
     expect(readCourse.createdAt).toBeInstanceOf(Date);

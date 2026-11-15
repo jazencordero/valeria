@@ -1,22 +1,30 @@
 "use client";
 
 /**
- * AI policy: does this course allow AI help on homework? (M2-21)
+ * AI policy: does this course allow AI help on homework? (M2-21, M2-27)
  *
  * Aalto sets AI rules per course and we do not read syllabi, so she tells us.
- * While the course's `ai_policy` is "unknown", the assignment page shows a
- * small card before the chat with "Yes", "No" and "Not sure":
+ * While the course's `ai_assignments` is "unknown", the assignment page shows
+ * a small card where the chat would be:
  *
- *   Yes      -> "allowed"      (unlocks drafting, cards and lecture pages)
- *   No       -> "not_allowed"
- *   Not sure -> stays "unknown"
+ *   Yes              -> "allowed"   (the chat reads the brief and may draft with her)
+ *   Only to explain  -> "explain"   (the chat explains; no course text, no drafts)
+ *   No               -> "off"       (no chat at all)
+ *   Not sure         -> stays "unknown", which is off
  *
  * The schema has no "answered" flag, so "Not sure" keeps "unknown" in the
  * database and the card is hidden for the rest of this view only; it asks
  * again on her next visit. That is on purpose: unknown is the safe state.
  *
- * For "not_allowed" and "unknown" the chat is explain-only and a visible line
- * says so, with a link to change the answer. "allowed" shows nothing.
+ * What shows under the card:
+ *   "off" / "unknown"  the page shows no chat (`chatHidden`), only AI_OFF_LINE
+ *                      and the link to change the answer.
+ *   "explain"          the chat is there, with EXPLAIN_ONLY_LINE and the link.
+ *   "allowed"          nothing.
+ *
+ * Study material (cards and lecture pages from the course's slides) is a
+ * separate rule, `ai_study`. It is not asked here; it is set where cards and
+ * lecture pages are offered.
  *
  * Plain data in, one callback out: the page passes
  * `setPolicy={setCourseAiPolicy.bind(null, course.id)}` from
@@ -24,31 +32,40 @@
  */
 import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { assignmentHelp } from "@/lib/ai-policy";
 import type { AiPolicy, PolicyResult } from "@/app/(app)/assignments/[id]/policy-actions";
 
 export type { AiPolicy };
-export type PolicyAnswer = "yes" | "no" | "not_sure";
+export type PolicyAnswer = "yes" | "explain" | "no" | "not_sure";
 
+/** Shown instead of the chat when AI help on assignments is off or not answered. */
+export const AI_OFF_LINE = "This course does not allow AI help on assignments. Hand-in works as usual.";
 export const EXPLAIN_ONLY_LINE = "Explain-only: this course does not allow AI-written homework.";
 
-/** What each button stores in `courses.ai_policy`. */
+/** What each button stores in `courses.ai_assignments`. */
 export const ANSWER_POLICY: Record<PolicyAnswer, AiPolicy> = {
   yes: "allowed",
-  no: "not_allowed",
+  explain: "explain",
+  no: "off",
   not_sure: "unknown",
 };
 
+/** True when the page shows no chat for this course: AI help is off, or she has not said yet. */
+export function chatHidden(policy: AiPolicy): boolean {
+  return assignmentHelp({ aiAssignments: policy }) === "off";
+}
+
 /**
- * True unless she said the course allows AI help. Explain-only means: no
- * AI-written homework, and none of the course's file text goes to a hosted AI.
+ * True when the chat is there but only explains: no AI-written homework, and
+ * none of the course's text goes to a hosted AI.
  */
 export function isExplainOnly(policy: AiPolicy): boolean {
-  return policy !== "allowed";
+  return assignmentHelp({ aiAssignments: policy }) === "explain";
 }
 
 export type AiPolicyCardProps = {
   courseName: string;
-  /** The course's `ai_policy` as the server read it. */
+  /** The course's `ai_assignments` as the server read it. */
   policy: AiPolicy;
   /** Stores the new value. Usually the bound server action. */
   setPolicy: (policy: AiPolicy) => Promise<PolicyResult>;
@@ -57,6 +74,7 @@ export type AiPolicyCardProps = {
 
 const BUTTONS: { answer: PolicyAnswer; label: string }[] = [
   { answer: "yes", label: "Yes" },
+  { answer: "explain", label: "Only to explain" },
   { answer: "no", label: "No" },
   { answer: "not_sure", label: "Not sure" },
 ];
@@ -78,7 +96,8 @@ export function AiPolicyCard({ courseName, policy: initial, setPolicy, className
   }
 
   const asking = editing || (policy === "unknown" && !answered);
-  const explainOnly = isExplainOnly(policy);
+  // The line under the card: none where AI help is fully allowed.
+  const line = chatHidden(policy) ? AI_OFF_LINE : isExplainOnly(policy) ? EXPLAIN_ONLY_LINE : null;
 
   async function answer(choice: PolicyAnswer) {
     if (pending) return;
@@ -100,7 +119,7 @@ export function AiPolicyCard({ courseName, policy: initial, setPolicy, className
     }
   }
 
-  if (!asking && !explainOnly) return null;
+  if (!asking && !line) return null;
 
   return (
     <div className={`flex flex-col gap-2.5 ${className}`} data-testid="ai-policy">
@@ -134,9 +153,12 @@ export function AiPolicyCard({ courseName, policy: initial, setPolicy, className
           )}
         </section>
       )}
-      {explainOnly && (
-        <p className="text-[14px] leading-[1.45] text-ink-2" data-testid="ai-policy-explain-only">
-          {EXPLAIN_ONLY_LINE}
+      {line && (
+        <p
+          className="text-[14px] leading-[1.45] text-ink-2"
+          data-testid={line === AI_OFF_LINE ? "ai-policy-off" : "ai-policy-explain-only"}
+        >
+          {line}
           {!asking && (
             <>
               {" "}

@@ -65,12 +65,19 @@ function runText() {
 
 let moodleIds = 1;
 
-/** A user, one course with the given AI policy, and one assignment in it with a brief and one attached file. */
-async function assignment(opts: { aiPolicy?: "unknown" | "allowed" | "not_allowed"; intro?: string; files?: string[] } = {}) {
+/** A user, one course with the given AI rules, and one assignment in it with a brief and one attached file. */
+async function assignment(
+  opts: {
+    aiAssignments?: "unknown" | "off" | "explain" | "allowed";
+    aiStudy?: "unknown" | "allowed" | "not_allowed";
+    intro?: string;
+    files?: string[];
+  } = {},
+) {
   const [user] = await t.db.insert(users).values({}).returning({ id: users.id });
   const [course] = await t.db
     .insert(courses)
-    .values({ userId: user.id, moodleId: moodleIds++, name: "Biology 101", aiPolicy: opts.aiPolicy ?? "allowed" })
+    .values({ userId: user.id, moodleId: moodleIds++, name: "Biology 101", aiAssignments: opts.aiAssignments ?? "allowed", aiStudy: opts.aiStudy })
     .returning({ id: courses.id });
   const [a] = await t.db
     .insert(assignments)
@@ -185,18 +192,37 @@ describe("estimate job, with the fake AI", () => {
     expect(await t.db.select().from(aiCache)).toEqual([]);
   }, SLOW);
 
-  it("makes no AI call for a course not marked as allowing AI", async () => {
-    for (const aiPolicy of ["unknown", "not_allowed"] as const) {
+  it("sends no brief to a model unless AI help on assignments is fully allowed, whatever the study rule says", async () => {
+    for (const aiAssignments of ["unknown", "off", "explain"] as const) {
+      for (const aiStudy of ["unknown", "allowed", "not_allowed"] as const) {
+        ai.reset();
+        const { userId, assignmentId } = await assignment({ aiAssignments, aiStudy });
+        ai.setDefault("groq", { text: "60" });
+
+        const { result, tally } = await runJob(assignmentId, userId);
+
+        expect(result).toEqual({ done: 1, retried: 0, failed: 0 });
+        expect(tally).toEqual({ estimated: 0, skipped: 1, noNumber: 0 });
+        expect(ai.calls).toEqual([]);
+        expect(await estimateOf(assignmentId)).toBeNull();
+      }
+    }
+  }, SLOW);
+
+  it("sends the brief when assignment help is 'allowed', also where study material is not allowed", async () => {
+    for (const aiAssignments of ["allowed"] as const) {
       ai.reset();
-      const { userId, assignmentId } = await assignment({ aiPolicy });
+      // A different brief each time: the answer is cached by brief text.
+      const intro = `<p>${BRIEF} (${aiAssignments})</p>`;
+      const { userId, assignmentId } = await assignment({ aiAssignments, aiStudy: "not_allowed", intro });
       ai.setDefault("groq", { text: "60" });
 
-      const { result, tally } = await runJob(assignmentId, userId);
+      const { tally } = await runJob(assignmentId, userId);
 
-      expect(result).toEqual({ done: 1, retried: 0, failed: 0 });
-      expect(tally).toEqual({ estimated: 0, skipped: 1, noNumber: 0 });
-      expect(ai.calls).toEqual([]);
-      expect(await estimateOf(assignmentId)).toBeNull();
+      expect(tally).toEqual({ estimated: 1, skipped: 0, noNumber: 0 });
+      expect(ai.calls).toHaveLength(1);
+      expect(JSON.stringify(ai.calls[0].body)).toContain(BRIEF);
+      expect(await estimateOf(assignmentId)).toBe(60);
     }
   }, SLOW);
 

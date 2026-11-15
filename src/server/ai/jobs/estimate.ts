@@ -15,13 +15,15 @@
  * `estimateJob` is the handler for one `estimate` job, payload `{ assignmentId }`, added for
  * each assignment with no estimate at the end of a finished sync (../../sync/run.ts). It writes
  * `assignments.estimate_min`. It ends the job without asking anything when the assignment is
- * gone, already has an estimate, has no brief and no files, or when its course is not marked as
- * allowing AI.
+ * gone, already has an estimate, has no brief and no files, or when AI help on its course's
+ * assignments is off.
  *
  * Aalto's rules (context/moodle/terms.md, point d): a teacher's material may go to an outside
- * AI model only where the course allows it. The brief is the teacher's material, so only a
- * course whose `courses.ai_policy` is 'allowed' is ever sent. 'unknown' (the default) and
- * 'not_allowed' are skipped and keep `estimate_min` null; the screens already hide a missing
+ * AI model only where the course allows it. The brief is the teacher's material, so it is sent
+ * only when `assignmentHelp` (src/lib/ai-policy.ts, M2-27) is 'allowed'. 'explain' is skipped
+ * too (build-ai's call, stricter than the ticket: courses carried over from 'not_allowed' become
+ * 'explain', and their teachers' briefs must not start going to an outside model). 'off' and
+ * 'unknown' (the default, which counts as off) are skipped and keep `estimate_min` null; the screens already hide a missing
  * estimate.
  *
  * Errors: `AiBusy` (every free provider is limited or down) is thrown, so the queue tries the job
@@ -30,6 +32,7 @@
  */
 import { createHash } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
+import { assignmentHelp } from "@/lib/ai-policy";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { courseFiles, courses } from "@/server/db/schema/courses";
 import { assignments } from "@/server/db/schema/work";
@@ -166,14 +169,14 @@ export function estimateJob(
         userId: assignments.userId,
         introHtml: assignments.introHtml,
         estimateMin: assignments.estimateMin,
-        aiPolicy: courses.aiPolicy,
+        aiAssignments: courses.aiAssignments,
       })
       .from(assignments)
       .innerJoin(courses, eq(courses.id, assignments.courseId))
       .where(eq(assignments.id, assignmentId))
       .limit(1);
-    // Course material goes to an outside model only where her course allows AI (terms.md, d).
-    if (!row || row.estimateMin !== null || row.aiPolicy !== "allowed") {
+    // The brief goes to an outside model only where AI help on assignments is allowed (terms.md, d).
+    if (!row || row.estimateMin !== null || assignmentHelp(row) !== "allowed") {
       tally.skipped += 1;
       return;
     }

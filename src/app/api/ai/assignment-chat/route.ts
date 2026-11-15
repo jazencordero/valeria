@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { aiRoute } from "@/server/ai/doorway";
-import { HISTORY_BUDGET_CHARS, READ_PAGES_MAX, buildContext, type ChatTools } from "@/server/chat/context";
+import {
+  AiOffForAssignments,
+  HISTORY_BUDGET_CHARS,
+  READ_PAGES_MAX,
+  assignmentHelpFor,
+  buildContext,
+  type ChatTools,
+} from "@/server/chat/context";
 import {
   ChatNotFound,
   appendMessage,
@@ -17,12 +24,16 @@ import {
  * In order:
  * 1. The assignment must be hers. One that is not, or does not exist: 404 `{error:'not_found'}`
  *    and nothing is stored.
- * 2. Her message is stored.
- * 3. The context is built again on every request (the course's AI policy can change mid-chat).
- * 4. The last 20 messages, cut to the history budget, go to the large model. Where the course
- *    allows AI the model may call `search_material`, `read_pages` and `write_draft` (M2-19),
+ * 2. AI help on the course's assignments must not be off (M2-27; "not answered yet" counts as
+ *    off): otherwise 403 `{error:'ai_off_for_assignments'}`. Nothing is stored, no context is
+ *    built, no tool is registered and no provider is called.
+ * 3. Her message is stored.
+ * 4. The context is built again on every request (the course's AI rule can change mid-chat; if
+ *    it turned off since step 2, the answer is the same 403).
+ * 5. The last 20 messages, cut to the history budget, go to the large model. Where the course
+ *    fully allows AI the model may call `search_material`, `read_pages` and `write_draft` (M2-19),
  *    for up to 4 rounds.
- * 5. When the reply has streamed to its end, ONE assistant message is stored: its text, plus a
+ * 6. When the reply has streamed to its end, ONE assistant message is stored: its text, plus a
  *    `source` part for each different `[file, p. N]` in it, plus one `draft` part if
  *    `write_draft` saved a draft during this request. There is one draft per assignment, so
  *    two calls in one request still give one part, and the draft holds the later text.
@@ -126,6 +137,8 @@ export const POST = aiRoute(
   async ({ body, user, ai }) => {
     let chatId: string;
     try {
+      // Before anything is stored or sent: is AI help on this course's assignments on at all?
+      if ((await assignmentHelpFor(user.id, body.assignmentId)) === "off") return aiOff();
       chatId = (await getOrCreateChat(user.id, body.assignmentId)).id;
     } catch (error) {
       if (error instanceof ChatNotFound) return notFound();
@@ -138,6 +151,7 @@ export const POST = aiRoute(
       context = await buildContext(user.id, body.assignmentId);
     } catch (error) {
       if (error instanceof ChatNotFound) return notFound();
+      if (error instanceof AiOffForAssignments) return aiOff();
       throw error;
     }
     const hasTools = Object.keys(context.tools).length > 0;
@@ -183,4 +197,12 @@ export const POST = aiRoute(
 
 function notFound(): Response {
   return Response.json({ error: "not_found" }, { status: 404, headers: { "cache-control": "no-store" } });
+}
+
+/** AI help on this course's assignments is off, or she has not said yet. */
+function aiOff(): Response {
+  return Response.json(
+    { error: "ai_off_for_assignments" },
+    { status: 403, headers: { "cache-control": "no-store" } },
+  );
 }

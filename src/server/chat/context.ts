@@ -9,15 +9,23 @@
  * tools to the SDK through the doorway.
  *
  * Aalto's rules (context/moodle/terms.md, point d): a teacher's material may go to an outside AI
- * model only where the course allows it. So what is sent depends on `courses.ai_policy`:
+ * model only where the course allows it. So what is sent depends on the course's rule for AI help
+ * on assignments (M2-27: `courses.ai_assignments`, read through `assignmentHelp` in
+ * src/lib/ai-policy.ts):
  *
- *   'allowed'      the brief as text, the start of the brief attachment, the attached files with
- *                  page counts, her current draft if there is one, and three tools:
- *                  `search_material`, `read_pages` and `write_draft` (M2-19).
- *   'unknown'      no course material text and no tools. Only the assignment name, the course
- *   'not_allowed'  name, the due time and the names of the attached files. The prompt tells the
- *                  model it has not been given the material and must not guess what it says.
- *                  'not_allowed' also forbids writing hand-in text.
+ *   'allowed'   the brief as text, the start of the brief attachment, the attached files with
+ *               page counts, her current draft if there is one, and three tools:
+ *               `search_material`, `read_pages` and `write_draft` (M2-19).
+ *   'explain'   no course material text and no tools. Only the assignment name, the course name,
+ *               the due time and the names of the attached files. The prompt tells the model it
+ *               has not been given the material, must not guess what it says, and must not write
+ *               hand-in text.
+ *   'off'       no context at all: `buildContext` throws `AiOffForAssignments`, so there is no
+ *               prompt and no tool to hand to a model. This is also the case while she has not
+ *               said what the course allows ('unknown' counts as off). The chat route asks
+ *               `assignmentHelpFor` first and answers 403.
+ *
+ * The course's other rule, `ai_study` (cards and lecture pages from its slides), is not read here.
  *
  * `materialShared` is true only for 'allowed', so the screen can say which case she is in.
  * `filesShared` is true when her file text may be read as well (see "Guard rails" below).
@@ -37,8 +45,8 @@
  *   - Every piece of course text (the brief, the attachment, the saved draft, and what
  *     `search_material` and `read_pages` return) is wrapped with `asData`, and the prompt holds
  *     `DATA_RULE`: text inside the markers is material to read, never instructions.
- *   - Her say. `mayUseFiles` (src/server/ai/consent.ts) is asked as well: where the course allows
- *     AI but she turned off "Use my course files with AI", the prompt holds the brief text only
+ *   - Her say. `mayUseFilesForAssignment` (src/server/ai/consent.ts) is asked as well: where the
+ *     course allows AI but she turned off "Use my course files with AI", the prompt holds the brief text only
  *     (no attachment text, no file ids), the only tool is `write_draft`, and the prompt tells the
  *     model to say once that her files are not shared. `filesShared` is false then. The file
  *     tools ask again every time they run. A course that is not 'allowed' is as before: nothing.
@@ -71,9 +79,10 @@
 import { and, asc, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { asData, asDataOverhead, DATA_RULE, defuse } from "@/server/ai/as-data";
-import { mayUseFiles } from "@/server/ai/consent";
+import { assignmentHelp, type AiAssignments, type AssignmentHelp } from "@/lib/ai-policy";
+import { mayUseFilesForAssignment } from "@/server/ai/consent";
 import { db as defaultDb, type Db } from "@/server/db/client";
-import { courseFiles, courses, filePages, type AI_POLICIES } from "@/server/db/schema/courses";
+import { courseFiles, courses, filePages } from "@/server/db/schema/courses";
 import { assignments, chatMessages, chats } from "@/server/db/schema/work";
 import { DRAFT_MAX_CHARS, DraftNotFound, getDraft, saveDraft, type Draft } from "@/server/drafts/store";
 import { pagesFor, searchPages, type PageText, type SearchHit } from "@/server/files/search";
@@ -105,7 +114,16 @@ export const FILE_LIST_MAX = 40;
 /** A file name longer than this is cut. */
 export const FILE_NAME_MAX = 120;
 
-export type AiPolicy = (typeof AI_POLICIES)[number];
+/**
+ * AI help on this course's assignments is off (or she has not said yet, which counts as off):
+ * there is no context to build. The chat route answers 403 `{error:'ai_off_for_assignments'}`.
+ */
+export class AiOffForAssignments extends Error {
+  constructor() {
+    super("ai_off_for_assignments");
+    this.name = "AiOffForAssignments";
+  }
+}
 
 /** One tool, in the shape the AI SDK takes for `tools`. */
 export type ChatTool<Input, Output> = {
@@ -140,11 +158,12 @@ export type ChatContext = {
   system: string;
   /** Empty unless the course allows AI. */
   tools: ChatTools;
-  /** True when the brief was put in the prompt (course policy 'allowed'). */
+  /** True when the brief was put in the prompt (assignment help 'allowed'). */
   materialShared: boolean;
   /** True when her file text may be read too: the course allows AI and her own switch is on. */
   filesShared: boolean;
-  aiPolicy: AiPolicy;
+  /** Never 'off': for 'off' no context is built (`AiOffForAssignments`). */
+  assignmentHelp: Exclude<AssignmentHelp, "off">;
 };
 
 export type BuildContextOptions = {
@@ -241,7 +260,7 @@ type Scope = {
   dueAt: Date | null;
   courseId: string;
   courseName: string;
-  aiPolicy: AiPolicy;
+  aiAssignments: AiAssignments;
 };
 
 /** Her assignment with its course, or `ChatNotFound`. */
@@ -255,7 +274,7 @@ async function scopeOf(db: Db, userId: string, assignmentId: string): Promise<Sc
       dueAt: assignments.dueAt,
       courseId: courses.id,
       courseName: courses.name,
-      aiPolicy: courses.aiPolicy,
+      aiAssignments: courses.aiAssignments,
     })
     .from(assignments)
     .innerJoin(courses, eq(courses.id, assignments.courseId))
@@ -330,18 +349,16 @@ function namesOnly(files: Attached[]): string {
   return `Attached files (names only):\n${lines.join("\n")}`;
 }
 
+/** The explain-only prompt: no course text, no drafting. */
 function withheldPrompt(scope: Scope, files: Attached[], now: Date, timeZone: string): string {
   const why =
-    scope.aiPolicy === "not_allowed"
-      ? "You have not been given the course material (the brief and the files), because this course has not allowed AI help."
-      : "You have not been given the course material (the brief and the files), because she has not yet said whether this course allows AI help.";
+    "You have not been given the course material (the brief and the files), because this course has not allowed AI help.";
   const lines = [
     "You only know the assignment name, the course name, the due time and the names of the attached files. Do not guess what the brief or any file says, and do not infer their content from their names. If she asks what the brief says, tell her plainly that you have not been given it.",
     "You may explain general concepts and give feedback on text she writes or pastes herself.",
     ...HONESTY_RULES,
+    NO_DRAFTING_RULE,
   ];
-  if (scope.aiPolicy === "not_allowed") lines.push(NO_DRAFTING_RULE);
-  else lines.push("If she wants you to read the brief and the files, she can mark the course as allowing AI help in Ready.");
   return [WHO, header(scope, now, timeZone), why, namesOnly(files), rules(lines)].join("\n\n");
 }
 
@@ -461,7 +478,7 @@ function buildTools(db: Db, userId: string, assignmentId: string): Required<Chat
   async function allowedScope(): Promise<Scope | null> {
     try {
       const scope = await scopeOf(db, userId, assignmentId);
-      return scope.aiPolicy === "allowed" ? scope : null;
+      return assignmentHelp(scope) === "allowed" ? scope : null;
     } catch (error) {
       if (error instanceof ChatNotFound) return null;
       throw error;
@@ -472,7 +489,7 @@ function buildTools(db: Db, userId: string, assignmentId: string): Required<Chat
   async function filesScope(): Promise<Scope | ToolRefusal> {
     const scope = await allowedScope();
     if (!scope) return { error: NOT_SHARED_ERROR };
-    if (!(await mayUseFiles(userId, scope.courseId, db))) return { error: FILES_OFF_ERROR };
+    if (!(await mayUseFilesForAssignment(userId, scope.courseId, db))) return { error: FILES_OFF_ERROR };
     return scope;
   }
 
@@ -578,8 +595,22 @@ function buildTools(db: Db, userId: string, assignmentId: string): Required<Chat
 }
 
 /**
+ * What the chat may do for this assignment's course: 'off', 'explain' or 'allowed'. The chat route
+ * asks this before it stores or sends anything. Throws `ChatNotFound` when the assignment does not
+ * exist or is not this user's.
+ */
+export async function assignmentHelpFor(
+  userId: string,
+  assignmentId: string,
+  db: Db = defaultDb,
+): Promise<AssignmentHelp> {
+  return assignmentHelp(await scopeOf(db, userId, assignmentId));
+}
+
+/**
  * The system prompt and tools for the chat about one assignment. Throws `ChatNotFound` when the
- * assignment does not exist or is not this user's.
+ * assignment does not exist or is not this user's, and `AiOffForAssignments` when AI help on the
+ * course's assignments is off or not yet answered: then nothing is read and nothing is built.
  */
 export async function buildContext(
   userId: string,
@@ -591,20 +622,24 @@ export async function buildContext(
   const timeZone = options.timeZone ?? "Europe/Helsinki";
 
   const scope = await scopeOf(db, userId, assignmentId);
+  const help = assignmentHelp(scope);
+  // Off (or not yet answered): no prompt, no tools, and not one more row is read.
+  if (help === "off") throw new AiOffForAssignments();
+
   const files = await attachedFiles(db, userId, assignmentId);
 
-  if (scope.aiPolicy !== "allowed") {
+  if (help === "explain") {
     return {
       system: cut(withheldPrompt(scope, files, now, timeZone), SYSTEM_BUDGET_CHARS),
       tools: {},
       materialShared: false,
       filesShared: false,
-      aiPolicy: scope.aiPolicy,
+      assignmentHelp: "explain",
     };
   }
 
   // Her own switch. Off: the brief text only, no file text, no file tools; write_draft stays.
-  const filesShared = await mayUseFiles(userId, scope.courseId, db);
+  const filesShared = await mayUseFilesForAssignment(userId, scope.courseId, db);
 
   // The brief attachment: the first attached file (by name) that has text.
   const first = filesShared ? files.find((f) => f.pages > 0) : undefined;
@@ -627,6 +662,6 @@ export async function buildContext(
     tools: filesShared ? tools : { write_draft: tools.write_draft },
     materialShared: true,
     filesShared,
-    aiPolicy: "allowed",
+    assignmentHelp: "allowed",
   };
 }

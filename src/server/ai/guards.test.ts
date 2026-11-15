@@ -2,23 +2,29 @@
 /*
  * M2-26: guard rails for course text.
  *   - asData / DATA_RULE: file text is wrapped and cannot close its own block.
- *   - mayUseFiles: her switch AND the course's policy AND the course is hers.
+ *   - mayUseFiles: her switch AND the course's study rule AND the course is hers.
+ *   - mayUseFilesForAssignment (M2-27): her switch AND assignment help fully allowed.
+ *   - The two rules together (M2-27): homework help off but slides allowed; both not answered.
+ *   - The migration that split `ai_policy` carries the old values over (M2-27).
  *   - languageOf: Finnish, Swedish and English are told apart.
  *   - The hostile slide: a slide tells the model to write the final answer and hand it in, and
  *     the fake AI is scripted to obey. No draft is written and nothing reaches the hand-in code.
  */
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { PGlite } from "@electric-sql/pglite";
 import { asc, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureSessionFor, SESSION_COOKIE } from "@/server/auth/session";
-import type { Db } from "@/server/db/client";
+import { MIGRATIONS_FOLDER, type Db } from "@/server/db/client";
 import { courseFiles, courses, filePages } from "@/server/db/schema/courses";
 import { confirmCodes, users } from "@/server/db/schema/users";
 import { assignments, chatMessages, drafts, submissions } from "@/server/db/schema/work";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
-import { DRAFT_NOT_ASKED_ERROR } from "@/server/chat/context";
+import { AiOffForAssignments, DRAFT_NOT_ASKED_ERROR, buildContext } from "@/server/chat/context";
 import { startFakeAi, type FakeAi } from "../../../tests/fake-ai/server";
 import { asData, asDataOverhead, DATA_RULE, defuse } from "./as-data";
-import { mayUseFiles, filesSwitchOn } from "./consent";
+import { mayUseFiles, mayUseFilesForAssignment, filesSwitchOn } from "./consent";
 import { languageOf } from "./language";
 
 // The chat route, the chat store and the AI router all read the app database; point it at this
@@ -159,14 +165,19 @@ describe("filesSwitchOn", () => {
   });
 });
 
-type Policy = "allowed" | "unknown" | "not_allowed";
+/** `courses.ai_assignments` and `courses.ai_study`. */
+type Policy = "allowed" | "explain" | "off" | "unknown";
+type Study = "allowed" | "unknown" | "not_allowed";
 
-/** A signed-in user with one course, one assignment and one attached file. */
-async function student(policy: Policy, pages: string[]) {
+/**
+ * A signed-in user with one course, one assignment and one attached file. `policy` is the rule
+ * for AI help on assignments; the study rule is the same yes unless given.
+ */
+async function student(policy: Policy, pages: string[], aiStudy: Study = policy === "allowed" ? "allowed" : "unknown") {
   const { user, token } = await ensureSessionFor(t.db, undefined);
   const [course] = await t.db
     .insert(courses)
-    .values({ userId: user.id, moodleId: 1, name: "Cell Biology", aiPolicy: policy })
+    .values({ userId: user.id, moodleId: 1, name: "Cell Biology", aiAssignments: policy, aiStudy })
     .returning();
   const [assignment] = await t.db
     .insert(assignments)
@@ -196,7 +207,7 @@ async function student(policy: Policy, pages: string[]) {
 }
 
 describe("mayUseFiles", () => {
-  it("is true only when the course allows AI, her switch is not off, and the course is hers", async () => {
+  it("is true only when the course's study rule is yes, her switch is not off, and the course is hers", async () => {
     const her = await student("allowed", ["text"]);
     const other = await student("allowed", ["text"]);
 
@@ -209,12 +220,18 @@ describe("mayUseFiles", () => {
     expect(await mayUseFiles(her.user.id, "not-a-uuid", t.db)).toBe(false);
     expect(await mayUseFiles("not-a-uuid", her.course.id, t.db)).toBe(false);
 
-    // The course's policy.
-    for (const policy of ["unknown", "not_allowed"] as const) {
-      await t.db.update(courses).set({ aiPolicy: policy }).where(eq(courses.id, her.course.id));
+    // The course's study rule. Full AI help on assignments does not stand in for it.
+    for (const aiStudy of ["unknown", "not_allowed"] as const) {
+      await t.db.update(courses).set({ aiStudy }).where(eq(courses.id, her.course.id));
       expect(await mayUseFiles(her.user.id, her.course.id, t.db)).toBe(false);
     }
-    await t.db.update(courses).set({ aiPolicy: "allowed" }).where(eq(courses.id, her.course.id));
+    await t.db.update(courses).set({ aiStudy: "allowed" }).where(eq(courses.id, her.course.id));
+
+    // The rule for assignments is not asked: whatever it is, the slides may be studied.
+    for (const aiAssignments of ["unknown", "off", "explain", "allowed"] as const) {
+      await t.db.update(courses).set({ aiAssignments }).where(eq(courses.id, her.course.id));
+      expect(await mayUseFiles(her.user.id, her.course.id, t.db)).toBe(true);
+    }
 
     // Her switch: off is no, whatever the course says. Someone else's switch does not count.
     await t.db.update(users).set({ settings: { ai: { useFiles: false } } }).where(eq(users.id, other.user.id));
@@ -224,6 +241,38 @@ describe("mayUseFiles", () => {
     expect(await mayUseFiles(her.user.id, her.course.id, t.db)).toBe(false);
     await t.db.update(users).set({ settings: { ai: { useFiles: true } } }).where(eq(users.id, her.user.id));
     expect(await mayUseFiles(her.user.id, her.course.id, t.db)).toBe(true);
+  });
+});
+
+describe("mayUseFilesForAssignment", () => {
+  it("is true only when assignment help is fully allowed, her switch is not off, and the course is hers", async () => {
+    const her = await student("allowed", ["text"]);
+    const other = await student("allowed", ["text"]);
+
+    expect(await mayUseFilesForAssignment(her.user.id, her.course.id, t.db)).toBe(true);
+
+    expect(await mayUseFilesForAssignment(her.user.id, other.course.id, t.db)).toBe(false);
+    expect(await mayUseFilesForAssignment(her.user.id, "0b9f4a52-6f0e-4c1d-9a55-2d1c8f3e7a10", t.db)).toBe(false);
+    expect(await mayUseFilesForAssignment(her.user.id, "not-a-uuid", t.db)).toBe(false);
+    expect(await mayUseFilesForAssignment("not-a-uuid", her.course.id, t.db)).toBe(false);
+
+    // Anything short of 'allowed' is no, also while the study rule says yes.
+    for (const aiAssignments of ["unknown", "off", "explain"] as const) {
+      await t.db.update(courses).set({ aiAssignments, aiStudy: "allowed" }).where(eq(courses.id, her.course.id));
+      expect(await mayUseFilesForAssignment(her.user.id, her.course.id, t.db)).toBe(false);
+    }
+    // The study rule is not asked.
+    for (const aiStudy of ["unknown", "not_allowed", "allowed"] as const) {
+      await t.db.update(courses).set({ aiAssignments: "allowed", aiStudy }).where(eq(courses.id, her.course.id));
+      expect(await mayUseFilesForAssignment(her.user.id, her.course.id, t.db)).toBe(true);
+    }
+
+    // Her switch.
+    await t.db.update(users).set({ settings: { ai: { useFiles: false } } }).where(eq(users.id, other.user.id));
+    expect(await mayUseFilesForAssignment(her.user.id, her.course.id, t.db)).toBe(true);
+    expect(await mayUseFilesForAssignment(other.user.id, other.course.id, t.db)).toBe(false);
+    await t.db.update(users).set({ settings: { ai: { useFiles: false } } }).where(eq(users.id, her.user.id));
+    expect(await mayUseFilesForAssignment(her.user.id, her.course.id, t.db)).toBe(false);
   });
 });
 
@@ -364,5 +413,123 @@ describe("a slide that gives orders", () => {
     expect(body).not.toContain(s.file.id);
     const offered = (ai.calls[0].body.tools as { function: { name: string } }[]).map((tool) => tool.function.name);
     expect(offered).toEqual(["write_draft"]);
+  });
+});
+
+describe("a course's two AI rules (M2-27)", () => {
+  it.each(["off", "unknown"] as const)(
+    "homework help '%s' but slides allowed: the chat is shut, cards from the slides are still allowed",
+    async (policy) => {
+      const s = await student(policy, ["Slide 6. Diffusion. FILE-TEXT-19ce"], "allowed");
+      // If a provider were called after all, the fake would be asked to write a draft.
+      ai.setDefault("groq", { rawBody: toolCallStream("write_draft", { title: "Essay 1", markdown: OBEYED }) });
+
+      // Study material: yes. This is what the card, concept and lecture-page jobs ask.
+      expect(await mayUseFiles(s.user.id, s.course.id, t.db)).toBe(true);
+      // The assignment chat: no files, no context, and so no write_draft.
+      expect(await mayUseFilesForAssignment(s.user.id, s.course.id, t.db)).toBe(false);
+      await expect(buildContext(s.user.id, s.assignment.id, { db: t.db })).rejects.toBeInstanceOf(AiOffForAssignments);
+
+      const res = await POST(post({ assignmentId: s.assignment.id, text: "Write the draft from my notes." }, s.cookie));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "ai_off_for_assignments" });
+      expect(ai.calls).toHaveLength(0);
+      expect(await stored()).toHaveLength(0);
+      expect(await t.db.select().from(drafts)).toHaveLength(0);
+      expect(otherHosts).toEqual([]);
+    },
+  );
+
+  it("both rules not answered: no course text goes anywhere", async () => {
+    const s = await student("unknown", ["Slide 6. Diffusion. FILE-TEXT-19ce"], "unknown");
+
+    expect(await mayUseFiles(s.user.id, s.course.id, t.db)).toBe(false);
+    expect(await mayUseFilesForAssignment(s.user.id, s.course.id, t.db)).toBe(false);
+    await expect(buildContext(s.user.id, s.assignment.id, { db: t.db })).rejects.toBeInstanceOf(AiOffForAssignments);
+
+    const res = await POST(post({ assignmentId: s.assignment.id, text: "What does the lecture say?" }, s.cookie));
+    expect(res.status).toBe(403);
+    expect(ai.calls).toHaveLength(0);
+    expect(otherHosts).toEqual([]);
+  });
+
+  it("'explain' with slides allowed: the chat answers, with no course text and no tools", async () => {
+    const s = await student("explain", ["Slide 6. Diffusion. FILE-TEXT-19ce"], "allowed");
+    ai.queue("groq", { text: "I have not been given the brief." });
+
+    const res = await POST(post({ assignmentId: s.assignment.id, text: "What does the lecture say?" }, s.cookie));
+    expect(res.status).toBe(200);
+    await chunks(res);
+
+    expect(await mayUseFiles(s.user.id, s.course.id, t.db)).toBe(true);
+    expect(await mayUseFilesForAssignment(s.user.id, s.course.id, t.db)).toBe(false);
+    expect(ai.calls).toHaveLength(1);
+    const body = JSON.stringify(ai.calls[0].body);
+    expect(ai.calls[0].body.tools).toBeUndefined();
+    expect(body).not.toContain("write_draft");
+    expect(body).not.toContain("FILE-TEXT-19ce");
+    expect(body).not.toContain("Write two pages about chloroplasts.");
+    expect(body).not.toContain(s.file.id);
+  });
+});
+
+describe("the migration that split ai_policy (M2-27)", () => {
+  /** The statements of one migration file, in order. */
+  async function statements(tag: string): Promise<string[]> {
+    const sql = await readFile(path.join(MIGRATIONS_FOLDER, `${tag}.sql`), "utf8");
+    return sql.split("--> statement-breakpoint").map((part) => part.trim()).filter(Boolean);
+  }
+
+  it("carries the old values over, and leaves the two new columns with their checks and defaults", async () => {
+    const journal = JSON.parse(await readFile(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf8")) as {
+      entries: { idx: number; tag: string }[];
+    };
+    const tags = journal.entries.sort((a, b) => a.idx - b.idx).map((entry) => entry.tag);
+    const split = tags.findIndex((tag) => tag.startsWith("0001_"));
+    expect(split).toBe(1);
+
+    const client = new PGlite();
+    try {
+      // The database as it was before this ticket, with one course per old value.
+      for (const tag of tags.slice(0, split)) for (const statement of await statements(tag)) await client.exec(statement);
+      const { rows: owners } = await client.query<{ id: string }>("insert into users default values returning id");
+      const owner = owners[0].id;
+      const old = ["allowed", "not_allowed", "unknown"];
+      for (const [i, policy] of old.entries()) {
+        await client.query("insert into courses (user_id, moodle_id, name, ai_policy) values ($1, $2, $3, $4)", [
+          owner,
+          i + 1,
+          `Fixture Course ${policy}`,
+          policy,
+        ]);
+      }
+
+      for (const statement of await statements(tags[split])) await client.exec(statement);
+
+      const { rows } = await client.query<{ name: string; ai_assignments: string; ai_study: string }>(
+        "select name, ai_assignments, ai_study from courses order by moodle_id",
+      );
+      expect(rows).toEqual([
+        { name: "Fixture Course allowed", ai_assignments: "allowed", ai_study: "allowed" },
+        { name: "Fixture Course not_allowed", ai_assignments: "explain", ai_study: "not_allowed" },
+        { name: "Fixture Course unknown", ai_assignments: "unknown", ai_study: "unknown" },
+      ]);
+
+      // The old column is gone; a new course starts at unknown + unknown; the checks hold.
+      const { rows: columns } = await client.query<{ column_name: string }>(
+        "select column_name from information_schema.columns where table_name = 'courses' and column_name like 'ai_%' order by column_name",
+      );
+      expect(columns.map((c) => c.column_name)).toEqual(["ai_assignments", "ai_study"]);
+      await client.query("insert into courses (user_id, moodle_id, name) values ($1, 9, 'Fixture Course new')", [owner]);
+      const { rows: fresh } = await client.query(
+        "select ai_assignments, ai_study from courses where moodle_id = 9",
+      );
+      expect(fresh).toEqual([{ ai_assignments: "unknown", ai_study: "unknown" }]);
+      await expect(client.query("update courses set ai_assignments = 'not_allowed' where moodle_id = 9")).rejects.toThrow();
+      await expect(client.query("update courses set ai_study = 'explain' where moodle_id = 9")).rejects.toThrow();
+      await client.query("update courses set ai_assignments = 'off', ai_study = 'allowed' where moodle_id = 9");
+    } finally {
+      await client.close();
+    }
   });
 });

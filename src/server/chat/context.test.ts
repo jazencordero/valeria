@@ -4,11 +4,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { courseFiles, courses, filePages } from "@/server/db/schema/courses";
 import { users } from "@/server/db/schema/users";
 import { assignments, drafts } from "@/server/db/schema/work";
+import type { AiAssignments, AiStudy } from "@/lib/ai-policy";
 import { DATA_RULE } from "@/server/ai/as-data";
 import { DRAFT_MAX_CHARS, getDraft, saveDraft } from "@/server/drafts/store";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import {
+  AiOffForAssignments,
   asksForDraft,
+  assignmentHelpFor,
   BRIEF_ATTACHMENT_MAX,
   buildContext,
   cleanBrief,
@@ -22,7 +25,6 @@ import {
   REPLY_RESERVE_CHARS,
   SYSTEM_BUDGET_CHARS,
   TOTAL_BUDGET_CHARS,
-  type AiPolicy,
 } from "./context";
 import { appendMessage, ChatNotFound, getOrCreateChat } from "./store";
 
@@ -43,11 +45,12 @@ const BRIEF_HTML =
 const BRIEF_MARK = "1500-word essay on osmosis";
 const NOW = new Date("2026-11-15T10:00:00Z");
 
-async function seed(policy: AiPolicy, name = "Student A") {
+/** `policy` is the course's rule for AI help on assignments; `aiStudy` its rule for study material. */
+async function seed(policy: AiAssignments, name = "Student A", aiStudy: AiStudy = "unknown") {
   const [user] = await t.db.insert(users).values({ displayName: name }).returning();
   const [course] = await t.db
     .insert(courses)
-    .values({ userId: user.id, moodleId: ++refs, name: "Plant Biology", aiPolicy: policy })
+    .values({ userId: user.id, moodleId: ++refs, name: "Plant Biology", aiAssignments: policy, aiStudy })
     .returning();
   const [assignment] = await t.db
     .insert(assignments)
@@ -115,7 +118,7 @@ describe("buildContext, course allows AI", () => {
     const ctx = await buildContext(user.id, assignment.id, opts());
 
     expect(ctx.materialShared).toBe(true);
-    expect(ctx.aiPolicy).toBe("allowed");
+    expect(ctx.assignmentHelp).toBe("allowed");
     expect(ctx.system).toContain("Assignment: Essay 1: Osmosis");
     expect(ctx.system).toContain("Course: Plant Biology");
     expect(ctx.system).toContain("Due: Friday 20 November 2026 at 23:59 (Europe/Helsinki)");
@@ -272,15 +275,16 @@ describe("buildContext, course allows AI", () => {
   });
 });
 
-describe("buildContext, course does not allow AI or has not said", () => {
-  it("'not_allowed': no brief text, no file text, no tools, and the no-drafting rule", async () => {
-    const { user, course, assignment } = await seed("not_allowed");
+describe("buildContext, assignment help 'explain'", () => {
+  it("no brief text, no file text, no tools, and the no-drafting rule", async () => {
+    const { user, course, assignment } = await seed("explain");
     const f = await file(user.id, course.id, assignment.id, "Brief.pdf", ["Grading: structure counts"]);
 
     const ctx = await buildContext(user.id, assignment.id, opts());
 
     expect(ctx.materialShared).toBe(false);
-    expect(ctx.aiPolicy).toBe("not_allowed");
+    expect(ctx.filesShared).toBe(false);
+    expect(ctx.assignmentHelp).toBe("explain");
     expect(ctx.tools).toEqual({});
     expect(ctx.system).toContain("Assignment: Essay 1: Osmosis");
     expect(ctx.system).toContain("Course: Plant Biology");
@@ -292,14 +296,16 @@ describe("buildContext, course does not allow AI or has not said", () => {
     expect(ctx.system).not.toContain(f.id);
     expect(ctx.system).toContain("this course has not allowed AI help");
     expect(ctx.system).toContain("Do not guess what the brief or any file says");
+    expect(ctx.system).toContain("give feedback on text she writes or pastes herself");
     expect(ctx.system).toContain("Do not write hand-in text");
     expect(ctx.system).toContain("Explain concepts and give feedback");
     expect(ctx.system).not.toContain("search_material");
     expect(ctx.system).not.toContain("write_draft");
+    expect(ctx.system.length).toBeLessThanOrEqual(SYSTEM_BUDGET_CHARS);
   });
 
-  it.each(["not_allowed", "unknown"] as const)("'%s': write_draft is not offered and an old draft is not sent", async (policy) => {
-    const { user, assignment } = await seed(policy);
+  it("write_draft is not offered and an old draft is not sent", async () => {
+    const { user, assignment } = await seed("explain");
     // A draft from when the course still allowed AI.
     await saveDraft(user.id, assignment.id, { title: "Old", contentMd: "## Intro\n\nOLD-DRAFT-MARK" }, t.db);
 
@@ -311,24 +317,63 @@ describe("buildContext, course does not allow AI or has not said", () => {
     expect(ctx.system).not.toContain("OLD-DRAFT-MARK");
   });
 
-  it("'unknown': no brief text and no tools, and says she has not said yet", async () => {
-    const { user, course, assignment } = await seed("unknown");
+  it("the study rule does not open the chat to course text: slides allowed, still nothing here", async () => {
+    const { user, course, assignment } = await seed("explain", "Student A", "allowed");
     await file(user.id, course.id, assignment.id, "Brief.pdf", ["Grading: structure counts"]);
 
     const ctx = await buildContext(user.id, assignment.id, opts());
 
-    expect(ctx.materialShared).toBe(false);
-    expect(ctx.aiPolicy).toBe("unknown");
     expect(ctx.tools).toEqual({});
-    expect(ctx.system).toContain("- Brief.pdf");
+    expect(ctx.filesShared).toBe(false);
     expect(ctx.system).not.toContain(BRIEF_MARK);
     expect(ctx.system).not.toContain("Grading: structure counts");
-    expect(ctx.system).toContain("she has not yet said whether this course allows AI help");
-    expect(ctx.system).toContain("Do not guess what the brief or any file says");
-    expect(ctx.system).toContain("give feedback on text she writes or pastes herself");
-    expect(ctx.system).not.toContain("Do not write hand-in text");
-    expect(ctx.system).not.toContain("write_draft");
-    expect(ctx.system.length).toBeLessThanOrEqual(SYSTEM_BUDGET_CHARS);
+  });
+});
+
+describe("buildContext, assignment help off or not answered (M2-27)", () => {
+  it.each([
+    ["off", "unknown"],
+    ["off", "allowed"],
+    ["unknown", "unknown"],
+    ["unknown", "allowed"],
+    ["unknown", "not_allowed"],
+  ] as const)("ai_assignments '%s', ai_study '%s': no context at all", async (policy, aiStudy) => {
+    const { user, course, assignment } = await seed(policy, "Student A", aiStudy);
+    await file(user.id, course.id, assignment.id, "Brief.pdf", ["Grading: structure counts"]);
+    await saveDraft(user.id, assignment.id, { title: "Old", contentMd: "## Intro\n\nOLD-DRAFT-MARK" }, t.db);
+
+    expect(await assignmentHelpFor(user.id, assignment.id, t.db)).toBe("off");
+    // No prompt and no tools come back: there is nothing to hand to a model, so no write_draft.
+    const built = await buildContext(user.id, assignment.id, opts()).then(
+      (ctx) => ctx,
+      (error: unknown) => error,
+    );
+    expect(built).toBeInstanceOf(AiOffForAssignments);
+    expect(built).not.toHaveProperty("system");
+    expect(built).not.toHaveProperty("tools");
+    expect(String((built as Error).message)).not.toContain(BRIEF_MARK);
+  });
+
+  it("assignmentHelpFor reads the course's rule, and only for her own assignment", async () => {
+    const a = await seed("explain", "Student A");
+    const b = await seed("allowed", "Student B");
+    expect(await assignmentHelpFor(a.user.id, a.assignment.id, t.db)).toBe("explain");
+    expect(await assignmentHelpFor(b.user.id, b.assignment.id, t.db)).toBe("allowed");
+    await expect(assignmentHelpFor(a.user.id, b.assignment.id, t.db)).rejects.toBeInstanceOf(ChatNotFound);
+    await expect(assignmentHelpFor(a.user.id, "not-a-uuid", t.db)).rejects.toBeInstanceOf(ChatNotFound);
+  });
+
+  it("'allowed' does not need the study rule: the chat reads her files whatever ai_study says", async () => {
+    for (const aiStudy of ["unknown", "not_allowed", "allowed"] as const) {
+      const { user, course, assignment } = await seed("allowed", `Student ${aiStudy}`, aiStudy);
+      await file(user.id, course.id, assignment.id, "Brief.pdf", ["Grading: structure counts"]);
+      const ctx = await buildContext(user.id, assignment.id, opts());
+      expect(ctx.assignmentHelp).toBe("allowed");
+      expect(ctx.filesShared).toBe(true);
+      expect(Object.keys(ctx.tools).sort()).toEqual(["read_pages", "search_material", "write_draft"]);
+      expect(ctx.system).toContain(BRIEF_MARK);
+      expect(ctx.system).toContain("Grading: structure counts");
+    }
   });
 });
 
@@ -377,13 +422,13 @@ describe("ownership", () => {
     const input = { title: "Essay 1", markdown: "## Intro\n\ntext" };
     await says(user.id, assignment.id);
 
-    for (const policy of ["not_allowed", "unknown"] as const) {
-      await t.db.update(courses).set({ aiPolicy: policy }).where(eq(courses.id, course.id));
+    for (const policy of ["explain", "off", "unknown"] as const) {
+      await t.db.update(courses).set({ aiAssignments: policy }).where(eq(courses.id, course.id));
       expect(await tools.write_draft!.execute(input)).toEqual({ error: DRAFT_NOT_ALLOWED_ERROR });
     }
     expect(await t.db.select().from(drafts)).toHaveLength(0);
 
-    await t.db.update(courses).set({ aiPolicy: "allowed" }).where(eq(courses.id, course.id));
+    await t.db.update(courses).set({ aiAssignments: "allowed" }).where(eq(courses.id, course.id));
     expect(await tools.write_draft!.execute(input)).toHaveProperty("draftId");
 
     await t.db.delete(assignments).where(eq(assignments.id, assignment.id));
@@ -397,11 +442,14 @@ describe("ownership", () => {
     const { tools } = await buildContext(user.id, assignment.id, opts());
     expect(await tools.search_material!.execute({ query: "plasmolysis" })).toHaveProperty("hits");
 
-    await t.db.update(courses).set({ aiPolicy: "not_allowed" }).where(eq(courses.id, course.id));
-    expect(await tools.search_material!.execute({ query: "plasmolysis" })).toEqual({ error: NOT_SHARED_ERROR });
-    expect(await tools.read_pages!.execute({ fileId: f.id, from: 1 })).toEqual({ error: NOT_SHARED_ERROR });
+    for (const policy of ["explain", "off", "unknown"] as const) {
+      // The study rule says yes all along: it does not keep the chat's file tools open.
+      await t.db.update(courses).set({ aiAssignments: policy, aiStudy: "allowed" }).where(eq(courses.id, course.id));
+      expect(await tools.search_material!.execute({ query: "plasmolysis" })).toEqual({ error: NOT_SHARED_ERROR });
+      expect(await tools.read_pages!.execute({ fileId: f.id, from: 1 })).toEqual({ error: NOT_SHARED_ERROR });
+    }
 
-    await t.db.update(courses).set({ aiPolicy: "allowed" }).where(eq(courses.id, course.id));
+    await t.db.update(courses).set({ aiAssignments: "allowed" }).where(eq(courses.id, course.id));
     expect(await tools.read_pages!.execute({ fileId: f.id, from: 1 })).toHaveProperty("pages");
 
     // The assignment is no longer hers (here: it is gone).
@@ -496,7 +544,7 @@ describe("guard rails (M2-26)", () => {
 
     const ctx = await buildContext(user.id, assignment.id, opts());
 
-    expect(ctx.aiPolicy).toBe("allowed");
+    expect(ctx.assignmentHelp).toBe("allowed");
     expect(ctx.materialShared).toBe(true);
     expect(ctx.filesShared).toBe(false);
     expect(ctx.system).toContain(BRIEF_MARK);
@@ -536,8 +584,8 @@ describe("guard rails (M2-26)", () => {
     expect(await tools.read_pages!.execute({ fileId: f.id, from: 1 })).toHaveProperty("pages");
   });
 
-  it.each(["not_allowed", "unknown"] as const)("'%s' with her switch on or off: still no course text at all", async (policy) => {
-    const { user, course, assignment } = await seed(policy);
+  it("'explain' with her switch on or off: still no course text at all", async () => {
+    const { user, course, assignment } = await seed("explain");
     await file(user.id, course.id, assignment.id, "Brief.pdf", ["Grading: structure counts"]);
     for (const off of [false, true]) {
       if (off) await switchOff(user.id);

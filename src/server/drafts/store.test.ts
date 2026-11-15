@@ -22,7 +22,7 @@ async function seed(name: string) {
   const [user] = await t.db.insert(users).values({ displayName: name }).returning();
   const [course] = await t.db
     .insert(courses)
-    .values({ userId: user.id, moodleId: ++refs, name: "Plant Biology", aiPolicy: "allowed" })
+    .values({ userId: user.id, moodleId: ++refs, name: "Plant Biology", aiAssignments: "allowed" })
     .returning();
   const [assignment] = await t.db
     .insert(assignments)
