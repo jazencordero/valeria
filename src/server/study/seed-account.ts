@@ -65,6 +65,8 @@ import { events } from "@/server/db/schema/calendar";
 import { courses } from "@/server/db/schema/courses";
 import { gradeItems } from "@/server/db/schema/grades";
 import { moodleConnections } from "@/server/db/schema/moodle";
+import { nameWithoutCode } from "@/server/moodle/read/courses";
+import { helsinkiToInstant } from "@/server/study/exams";
 import { exams } from "@/server/db/schema/study";
 import { confirmCodes, sessions, users } from "@/server/db/schema/users";
 import { assignments, ASSIGNMENT_STATES } from "@/server/db/schema/work";
@@ -95,21 +97,34 @@ import { EXAM_TARGET_PCT, kindFor } from "@/server/sync/events";
 
 const nonEmpty = (what: string) => z.string({ error: `${what} must be text.` }).trim().min(1, { error: `${what} is empty.` });
 
-/** ISO text or Unix seconds (Moodle's 0 = not set) -> Date | null. */
+/** "YYYY-MM-DD HH:MM" (or with a T, or seconds) and no zone: a wall-clock time. */
+const LOCAL_TIME = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/;
+const LOCAL_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * ISO text with a zone, Unix seconds (Moodle's 0 = not set), or a time with no zone
+ * ("2026-11-20 23:59"), which is read as Europe/Helsinki local time, the way MyCourses shows
+ * it. A day alone is that day's Helsinki midnight.
+ */
 function toDate(v: string | number | null | undefined): Date | null | "bad" {
-  if (v === null || v === undefined || v === "" || v === 0) return null;
+  if (v === null || v === undefined || v === 0) return null;
   if (typeof v === "number") return Number.isFinite(v) && v > 0 ? new Date(v < 1e12 ? v * 1000 : v) : "bad";
-  const t = Date.parse(v);
+  const text = v.trim();
+  if (text === "") return null;
+  const local = LOCAL_TIME.exec(text);
+  if (local) return helsinkiToInstant(local[1], local[2]) ?? "bad";
+  if (LOCAL_DAY.test(text)) return helsinkiToInstant(text, "00:00") ?? "bad";
+  const t = Date.parse(text);
   return Number.isNaN(t) ? "bad" : new Date(t);
 }
 
 const When = z
-  .union([z.string(), z.number()], { error: "must be an ISO date and time, Unix seconds or null." })
+  .union([z.string(), z.number()], { error: "must be a date and time (ISO, or YYYY-MM-DD HH:MM in Helsinki time), Unix seconds or null." })
   .nullish()
   .transform((v, ctx) => {
     const d = toDate(v);
     if (d === "bad") {
-      ctx.addIssue({ code: "custom", message: "must be an ISO date and time, Unix seconds or null." });
+      ctx.addIssue({ code: "custom", message: "must be a date and time (ISO, or YYYY-MM-DD HH:MM in Helsinki time), Unix seconds or null." });
       return z.NEVER;
     }
     return d;
@@ -124,6 +139,10 @@ const AssignmentSchema = z.looseObject({
   dueAt: When,
   cutoffAt: When,
   opensAt: When,
+  // The same three as a hand-pulled file names them.
+  due: When,
+  cutoff: When,
+  opens: When,
   status: z.string().nullish(),
   graded: z.boolean().nullish(),
   submittedAt: When,
@@ -543,9 +562,9 @@ export function planSeed(input: SeedInput): SeedPlan {
         moodleId: id,
         cmid: a.cmid != null ? Number(a.cmid) : null,
         name: a.name.trim(),
-        dueAt: a.dueAt ?? null,
-        cutoffAt: a.cutoffAt ?? null,
-        opensAt: a.opensAt ?? null,
+        dueAt: a.dueAt ?? a.due ?? null,
+        cutoffAt: a.cutoffAt ?? a.cutoff ?? null,
+        opensAt: a.opensAt ?? a.opens ?? null,
         state: stateOf(a.status, a.graded),
         submittedAt: a.submittedAt ?? null,
         needsSubmitButton: a.requiresSubmitPress ?? false,
@@ -569,7 +588,8 @@ export function planSeed(input: SeedInput): SeedPlan {
     const rule = input.aiRules.get(code);
     return {
       code,
-      name: c.name.trim(),
+      // Named as the course sync names it: the full name without its leading "<code> - ".
+      name: nameWithoutCode(c.name.trim(), c.code.trim()).trim(),
       moodleId,
       assignments: planned,
       events: plannedEvents,

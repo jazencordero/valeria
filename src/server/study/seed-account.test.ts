@@ -380,6 +380,61 @@ describe("shapes a real hand-made bundles folder has (M3-57 follow-up)", () => {
   );
 });
 
+describe("an account file pulled by hand (M3-57 follow-up 2)", () => {
+  it(
+    "reads due, cutoff, opens and at as Helsinki local time, and names a course as the sync would",
+    async () => {
+      const dir = path.join(tmp, "hand-pulled");
+      const account = JSON.parse(await readFile(path.join(ACCOUNT, "account.json"), "utf8"));
+      account.courses[0].name = `${account.courses[0].code} - Intro to Forecasting, Contact teaching, 21.10.2026-2.12.2026`;
+      account.courses[0].assignments = [
+        { name: "Winter essay", due: "2026-11-20 23:59", cutoff: "2026-11-27 23:59", opens: "2026-11-01 08:00", maxFiles: 1 },
+        { name: "Summer essay", due: "2026-06-15 12:00" },
+        { name: "Zoned essay", due: "2026-11-20T23:59:00+02:00" },
+        { name: "No date essay" },
+      ];
+      account.courses[0].calendarNext60Days = [{ name: "Guest lecture", at: "2026-11-26 10:15", module: "", type: "course" }];
+      await cp(ACCOUNT, dir, { recursive: true });
+      await write(path.join(dir, "account.json"), account);
+
+      const r = await applySeed(t.db, planSeed(await loadSeed(dir, bundles)), { name: "Testi", now: NOW });
+      const rows = await t.db.select().from(assignments).where(eq(assignments.userId, r.userId));
+      const byName = (n: string) => rows.find((a) => a.name === n)!;
+      // November is UTC+2 in Helsinki, June is UTC+3.
+      expect(byName("Winter essay").dueAt?.toISOString()).toBe("2026-11-20T21:59:00.000Z");
+      expect(byName("Winter essay").cutoffAt?.toISOString()).toBe("2026-11-27T21:59:00.000Z");
+      expect(byName("Winter essay").opensAt?.toISOString()).toBe("2026-11-01T06:00:00.000Z");
+      expect(byName("Summer essay").dueAt?.toISOString()).toBe("2026-06-15T09:00:00.000Z");
+      expect(byName("Zoned essay").dueAt?.toISOString()).toBe("2026-11-20T21:59:00.000Z");
+      expect(byName("No date essay").dueAt).toBeNull();
+
+      const [event] = (await t.db.select().from(events).where(eq(events.userId, r.userId))).filter((e) => e.title === "Guest lecture");
+      expect(event.startsAt.toISOString()).toBe("2026-11-26T08:15:00.000Z");
+
+      const [course] = (await t.db.select().from(courses).where(eq(courses.userId, r.userId))).filter((c) => c.code === account.courses[0].code);
+      expect(course.name).toBe("Intro to Forecasting, Contact teaching, 21.10.2026-2.12.2026");
+
+      // A second run on a corrected file updates the same rows in place.
+      account.courses[0].assignments[0].due = "2026-11-21 23:59";
+      await write(path.join(dir, "account.json"), account);
+      const before = await rowCounts();
+      const again = await applySeed(t.db, planSeed(await loadSeed(dir, bundles)), { name: "Testi", now: NOW });
+      expect(again.userId).toBe(r.userId);
+      expect(await rowCounts()).toEqual(before);
+      const [moved] = (await t.db.select().from(assignments).where(eq(assignments.userId, r.userId))).filter((a) => a.name === "Winter essay");
+      expect(moved.id).toBe(byName("Winter essay").id);
+      expect(moved.dueAt?.toISOString()).toBe("2026-11-21T21:59:00.000Z");
+
+      // A time that does not exist is refused with its path.
+      account.courses[0].assignments[0].due = "2026-13-40 25:00";
+      await write(path.join(dir, "account.json"), account);
+      const err = await loadSeed(dir, bundles).catch((e: unknown) => e);
+      expect((err as SeedInvalid).problems.join("\n")).toContain("courses.0.assignments.0.due");
+    },
+    T,
+  );
+});
+
 describe("CLI", () => {
   it("parses its arguments", () => {
     expect(parseArgs(["a", "b", "--name", "Testi", "--dry-run"])).toMatchObject({ ok: true, args: { name: "Testi", dryRun: true, linkOnly: false, origin: "http://localhost:3000" } });
