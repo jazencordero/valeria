@@ -59,9 +59,26 @@
  *   days ago (`NOT_NOW_DAYS`, as the card's own localStorage snooze). Home then
  *   leaves the card out, so it does not render and fade out on every visit.
  *
+ * M9-19 adds "pick up where you left off":
+ * - `pickup`: one lecture to continue, or null (no row). Only her visible
+ *   courses count, and "unread" and "current" are M9-03's `courseView` states
+ *   (the course path's): the current lecture is the first posted one she has
+ *   not read. In order:
+ *   1. The current lecture of the course whose exam is nearest (the exam
+ *      cards' order). An exam course with nothing unread passes to the next.
+ *   2. With no exams (or none of their courses with anything unread): the
+ *      lecture she opened last (`lectures.last_opened_at`, else `read_at`,
+ *      the newer of the two). If that one is unread it is the row; if it is
+ *      read, its course's current lecture; else the next one she opened.
+ *   3. Else the first of her courses, by name, with a current lecture.
+ *   Nothing unread anywhere: null. Minutes are M9-05's `lecture_content`
+ *   reading time, null until the page is written.
+ *   Note: nothing writes `last_opened_at` yet (the lecture page does not), so
+ *   until it does, step 2 goes by the lecture she marked read last.
+ *
  * Later Home tickets extend `HomeView` here.
  */
-import { and, eq, gte, lt } from "drizzle-orm";
+import { and, eq, gte, inArray, lt } from "drizzle-orm";
 import { TIME_ZONE } from "@/lib/dates";
 import { greeting, type GreetingAssignment, type JustHandedIn, type JustStudied, type NextExam } from "@/lib/home/greeting";
 import { WEEK_DAYS, weekModel, type WeekItem, type WeekModel } from "@/lib/home/week";
@@ -69,15 +86,19 @@ import { DONE_WINDOW_MS, type Queue } from "@/lib/queue";
 import { gradeFor } from "@/lib/study/forecast";
 import { FEED_PROVIDERS, itemsForUser, type FeedProvider } from "@/server/calendar/feed";
 import { db as defaultDb, type Db } from "@/server/db/client";
+import { courseView, listCourses, type CourseLecture } from "@/server/courses/store";
 import { calendarFeeds } from "@/server/db/schema/calendar";
 import { courses } from "@/server/db/schema/courses";
 import { MOODLE_STATUSES, moodleConnections } from "@/server/db/schema/moodle";
+import { lectureContent, lectures } from "@/server/db/schema/learn";
+import { exams as examsTable } from "@/server/db/schema/study";
 import { users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
 import { examView, type ExamView } from "@/server/study/actions";
 import { getAssignmentsView, type DoneAssignment, type OpenAssignment } from "./assignments";
 import { getExamsView, type ExamsTabExam, type ExamViewLoader } from "./exams";
 import { getGradesList, type GradesListRow } from "./grades";
+import { lectureHref } from "./lecture";
 import type { Flash } from "./flash";
 
 export type HomeConnection = { status: (typeof MOODLE_STATUSES)[number] };
@@ -168,6 +189,18 @@ export function neverMissOn(settings: Record<string, unknown> | null | undefined
   return cal || rem ? { calendar: cal, reminders: rem } : null;
 }
 
+/** "Pick up where you left off": the lecture Continue opens. */
+export type HomePickup = {
+  courseId: string;
+  lectureId: string;
+  n: number;
+  title: string;
+  /** Reading time, or null while the lecture page is still being written. */
+  minutes: number | null;
+  /** The lecture page, `/courses/<id>/lectures/<n>`. */
+  href: string;
+};
+
 export type HomeView = {
   /** First word of her display name, or `null` when we have none. */
   firstName: string | null;
@@ -187,6 +220,8 @@ export type HomeView = {
   grades: GradesListRow[];
   /** The Never miss one card, under the grades card. */
   neverMiss: HomeNeverMiss;
+  /** "Pick up where you left off", under the exam cards; null: no row. */
+  pickup: HomePickup | null;
 };
 
 /** "Valeria Example" gives "Valeria"; empty or missing gives null. */
@@ -315,6 +350,88 @@ async function neverMissFor(
   };
 }
 
+const unread = (l: CourseLecture) => l.state === "cur" || l.state === "up";
+
+/**
+ * Which lecture "pick up where you left off" names (see the header).
+ * `examIds`: her upcoming exams, nearest first.
+ */
+export async function pickupFor(
+  userId: string,
+  examIds: readonly string[],
+  now: Date,
+  database: Db = defaultDb,
+): Promise<HomePickup | null> {
+  const visible = await listCourses(userId, database, now);
+  if (visible.length === 0) return null;
+  const views = await Promise.all(visible.map((c) => courseView(userId, c.id, database, now)));
+  const byCourse = new Map(views.map((v) => [v.course.id, v.lectures]));
+  const current = (courseId: string) => byCourse.get(courseId)?.find((l) => l.state === "cur") ?? null;
+
+  let pick: { courseId: string; lecture: CourseLecture } | null = null;
+
+  // 1. The nearest exam's course.
+  if (examIds.length > 0) {
+    const rows = await database
+      .select({ id: examsTable.id, courseId: examsTable.courseId })
+      .from(examsTable)
+      .where(and(eq(examsTable.userId, userId), inArray(examsTable.id, [...examIds])));
+    const courseOf = new Map(rows.map((r) => [r.id, r.courseId]));
+    for (const id of examIds) {
+      const courseId = courseOf.get(id);
+      const cur = courseId ? current(courseId) : null;
+      if (courseId && cur) {
+        pick = { courseId, lecture: cur };
+        break;
+      }
+    }
+  }
+
+  // 2. The lecture she opened last.
+  if (!pick) {
+    const touched = await database
+      .select({ id: lectures.id, courseId: lectures.courseId, openedAt: lectures.lastOpenedAt, readAt: lectures.readAt })
+      .from(lectures)
+      .where(and(eq(lectures.userId, userId), inArray(lectures.courseId, [...byCourse.keys()])));
+    const at = (r: (typeof touched)[number]) => Math.max(r.openedAt?.getTime() ?? -Infinity, r.readAt?.getTime() ?? -Infinity);
+    const recent = touched.filter((r) => Number.isFinite(at(r))).sort((a, b) => at(b) - at(a) || a.id.localeCompare(b.id));
+    for (const r of recent) {
+      const lecture = byCourse.get(r.courseId)?.find((l) => l.id === r.id);
+      const chosen = lecture && unread(lecture) ? lecture : current(r.courseId);
+      if (chosen) {
+        pick = { courseId: r.courseId, lecture: chosen };
+        break;
+      }
+    }
+  }
+
+  // 3. The first course, by name, with something unread.
+  if (!pick) {
+    for (const c of visible) {
+      const cur = current(c.id);
+      if (cur) {
+        pick = { courseId: c.id, lecture: cur };
+        break;
+      }
+    }
+  }
+  if (!pick) return null;
+
+  const [content] = await database
+    .select({ minutes: lectureContent.minutes })
+    .from(lectureContent)
+    .where(eq(lectureContent.lectureId, pick.lecture.id))
+    .limit(1);
+  return {
+    courseId: pick.courseId,
+    lectureId: pick.lecture.id,
+    n: pick.lecture.n,
+    title: pick.lecture.title,
+    minutes: content?.minutes ?? null,
+    href: lectureHref(pick.courseId, pick.lecture.n),
+  };
+}
+
 export async function getHomeView(
   userId: string,
   options: { now: Date; view?: ExamViewLoader; flash?: Flash | null },
@@ -427,5 +544,11 @@ export async function getHomeView(
     week: weekModel(weekItems, now),
     grades: (await getGradesList(userId, database)).courses,
     neverMiss: await neverMissFor(userId, me?.settings, now, database),
+    pickup: await pickupFor(
+      userId,
+      examList.exams.map((e) => e.id),
+      now,
+      database,
+    ),
   };
 }

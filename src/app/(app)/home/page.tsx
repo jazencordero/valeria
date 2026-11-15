@@ -71,6 +71,12 @@
  * the card for 30 days: the card keeps it in localStorage, and `dismissNeverMiss`
  * saves it too, so after a reload the page leaves the card out (no flash).
  *
+ * M9-19: under the exam cards, "pick up where you left off"
+ * (`src/components/home/pickup.tsx`) with `getHomeView`'s `pickup`: one
+ * lecture and Continue, which opens its page. With no exams the row stands
+ * alone in the same place, without the EXAMS AND QUIZZES label; with nothing
+ * unread anywhere there is no row.
+ *
  * Cut: the week markers' pulse after turning on. `WeekCard` exposes `pulse()`
  * through a ref, which needs a client component holding both cards; none of this
  * ticket's files can be one.
@@ -95,6 +101,7 @@ import {
 } from "@/components/home/handed-in";
 import { GradesCard } from "@/components/home/grades-card";
 import { NeverMiss } from "@/components/home/never-miss";
+import { Pickup } from "@/components/home/pickup";
 import { HeroCard } from "@/components/home/hero-card";
 import { Queue, QueueRow } from "@/components/home/queue-row";
 import { WeekCard } from "@/components/home/week-card";
@@ -426,11 +433,18 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
           </Slide>
         </Slide>
 
-        {view.exams.length > 0 && (
+        {view.exams.length > 0 ? (
           <Slide as="section" {...part(4)} className="mt-8" aria-labelledby="lbl-exams">
             <SectionLabel id="lbl-exams">EXAMS AND QUIZZES</SectionLabel>
             <ExamCards exams={view.exams} />
+            {view.pickup && <Pickup {...view.pickup} className="mt-3.5" />}
           </Slide>
+        ) : (
+          view.pickup && (
+            <Slide as="section" {...part(4)} className="mt-8" aria-label="Pick up where you left off">
+              <Pickup {...view.pickup} />
+            </Slide>
+          )
         )}
       </div>
 

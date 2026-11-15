@@ -1,8 +1,10 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { and, eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { courses } from "@/server/db/schema/courses";
 import { gradeItems } from "@/server/db/schema/grades";
+import { lectureContent, lectures } from "@/server/db/schema/learn";
 import { moodleConnections } from "@/server/db/schema/moodle";
 import { cardConcepts, cards, concepts, exams } from "@/server/db/schema/study";
 import { users } from "@/server/db/schema/users";
@@ -38,7 +40,7 @@ vi.mock("@/server/db/client", async (importOriginal) => {
   return { ...real, db };
 });
 
-const { biteDay, biteFor, firstNameOf, getHomeView, neverMissDismissed, neverMissOn } = await import("./home");
+const { biteDay, biteFor, firstNameOf, getHomeView, neverMissDismissed, neverMissOn, pickupFor } = await import("./home");
 const { dismissNeverMissFor, turnOffNeverMissFor, turnOnNeverMissFor } = await import(
   "@/app/(app)/home/never-miss-actions"
 );
@@ -770,4 +772,119 @@ describe("parseFlash", () => {
     expect(parseFlash(JSON.stringify({ kind: "studied", at: NOW.getTime(), examId: "e1" }), NOW)).toBeNull();
     expect(parseFlash(JSON.stringify({ kind: "other", at: NOW.getTime() }), NOW)).toBeNull();
   });
+});
+
+describe("getHomeView: pick up where you left off", () => {
+  const HOUR = 60 * 60 * 1000;
+
+  async function lecture(
+    userId: string,
+    courseId: string,
+    n: number,
+    title: string,
+    extra: Partial<typeof lectures.$inferInsert> & { minutes?: number } = {},
+  ) {
+    const { minutes, ...rest } = extra;
+    const [l] = await t.db.insert(lectures).values({ userId, courseId, n, title, ...rest }).returning();
+    if (minutes !== undefined) {
+      await t.db.insert(lectureContent).values({ lectureId: l.id, minutes, sourceHash: `h-${l.id}` });
+    }
+    return l;
+  }
+  const read = (hoursAgo: number) => ({ readAt: new Date(NOW.getTime() - hoursAgo * HOUR) });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+
+  it(
+    "names the current lecture of the course whose exam is nearest",
+    async () => {
+      const u = await user();
+      signedIn.userId = u.id;
+      const a = await course(u.id, "Alpha Course");
+      const b = await course(u.id, "Beta Course");
+      await lecture(u.id, a.id, 1, "Alpha one", { ...read(1), minutes: 4 });
+      await lecture(u.id, a.id, 2, "Alpha two", { minutes: 5 });
+      await lecture(u.id, b.id, 1, "Beta one", read(30));
+      await lecture(u.id, b.id, 2, "Beta two", { minutes: 6 });
+      await lecture(u.id, b.id, 3, "Beta three");
+      await exam(u.id, a.id, "Alpha exam", DEC_3, { cards: false });
+      await exam(u.id, b.id, "Beta exam", FRIDAY, { cards: false });
+
+      const view = await getHomeView(u.id, { now: NOW }, t.db);
+
+      expect(view.pickup).toMatchObject({
+        courseId: b.id,
+        n: 2,
+        title: "Beta two",
+        minutes: 6,
+        href: `/courses/${b.id}/lectures/2`,
+      });
+    },
+    DB_TIMEOUT,
+  );
+
+  it(
+    "passes over an exam course with nothing unread",
+    async () => {
+      const u = await user();
+      signedIn.userId = u.id;
+      const a = await course(u.id, "Alpha Course");
+      const b = await course(u.id, "Beta Course");
+      await lecture(u.id, a.id, 1, "Alpha one");
+      await lecture(u.id, b.id, 1, "Beta one", read(2));
+      const soon = await exam(u.id, b.id, "Beta exam", FRIDAY, { cards: false });
+      const later = await exam(u.id, a.id, "Alpha exam", DEC_3, { cards: false });
+
+      expect(await pickupFor(u.id, [soon.id, later.id], NOW, t.db)).toMatchObject({ courseId: a.id, n: 1, minutes: null });
+    },
+    DB_TIMEOUT,
+  );
+
+  it(
+    "with no exams, names the lecture she opened last, or its course's current one when she has read it",
+    async () => {
+      const u = await user();
+      signedIn.userId = u.id;
+      const a = await course(u.id, "Alpha Course");
+      const b = await course(u.id, "Beta Course");
+      await lecture(u.id, a.id, 1, "Alpha one", { lastOpenedAt: new Date(NOW.getTime() - 5 * HOUR) });
+      await lecture(u.id, b.id, 1, "Beta one");
+      const b2 = await lecture(u.id, b.id, 2, "Beta two", { minutes: 7 });
+
+      // Beta two opened last and still unread: it, not Beta one (the current one).
+      await t.db.update(lectures).set({ lastOpenedAt: new Date(NOW.getTime() - HOUR) }).where(eq(lectures.id, b2.id));
+      expect((await getHomeView(u.id, { now: NOW }, t.db)).pickup).toMatchObject({ courseId: b.id, n: 2, minutes: 7 });
+
+      // Alpha one read just now: the newest touch is a read lecture, so its course's current one.
+      await lecture(u.id, a.id, 2, "Alpha two");
+      await t.db.update(lectures).set(read(0)).where(and(eq(lectures.courseId, a.id), eq(lectures.n, 1)));
+      expect(await pickupFor(u.id, [], NOW, t.db)).toMatchObject({ courseId: a.id, n: 2, title: "Alpha two" });
+    },
+    DB_TIMEOUT,
+  );
+
+  it(
+    "is hidden when everything posted is read, and ignores hidden courses and other users",
+    async () => {
+      const u = await user();
+      signedIn.userId = u.id;
+      const a = await course(u.id, "Alpha Course");
+      const hidden = await course(u.id, "Hidden Course", { hidden: true });
+      await lecture(u.id, a.id, 1, "Alpha one", read(3));
+      await lecture(u.id, a.id, 2, "Alpha two", { opensAt: new Date(NOW.getTime() + 48 * HOUR) });
+      await lecture(u.id, hidden.id, 1, "Hidden one");
+      const other = await user();
+      const theirs = await course(other.id, "Their Course");
+      await lecture(other.id, theirs.id, 1, "Their one", { lastOpenedAt: NOW });
+      await exam(u.id, a.id, "Alpha exam", FRIDAY, { cards: false });
+
+      expect((await getHomeView(u.id, { now: NOW }, t.db)).pickup).toBeNull();
+      // No courses at all: no row either.
+      expect(await pickupFor((await user()).id, [], NOW, t.db)).toBeNull();
+    },
+    DB_TIMEOUT,
+  );
 });
