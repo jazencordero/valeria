@@ -560,6 +560,72 @@ describe("CLI", () => {
     expect(parseArgs(["a", "b", "--set-password", "--dry-run"])).toMatchObject({ ok: false });
   });
 
+  it("parses --upload (M3-58): an https address and the account to log in to, and nothing that belongs to a direct run", () => {
+    const up = (...more: string[]) => parseArgs(["a", "b", "--username", "Test.Student", ...more]);
+    expect(up("--upload", "https://ready.example.test/some/page?x=1")).toMatchObject({
+      ok: true,
+      args: { upload: "https://ready.example.test", username: "Test.Student", dryRun: false, linkOnly: false, setPassword: false },
+    });
+    expect(up("--upload", "https://ready.example.test", "--dry-run")).toMatchObject({ ok: true, args: { upload: "https://ready.example.test", dryRun: true } });
+    expect(parseArgs(["a", "b"])).toMatchObject({ ok: true, args: { dryRun: false } });
+    expect((parseArgs(["a", "b"]) as { args: { upload?: string } }).args.upload).toBeUndefined();
+
+    // Plain http: this machine only, by name or by address, on any port. Refused before anything is asked.
+    for (const local of ["http://localhost:4344", "http://127.0.0.1:3000", "http://[::1]:3000", "http://localhost"]) {
+      expect(up("--upload", local)).toMatchObject({ ok: true, args: { upload: new URL(local).origin } });
+    }
+    const httpOnly = "--upload must be an https:// address: the password is sent to it. Plain http is only taken for localhost, 127.0.0.1 or [::1].";
+    for (const far of ["http://ready.example.test", "http://localhost.example.test", "http://127.0.0.1.example.test", "http://192.168.1.20:3000", "http://0.0.0.0:3000", "ftp://localhost", "ws://localhost:3000"]) {
+      expect(up("--upload", far)).toEqual({ ok: false, help: false, error: httpOnly });
+    }
+    expect(up("--upload")).toMatchObject({ ok: false });
+    expect(up("--upload", "not an address")).toMatchObject({ ok: false });
+    // No name or password inside the address: they would sit in the shell's history.
+    expect(up("--upload", "https://test.student:correct-horse@ready.example.test")).toMatchObject({ ok: false, error: expect.stringContaining("give the address only") });
+
+    // It needs the account, both folders, and none of the direct run's options.
+    expect(parseArgs(["a", "b", "--upload", "https://ready.example.test"])).toMatchObject({ ok: false, error: "--upload needs --username <name>: the account to log in to." });
+    expect(parseArgs(["a", "--upload", "https://ready.example.test", "--username", "test.student"])).toMatchObject({ ok: false, error: "Give <bundles-dir> too." });
+    expect(up("--upload", "https://ready.example.test", "--set-password")).toMatchObject({ ok: false, error: expect.stringContaining("--upload and --set-password do not go together") });
+    expect(up("--upload", "https://ready.example.test", "--link")).toMatchObject({ ok: false, error: expect.stringContaining("--upload and --link do not go together") });
+    expect(up("--upload", "https://ready.example.test", "--origin", "https://ready.example.test")).toMatchObject({ ok: false, error: expect.stringContaining("--upload and --origin do not go together") });
+    expect(up("--upload", "https://ready.example.test", "--name", "Testi")).toMatchObject({ ok: false, error: expect.stringContaining("--upload and --name do not go together") });
+    expect(up("--upload", "https://ready.example.test", "--password", "correct horse")).toMatchObject({ ok: false, error: "Unknown option --password." });
+  });
+
+  it("an upload opens no database, and a refused address asks for no password and sends nothing", async () => {
+    const lines: string[] = [];
+    let asked = 0;
+    let sent = 0;
+    const io = {
+      out: (l: string) => void lines.push(l),
+      err: (l: string) => void lines.push(l),
+      askHidden: async () => {
+        asked += 1;
+        return "correct horse";
+      },
+      fetch: (async () => {
+        sent += 1;
+        return Response.json({});
+      }) as typeof fetch,
+    };
+    expect(await run([ACCOUNT, bundles, "--upload", "http://ready.example.test", "--username", "test.student"], null, io)).toBe(1);
+    expect(lines[0]).toContain("--upload must be an https:// address");
+    // A direct run with no database says so instead of throwing.
+    expect(await run([ACCOUNT, bundles], null, io)).toBe(1);
+    // Files that do not fit stop an upload before the password is asked.
+    const bad = path.join(tmp, "bad-upload-account");
+    await cp(ACCOUNT, bad, { recursive: true });
+    await writeFile(path.join(bad, "account.json"), "{ not json");
+    expect(await run([bad, bundles, "--upload", "https://ready.example.test", "--username", "test.student"], null, io)).toBe(1);
+    expect([asked, sent]).toEqual([0, 0]);
+    expect(lines.join("\n")).not.toContain("correct horse");
+    // The help says which of its two meanings --username has.
+    lines.length = 0;
+    expect(await run(["--help"], null, io)).toBe(0);
+    expect(lines.join("\n")).toContain("with --upload: the EXISTING account to log in to");
+  });
+
   it(
     "--username asks for the password at the prompt, stores only its hash, and --set-password changes it later (M5-14)",
     async () => {

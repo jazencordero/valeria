@@ -11,11 +11,15 @@
  *   -> 200 { part, counts, ... }                  the counts a direct run prints (`SeedAnswer`)
  *
  * Whose account: the signed-in caller's, from the session cookie, never from the body. A body
- * that names a user (or a seed key) is refused; the parts have no field for one.
+ * that names a user (or a seed key) is refused; the parts have no field for one. The caller must
+ * be logged in to a named account (a user with a username, M5-14; the tool logs in through
+ * POST /api/login): a device session with no account behind it is refused, and so is a demo.
  *
  * Refusals, all JSON `{ error, message }`, never cached:
  *   415 wrong_type      Content-Type is not application/json
- *   403 cross_site      the request came from another site (see below), or the account is a demo
+ *   403 cross_site      the request came from another site (see below)
+ *   403 demo            the account is a demo
+ *   403 no_account      the session is a device's, with no username: log in to an account first
  *   401 not_signed_in   no valid session
  *   413 too_large       over 4 MB, by Content-Length or by the bytes actually read
  *   429 too_many        over 30 requests in an hour for this user; Retry-After says how long
@@ -118,6 +122,7 @@ export async function POST(request: NextRequest) {
     throw err;
   }
   if (isDemo(user)) return refuse(403, "demo", "A demo account cannot be filled from files.");
+  if (!user.username) return refuse(403, "no_account", "Log in to an account with a username first: files only go into a named account.");
 
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > UPLOAD_MAX_BYTES) return refuse(413, "too_large", TOO_LARGE);
