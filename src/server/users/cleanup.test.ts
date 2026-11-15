@@ -124,6 +124,18 @@ describe("cleanup", () => {
     expect(await exists(anon8)).toBe(true);
   });
 
+  it("never removes an account with a username, even logged out for a year (M5-14)", { timeout: SLOW }, async () => {
+    const account = await makeUser({ lastSeen: null, created: ago(400 * DAY) });
+    await t.db.update(users).set({ username: "test.student" }).where(eq(users.id, account));
+    const demoAccount = await makeUser({ lastSeen: ago(30 * DAY), demo: true });
+    await t.db.update(users).set({ username: "test.demo" }).where(eq(users.id, demoAccount));
+    const anon = await makeUser({ lastSeen: null, created: ago(400 * DAY) });
+    expect(await cleanup(NOW, t.db)).toEqual({ anonymous: 1, demo: 0 });
+    expect(await exists(account)).toBe(true);
+    expect(await exists(demoAccount)).toBe(true);
+    expect(await exists(anon)).toBe(false);
+  });
+
   it("reads the newest session, and falls back to created_at with no session", { timeout: SLOW }, async () => {
     const twoDevices = await makeUser({ lastSeen: ago(60 * DAY) });
     await t.db.insert(sessions).values({ userId: twoDevices, tokenHash: "hash-second", lastSeenAt: ago(DAY) });

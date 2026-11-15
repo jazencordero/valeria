@@ -42,13 +42,24 @@ export function oneOf(name: string, column: AnyPgColumn, values: readonly string
   return check(name, sql`${column} in (${list})`);
 }
 
-export const users = pgTable("users", {
-  id: id(),
-  createdAt: createdAt(),
-  displayName: text("display_name"),
-  school: text("school"),
-  settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
-});
+/** 3 to 32 of a-z 0-9 . _ - (M5-14). Stored lower-case; `normalizeUsername` in src/server/auth/accounts.ts. */
+export const USERNAME_SQL_PATTERN = "^[a-z0-9._-]{3,32}$";
+
+export const users = pgTable(
+  "users",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    displayName: text("display_name"),
+    school: text("school"),
+    settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+    /** Null for a device-only visitor (no account). Unique, lower-case (M5-14). */
+    username: text("username").unique(),
+    /** `scrypt$N$r$p$salt$hash` from src/server/auth/password.ts. Never logged. */
+    passwordHash: text("password_hash"),
+  },
+  (t) => [check("users_username_check", sql`${t.username} ~ ${sql.raw(`'${USERNAME_SQL_PATTERN}'`)}`)],
+);
 
 export const sessions = pgTable(
   "sessions",

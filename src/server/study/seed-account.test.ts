@@ -14,6 +14,7 @@ import { confirmCodes, sessions, users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { parseArgs, run } from "../../../scripts/study/seed-account";
+import { logIn } from "@/server/auth/accounts";
 import { getAssignmentPage } from "@/server/data/assignment";
 import { syncNow } from "@/server/sync/run";
 import type { ImportResult } from "./import-bundle";
@@ -550,7 +551,63 @@ describe("CLI", () => {
     expect(parseArgs(["a"])).toMatchObject({ ok: false });
     expect(parseArgs(["a", "b", "--origin", "ftp://x"])).toMatchObject({ ok: false });
     expect(parseArgs(["a", "--link", "--dry-run"])).toMatchObject({ ok: false });
+    // M5-14: a username, and a password asked at a prompt: never taken as an argument.
+    expect(parseArgs(["a", "b", "--username", "Test.Student"])).toMatchObject({ ok: true, args: { username: "Test.Student", setPassword: false } });
+    expect(parseArgs(["a", "--link", "--set-password"])).toMatchObject({ ok: true, args: { setPassword: true } });
+    expect(parseArgs(["a", "b", "--username"])).toMatchObject({ ok: false });
+    expect(parseArgs(["a", "b", "--username", "no spaces allowed"])).toMatchObject({ ok: false });
+    expect(parseArgs(["a", "b", "--password", "correct horse"])).toMatchObject({ ok: false, error: "Unknown option --password." });
+    expect(parseArgs(["a", "b", "--set-password", "--dry-run"])).toMatchObject({ ok: false });
   });
+
+  it(
+    "--username asks for the password at the prompt, stores only its hash, and --set-password changes it later (M5-14)",
+    async () => {
+      // Invented name and passwords only.
+      const lines: string[] = [];
+      const answers: string[] = [];
+      const asked: string[] = [];
+      const io = {
+        out: (l: string) => lines.push(l),
+        err: (l: string) => lines.push(l),
+        askHidden: async (q: string) => {
+          asked.push(q);
+          return answers.shift() ?? "";
+        },
+      };
+
+      answers.push("correct horse", "correct horse");
+      expect(await run([ACCOUNT, bundles, "--name", "Testi", "--username", "Test.Student"], t.db, io)).toBe(0);
+      expect(asked).toHaveLength(2);
+      expect(lines.join("\n")).toContain("Log in: username test.student, password set.");
+      expect(lines.join("\n")).not.toContain("correct horse");
+      const [user] = await t.db.select().from(users).where(eq(users.username, "test.student"));
+      expect(user.passwordHash).toMatch(/^scrypt\$/);
+      expect(user.passwordHash).not.toContain("correct horse");
+      expect((await logIn("test.student", "correct horse", { db: t.db })).ok).toBe(true);
+
+      // A rerun with the same username keeps the password and asks nothing.
+      asked.length = 0;
+      expect(await run([ACCOUNT, "--link", "--username", "test.student"], t.db, io)).toBe(0);
+      expect(asked).toHaveLength(0);
+
+      // --set-password changes it; two different answers change nothing.
+      answers.push("a new password", "not the same");
+      expect(await run([ACCOUNT, "--link", "--set-password"], t.db, io)).toBe(1);
+      expect((await logIn("test.student", "correct horse", { db: t.db })).ok).toBe(true);
+      answers.push("a new password", "a new password");
+      expect(await run([ACCOUNT, "--link", "--set-password"], t.db, io)).toBe(0);
+      expect((await logIn("test.student", "correct horse", { db: t.db })).ok).toBe(false);
+      expect((await logIn("test.student", "a new password", { db: t.db })).ok).toBe(true);
+      expect(lines.join("\n")).not.toContain("a new password");
+
+      // Too short: refused at the first answer.
+      answers.push("four");
+      expect(await run([ACCOUNT, "--link", "--set-password"], t.db, io)).toBe(1);
+      expect(lines.join("\n")).toContain("Use at least 5 characters. Nothing was set.");
+    },
+    T,
+  );
 
   it(
     "seeds, prints a one-time link that works once, and --link prints a fresh one",

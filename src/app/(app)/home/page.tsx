@@ -112,7 +112,9 @@ import { ThemeButton } from "@/components/ui/theme-button";
 import { lmsNameOf, schoolOf } from "@/lib/schools";
 import { dateLine, earlyBy, listDate, sameDay } from "@/lib/dates";
 import { FAST_COOKIE, FAST_PARAM } from "@/lib/motion/fast";
+import { landingFor } from "@/server/auth/accounts";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
+import { db } from "@/server/db/client";
 import { readFlash } from "@/server/data/flash";
 import { getHomeView, type HomeBite, type HomeDone, type HomeExam, type HomeFirst } from "@/server/data/home";
 import { syncNow } from "@/server/sync/run";
@@ -289,8 +291,13 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
   const flash = await readFlash(now);
   const view = await getHomeView(user.id, { now, flash });
   // An account seeded from files (M3-57) has courses but no connection yet: it stays on Home.
+  // An account with a username (M5-14) is not sent to /connect for having no connection
+  // either: it follows the log in rule (`landingFor`), Home unless it never began the first run.
   const seeded = Boolean((user.settings as { seededFrom?: unknown } | null)?.seededFrom);
-  if (!view.connection && !seeded) redirect("/connect");
+  if (!view.connection && !seeded) {
+    if (!user.username) redirect("/connect");
+    if ((await landingFor(db, user.id)) === "/school") redirect("/school");
+  }
   // The hand-in she has just made, when Home should rearrange itself for it (M4-12).
   const handed = flash?.kind === "handedIn" && !fast && !arrive && view.lastDone?.dueAt ? view.lastDone : null;
   const handedDue = handed?.dueAt ?? null;

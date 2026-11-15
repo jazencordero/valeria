@@ -5,6 +5,7 @@
  *   const plan = planSeed(input);                           // pure
  *   const result = await applySeed(db, plan, { name, dryRun }); // one transaction
  *   const link = await mintOpenLink(db, result.userId);     // GET /open?code=...
+ *   await setSeededLogin(db, result.userId, { username, password }); // log in (M5-14)
  *
  * Inputs (both read at run time, never copied):
  * - `<account-dir>/account.json` (M0-16's pull): `{ pulledAt, source, courses: [{ code, name,
@@ -59,6 +60,7 @@ import { readFile, realpath, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { setLogin } from "@/server/auth/accounts";
 import { hashToken, newToken } from "@/server/auth/session";
 import type { Db } from "@/server/db/client";
 import { events } from "@/server/db/schema/calendar";
@@ -1505,4 +1507,31 @@ export function combineAnswers(plan: SeedPlan, answers: SeedAnswer[]): UploadSum
   }
   if (plan.bundles.some((b) => b.kind === "exam")) notes.push("Where a bundle's seed gives another exam date than account.json, account.json's date is kept.");
   return { dryRun: false, counts, imports, skipped, notStored: plan.notStored, notes };
+}
+
+// ---------------------------------------------------------------------------
+// The account's login (M5-14): `--username` and `--set-password`
+// ---------------------------------------------------------------------------
+
+/** The seeded user's username and whether it has a password yet. Never the hash itself. */
+export async function seededLoginOf(database: Db, userId: string): Promise<{ username: string | null; hasPassword: boolean } | null> {
+  const [row] = await database
+    .select({ username: users.username, hasPassword: sql<boolean>`${users.passwordHash} is not null` })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Gives the seeded user a username and/or a new password, so the account can be handed over as a
+ * name and a password (log in, M5-14) instead of only a one-time link. The password is hashed by
+ * `setLogin` (src/server/auth/accounts.ts) and is never stored, printed or returned in clear.
+ */
+export async function setSeededLogin(
+  database: Db,
+  userId: string,
+  login: { username?: string; password?: string },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return setLogin(database, userId, login);
 }

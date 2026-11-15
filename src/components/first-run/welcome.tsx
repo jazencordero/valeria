@@ -10,7 +10,8 @@
  * Top: the wordmark (tiny cap + "Ready") and the theme button. Middle: the
  * cap on a blush blob with a butter star and a squiggle, the three-line
  * headline (the last line rose italic with a hand-drawn underline) and the
- * sub line. Foot: Get started (to /school) and "Takes about 20 seconds."
+ * sub line. Foot: Sign up (to /signup, then the first run) and Log in (to
+ * /login, for an account she already has, M5-14), and "Takes about 20 seconds."
  *
  * The intro (full motion only), in ms from load: pencil outlines sketch where
  * the parts go (`Guides`), the blob springs in (250), the cap drops (450) and
@@ -361,9 +362,12 @@ export function Welcome() {
         </div>
 
         <div className="grid gap-3 pt-4 text-center">
-          <div data-guide data-part="button" style={from("button")}>
-            <Button href="/school" size="lg" block>
-              Get started
+          <div data-guide data-part="button" style={from("button")} className="grid gap-3">
+            <Button href="/signup" size="lg" block>
+              Sign up
+            </Button>
+            <Button href="/login" variant="secondary" size="lg" block>
+              Log in
             </Button>
           </div>
           <p data-part="fine" style={from("fine")} className="fine">

@@ -2,7 +2,8 @@
  * Whole-flow check (M5-12): first run.
  *
  * A brand-new visitor (fresh browser context, so no session cookie and no
- * user row): `/` sends her to Welcome; Get started; pick Aalto; Continue;
+ * user row): `/` sends her to Welcome; Sign up (M5-14: an invented name, unique per run,
+ * and an invented password, the box ticked); pick Aalto; Continue;
  * "Continue with Aalto"; tick the box and upload the sample QR
  * (tests/fixtures/files/sample-qr.png, which the fake Moodle swaps for the
  * demo key, src/server/moodle/fake-inline.ts); the sorting screen with at
@@ -23,6 +24,7 @@
  * Cut (ticket): no camera test. Runs on the phone and laptop projects; see
  * handin.spec.ts for the setup.
  */
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
@@ -40,9 +42,19 @@ async function fastOn(context: BrowserContext, baseURL: string) {
 async function walkToQr(page: Page) {
   await page.goto("/");
   await expect(page).toHaveURL(/\/welcome$/);
-  await page.getByRole("link", { name: "Get started" }).click();
+  await page.getByRole("link", { name: "Sign up" }).click();
 
-  await expect(page).toHaveURL(/\/school$/);
+  // Sign up (M5-14). Invented only. The page is prerendered: retry until the tap holds.
+  await expect(page).toHaveURL(/\/signup$/);
+  const username = `test.first.${randomBytes(5).toString("hex")}`;
+  await expect(async () => {
+    await page.getByLabel("Username").fill(username);
+    await page.getByLabel("Password", { exact: true }).fill("correct horse");
+    await page.getByRole("checkbox").setChecked(false);
+    await page.getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Sign up", exact: true }).click({ timeout: 2_000 });
+    await expect(page).toHaveURL(/\/school$/, { timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
   // The page is prerendered: a tap before it hydrates does nothing, so tap until it holds.
   const aalto = page.getByRole("radio", { name: /Aalto/ });
   await expect(async () => {

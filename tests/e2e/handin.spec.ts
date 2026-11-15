@@ -7,6 +7,7 @@
  * still opens /demo?reset=1 so a reused session starts from the seed too.
  * The READY_FAST cookie makes every animation instant (src/lib/motion/fast.ts).
  */
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -61,6 +62,16 @@ test("hand in Assignment 3 from the demo and see it done", async ({ page }) => {
 });
 
 test("a bad key on /connect shows the error sentence", async ({ page }) => {
+  // Signed out, /connect is out of reach (M5-14): sign up first (invented name and password).
+  await page.goto("/signup");
+  await expect(async () => {
+    await page.getByLabel("Username").fill(`test.key.${randomBytes(5).toString("hex")}`);
+    await page.getByLabel("Password", { exact: true }).fill("correct horse");
+    await page.getByRole("checkbox").setChecked(false);
+    await page.getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Sign up", exact: true }).click({ timeout: 2_000 });
+    await expect(page).toHaveURL(/\/school$/, { timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
   await page.goto("/connect");
   // M5-08: the key field is one step in, under "Paste a key instead".
   await page.getByRole("button", { name: "Paste a key instead" }).click();

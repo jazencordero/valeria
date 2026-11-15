@@ -1,5 +1,9 @@
 /*
  * Settings, plain (M1-38): MyCourses, your data, what Ready keeps.
+ * M5-14 adds "Account": the username she is logged in as and "Log out" (a form
+ * posting to POST /logout, which ends this device's session only). A device-only
+ * visitor (no username: from before accounts, or the demo) gets no Log out, as
+ * she could never get back in.
  * M2-26 adds a plain checkbox under "What Ready keeps": "Use my course files with AI"
  * (M8-03 turns it into the designed switch).
  *
@@ -31,6 +35,8 @@ type Connection = {
 };
 
 type AccountProps = {
+  /** The account's username; null for a device-only visitor. */
+  username: string | null;
   connection: Connection | null;
   /** True after a delete attempt whose typed text did not match. */
   confirmWrong: boolean;
@@ -77,13 +83,14 @@ async function AccountSections({ searchParams }: { searchParams: SearchParams })
 
   return (
     <Account
+      username={user.username}
       connection={row ? { name: user.displayName, ...row } : null}
       confirmWrong={confirm === "wrong"}
     />
   );
 }
 
-function Account({ connection, confirmWrong }: AccountProps) {
+function Account({ username, connection, confirmWrong }: AccountProps) {
   return (
     <>
       <section aria-labelledby="lms-title" className="space-y-3">
@@ -121,6 +128,27 @@ function Account({ connection, confirmWrong }: AccountProps) {
           </>
         ) : (
           <p className="ink-2">{LMS_NAME} is not connected.</p>
+        )}
+      </section>
+
+      <section aria-labelledby="account-title" className="space-y-3">
+        <h2 id="account-title" className="type-h22">
+          Account
+        </h2>
+        {username ? (
+          <>
+            <p>Logged in as {username}</p>
+            {/* A route handler that takes POST only, so no link or prefetch can log her out. */}
+            <form action="/logout" method="post">
+              <Button type="submit" variant="secondary">
+                Log out
+              </Button>
+            </form>
+            <p className="fine">Logs out on this device only. Your account and everything in it stay.</p>
+          </>
+        ) : (
+          // A device-only visitor (from before accounts, or the demo) could never get back in.
+          <p className="ink-2">Ready knows you by this device only, so there is no account to log out of.</p>
         )}
       </section>
 

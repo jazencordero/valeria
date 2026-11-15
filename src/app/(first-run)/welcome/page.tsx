@@ -1,6 +1,7 @@
 /**
- * Welcome (M5-02): the first screen a new student sees. Get started goes to
- * /school (M5-04).
+ * Welcome (M5-02): the first screen a new student sees, and where a signed-out
+ * visitor lands (M5-14). Sign up goes to /signup and then the first run
+ * (/school, M5-04); Log in goes to /login.
  *
  * Fully static: no cookie, no data, so it prerenders under cacheComponents.
  * The theme comes from the root layout's boot script, not from the server.

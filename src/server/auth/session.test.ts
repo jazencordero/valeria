@@ -192,6 +192,28 @@ describe("mergeUsers", () => {
     expect(conns[0]).toMatchObject({ userId: into.user.id, tokenSealed: "into" });
   });
 
+  it("hands the source's username and password to a target that has none (M5-14)", async () => {
+    // Invented names and hash strings only.
+    const from = await newUser();
+    const into = await newUser();
+    await t.db.update(users).set({ username: "test.student", passwordHash: "scrypt$invented" }).where(eq(users.id, from.user.id));
+    await mergeUsers(from.user.id, into.user.id, t.db);
+    const [kept] = await t.db.select().from(users).where(eq(users.id, into.user.id));
+    expect(kept).toMatchObject({ username: "test.student", passwordHash: "scrypt$invented" });
+    expect(await t.db.select().from(users)).toHaveLength(1);
+  });
+
+  it("keeps the target's own username and password when both have one (M5-14)", async () => {
+    const from = await newUser();
+    const into = await newUser();
+    await t.db.update(users).set({ username: "test.source", passwordHash: "scrypt$source" }).where(eq(users.id, from.user.id));
+    await t.db.update(users).set({ username: "test.target", passwordHash: "scrypt$target" }).where(eq(users.id, into.user.id));
+    await mergeUsers(from.user.id, into.user.id, t.db);
+    const rows = await t.db.select().from(users);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: into.user.id, username: "test.target", passwordHash: "scrypt$target" });
+  });
+
   it("refuses to merge a user into itself", async () => {
     const { user } = await newUser();
     await expect(mergeUsers(user.id, user.id, t.db)).rejects.toThrow();
@@ -199,18 +221,40 @@ describe("mergeUsers", () => {
 });
 
 describe("proxy", () => {
-  it("sets an httpOnly, lax, one-year ready_session cookie when there is none", () => {
-    const res = proxy(new NextRequest("https://ready.example/"));
-    const cookie = res.cookies.get(SESSION_COOKIE);
-    expect(cookie?.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(cookie).toMatchObject({ httpOnly: true, sameSite: "lax", path: "/", maxAge: SESSION_MAX_AGE_SECONDS });
-    // Same options session.ts uses when it has to set the cookie itself.
-    expect(cookie).toMatchObject(sessionCookieOptions());
+  // M5-14: the proxy no longer mints a cookie; a visitor without one is signed out.
+  it("sends a signed-out visitor from an app page to the welcome screen, and mints no cookie", () => {
+    for (const path of ["/home", "/settings", "/courses/x", "/connect", "/sorting"]) {
+      const res = proxy(new NextRequest(`https://ready.example${path}`));
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe("https://ready.example/welcome");
+      expect(res.cookies.get(SESSION_COOKIE)).toBeUndefined();
+    }
+    // A malformed cookie counts as none.
+    const bad = proxy(new NextRequest("https://ready.example/home", { headers: { cookie: `${SESSION_COOKIE}=nope` } }));
+    expect(bad.headers.get("location")).toBe("https://ready.example/welcome");
   });
 
-  it("leaves a well-formed cookie alone", () => {
+  it("sends a signed-out visitor starting the first run to sign up", () => {
+    const res = proxy(new NextRequest("https://ready.example/school"));
+    expect(res.headers.get("location")).toBe("https://ready.example/signup");
+  });
+
+  it("lets the public pages through without a cookie", () => {
+    for (const path of ["/", "/welcome", "/login", "/signup", "/privacy", "/demo", "/open", "/logout", "/api/sync", "/dev/welcome"]) {
+      const res = proxy(new NextRequest(`https://ready.example${path}`));
+      expect(res.headers.get("location"), path).toBeNull();
+      expect(res.cookies.get(SESSION_COOKIE)).toBeUndefined();
+    }
+  });
+
+  it("leaves a well-formed cookie alone and lets it through", () => {
     const token = newToken();
-    const res = proxy(new NextRequest("https://ready.example/", { headers: { cookie: `${SESSION_COOKIE}=${token}` } }));
+    const res = proxy(new NextRequest("https://ready.example/home", { headers: { cookie: `${SESSION_COOKIE}=${token}` } }));
+    expect(res.headers.get("location")).toBeNull();
     expect(res.cookies.get(SESSION_COOKIE)).toBeUndefined();
+  });
+
+  it("uses one-year httpOnly lax cookie options for the session", () => {
+    expect(sessionCookieOptions()).toMatchObject({ httpOnly: true, sameSite: "lax", path: "/", maxAge: SESSION_MAX_AGE_SECONDS });
   });
 });

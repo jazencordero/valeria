@@ -39,7 +39,8 @@ const HEADLINE = "Get a 5.Worry less.Party more.";
 function finishedHtml(container: HTMLElement) {
   return container.innerHTML
     .replace(/class="cap( tiny)? (idle|calm)[^"]*"/g, 'class="cap$1"')
-    .replace(/<a [^>]*href="\/school"[\s\S]*?<\/a>/, "<a>Get started</a>");
+    .replace(/<a [^>]*href="\/signup"[\s\S]*?<\/a>/, "<a>Sign up</a>")
+    .replace(/<a [^>]*href="\/login"[\s\S]*?<\/a>/, "<a>Log in</a>");
 }
 
 const styled = (c: HTMLElement) => c.querySelectorAll("[data-part][style]");
@@ -108,7 +109,8 @@ describe("Welcome", () => {
     expect(container.querySelector("h1")?.hasAttribute("aria-label")).toBe(false);
     // Every part's animation was cancelled, so none leaves a style behind.
     expect(cancelled.length).toBe(container.querySelectorAll("[data-part]").length);
-    expect(container.querySelector("a[href='/school']")?.textContent).toContain("Get started");
+    expect(container.querySelector("a[href='/signup']")?.textContent).toContain("Sign up");
+    expect(container.querySelector("a[href='/login']")?.textContent).toContain("Log in");
   });
 
   it("under the test switch draws no outlines and hides nothing", () => {

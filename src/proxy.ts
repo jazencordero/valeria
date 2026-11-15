@@ -1,34 +1,42 @@
 /*
- * Gives every visitor a `ready_session` cookie before anything renders.
+ * Runs before anything renders: decides who may see an app page, and drops
+ * the one-time Home greeting cookie on a full load of Home.
  *
- * This file only mints the random token; it never touches the database.
- * Proxy runs in the Node.js runtime, but it is bundled and invoked apart from
- * the render code (the docs say not to rely on shared modules or globals, and
- * not to use Proxy for session management). Opening the DB here would mean a
- * second PGlite on the same data folder in dev. So the user and session rows
- * are created lazily by `ensureSession()` in `src/server/auth/session.ts`,
- * the first time server code asks for them.
+ * Signed in or not (M5-14). This file never touches the database (Proxy is
+ * bundled and invoked apart from the render code, and opening the DB here
+ * would mean a second PGlite on the same data folder in dev), so it decides
+ * by the `ready_session` cookie alone: a well-formed one goes on; none (or a
+ * malformed one) on any page that is not public goes to the welcome screen,
+ * and the first-run start (/school) to sign up. The pages and the server
+ * code still check the session row themselves.
  *
- * Server Components cannot set cookies, which is why the cookie is set here:
- * by the time a page calls `ensureSession()`, the browser already holds the
- * token, and this same request carries it too (it is copied onto the request).
+ * It no longer mints a cookie for every visitor. A device session is made by
+ * sign up and log in (their Server Actions), by /demo and by an /open link
+ * (route handlers), each of which sets the cookie itself, as `session.ts`
+ * does. A browser that already holds a cookie from before keeps its device
+ * user, so nobody who used Ready before accounts loses their data.
  *
- * Keep the name and options in step with `session.ts` (a test checks).
+ * Public, with or without a cookie: the front door (/, which sends a
+ * cookie-less visitor to Welcome itself), /welcome, /login, /signup,
+ * /privacy, /demo, /open, /logout, /api/... (each route checks on its own)
+ * and /dev/... (preview pages).
  */
 import { NextResponse, type NextRequest } from "next/server";
 
 const SESSION_COOKIE = "ready_session";
 /** Keep in step with `FLASH_COOKIE` in `src/server/data/flash.ts`. */
 const FLASH_COOKIE = "ready_flash";
-const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
-/** 32 random bytes as base64url, no padding. */
+/** 32 random bytes as base64url, no padding. Same shape `session.ts` checks. */
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
-function mintToken(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const PUBLIC_PAGES = new Set(["/", "/welcome", "/login", "/signup", "/privacy", "/demo", "/open", "/logout"]);
+const PUBLIC_PREFIXES = ["/api/", "/dev/"];
+
+/** Whether `pathname` may be seen without a session cookie. */
+function isPublicPath(pathname: string): boolean {
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  if (PUBLIC_PAGES.has(path) || path === "/api" || path === "/dev") return true;
+  return PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
 /**
@@ -54,33 +62,21 @@ function isHomeDocument(request: NextRequest): boolean {
 }
 
 export function proxy(request: NextRequest) {
-  const dropFlash = request.cookies.has(FLASH_COOKIE) && isHomeDocument(request);
-  if (dropFlash) request.cookies.delete(FLASH_COOKIE);
-  const response = withSession(request, dropFlash);
-  if (dropFlash) response.cookies.delete(FLASH_COOKIE);
-  return response;
-}
-
-function withSession(request: NextRequest, requestChanged: boolean): NextResponse {
-  const existing = request.cookies.get(SESSION_COOKIE)?.value;
-  if (existing && TOKEN_PATTERN.test(existing)) {
-    // Pass an edited cookie header on to the render when the flash was dropped.
-    return requestChanged ? NextResponse.next({ request: { headers: request.headers } }) : NextResponse.next();
+  const session = request.cookies.get(SESSION_COOKIE)?.value;
+  const signedIn = session !== undefined && TOKEN_PATTERN.test(session);
+  const { pathname } = request.nextUrl;
+  if (!signedIn && !isPublicPath(pathname)) {
+    // Starting the first run without an account means making one first.
+    const to = pathname === "/school" ? "/signup" : "/welcome";
+    return NextResponse.redirect(new URL(to, request.url), 303);
   }
 
-  const token = mintToken();
-  // Let this request's render see the token as if the browser had sent it.
-  request.cookies.set(SESSION_COOKIE, token);
+  const dropFlash = request.cookies.has(FLASH_COOKIE) && isHomeDocument(request);
+  if (!dropFlash) return NextResponse.next();
+  request.cookies.delete(FLASH_COOKIE);
+  // Pass the edited cookie header on to the render.
   const response = NextResponse.next({ request: { headers: request.headers } });
-  response.cookies.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    // Secure everywhere except `next dev` on plain http (Safari drops Secure
-    // cookies on http://localhost). Vercel previews and production are https.
-    secure: process.env.NODE_ENV !== "development",
-    sameSite: "lax",
-    path: "/",
-    maxAge: ONE_YEAR_SECONDS,
-  });
+  response.cookies.delete(FLASH_COOKIE);
   return response;
 }
 

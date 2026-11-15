@@ -13,6 +13,10 @@
  *   (7) days ago. A demo user always holds the fake Moodle's connection
  *   (see `@/server/demo/seed`), so for demo users the connection does not count.
  *
+ * A user with a username (an account, M5-14) is never deleted, demo flag or not:
+ * logging out leaves her with no session, and she must find her account there
+ * when she logs in again, however long after.
+ *
  * A user who is not a demo user is never deleted, however long she has been
  * away, if she has a Moodle connection (the ticket's cut) or owns any study
  * data: a course, an exam or a card. The real student's account can be filled
@@ -74,7 +78,7 @@ export async function cleanup(now: Date = new Date(), database: Db = defaultDb):
   const rows = await database
     .delete(users)
     .where(
-      sql`(
+      sql`${users.username} is null and (
         (${isDemoSql} and ${lastActive} < ${demoBefore.toISOString()}::timestamptz)
         or (not ${isDemoSql} and not ${connected} and not ${ownsStudyData} and ${lastActive} < ${anonymousBefore.toISOString()}::timestamptz)
       )`,

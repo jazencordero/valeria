@@ -237,6 +237,13 @@ async function rows<T>(database: Db, query: SQL): Promise<T[]> {
  *
  * The target's profile wins too; empty fields are filled from the source and
  * settings are merged with the target's values on top.
+ *
+ * The login (M5-14): when the target has no username, it takes the source's
+ * username and password hash, as a pair (a name without its password, or the
+ * other way round, opens nothing). When both have a username, the target keeps
+ * its own and the source's username and password go with the source: that
+ * login stops working. Usernames are unique, so the source's are cleared
+ * before the target takes them.
  */
 export async function mergeUsers(fromId: string, intoId: string, database: Db = defaultDb) {
   if (fromId === intoId) throw new Error("mergeUsers: fromId and intoId are the same user.");
@@ -335,7 +342,21 @@ export async function mergeUsers(fromId: string, intoId: string, database: Db = 
       );
     }
 
-    // 3. Keep the target's profile, fill its gaps from the source, drop the source.
+    // 3. The login: the target takes the source's username and password when it has none.
+    const [from] = await tx
+      .select({ username: users.username, passwordHash: users.passwordHash })
+      .from(users)
+      .where(eq(users.id, fromId));
+    const [into] = await tx.select({ username: users.username }).from(users).where(eq(users.id, intoId));
+    if (from?.username && !into?.username) {
+      await tx.update(users).set({ username: null, passwordHash: null }).where(eq(users.id, fromId));
+      await tx
+        .update(users)
+        .set({ username: from.username, passwordHash: from.passwordHash })
+        .where(eq(users.id, intoId));
+    }
+
+    // 4. Keep the target's profile, fill its gaps from the source, drop the source.
     await tx.execute(
       sql`update users t set
             display_name = coalesce(t.display_name, f.display_name),
