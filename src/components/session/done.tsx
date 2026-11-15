@@ -420,8 +420,11 @@ export function SessionDone({
           />
         </div>
 
+        {/* The way out stays on screen on a phone: pinned to the bottom of the
+            scrolling done screen, the content scrolls above it. */}
         <motion.div
-          className="mt-5 grid gap-2 min-[700px]:grid-cols-2"
+          data-testid="session-done-actions"
+          className="sticky bottom-0 z-[1] -mx-[var(--pad)] mt-5 grid gap-2 bg-paper px-[var(--pad)] pt-3 pb-[max(12px,env(safe-area-inset-bottom,0px))] shadow-[0_-12px_12px_-8px_var(--paper)] min-[700px]:grid-cols-2"
           {...enter(motionMode, { opacity: 0, y: 10 }, { opacity: 1, y: 0 }, out(0.26, 1.1))}
         >
           {more ? (

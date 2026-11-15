@@ -469,6 +469,16 @@ describe("SessionPlayer: the end", () => {
     expect(push).toHaveBeenLastCalledWith("/exams/exam-1?from=58");
   });
 
+  it("keeps the way out pinned to the bottom of the done screen, so a phone never has to scroll to it", async () => {
+    const { user } = setup({ cards: [A] });
+    await answer(user, "2");
+    await screen.findByTestId("session-done");
+    const actions = screen.getByTestId("session-done-actions");
+    expect(actions.className).toMatch(/\bsticky\b/);
+    expect(actions.className).toMatch(/\bbottom-0\b/);
+    expect(actions.contains(screen.getByRole("button", { name: "Done for now" }))).toBe(true);
+  });
+
   it("Stop saves and goes back to the exam without ending the session", async () => {
     const { user, endSession, saveProgress } = setup();
     await answer(user, "2");
