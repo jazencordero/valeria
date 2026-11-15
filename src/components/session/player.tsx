@@ -170,8 +170,11 @@ export type SessionPlayerProps = {
   examShort: string;
   /** Exam time, epoch ms. */
   examAt: number;
+  /** The exam's day as a sentence says it: "Friday" within six days, else "Mon 23 Nov". */
   examDay: string;
   targetPct: number;
+  /** The grade she aims for, from her bundle (`exams.grade_target`); null when none is known. */
+  targetGrade?: number | null;
   /** Session start, epoch ms. */
   startedAt: number;
   /** The session has ended already: go straight to the done screen. */
@@ -886,6 +889,7 @@ function DoneLayer({
           forecastBefore={data.forecastBeforeShown}
           forecastAfter={data.forecastAfterShown}
           target={props.targetPct}
+          targetGrade={props.targetGrade ?? null}
           planEnd={planEnd(data.forecastAfterShown, daysLeft)}
           examDay={props.examDay}
           concepts={names}

@@ -69,6 +69,7 @@ const BASE = {
   forecastBefore: 58,
   forecastAfter: 62,
   target: 80,
+  targetGrade: 4,
   planEnd: 88,
   examDay: "Friday",
   concepts: CONCEPTS,

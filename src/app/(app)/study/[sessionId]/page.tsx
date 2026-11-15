@@ -35,11 +35,12 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { SessionPlayer, type PlayerCard, type StoredReview } from "@/components/session/player";
-import { TIME_ZONE } from "@/lib/dates";
+import { byDay } from "@/lib/dates";
 import type { SectionKind } from "@/lib/study/bite";
 import type { Grade } from "@/lib/study/memory";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { shortNameOf } from "@/server/data/courses";
+import { targetGradeOf } from "@/server/data/exams";
 import { db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { exams, reviews, studySessions } from "@/server/db/schema/study";
@@ -53,7 +54,6 @@ type Params = Promise<{ sessionId: string }>;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const WARM_MAX = 4;
 
-const weekdayOf = new Intl.DateTimeFormat("en-GB", { timeZone: TIME_ZONE, weekday: "long" });
 
 async function signedInUser(): Promise<User> {
   try {
@@ -99,7 +99,7 @@ async function Session({ params }: { params: Params }) {
     .where(and(eq(studySessions.id, sessionId), eq(studySessions.userId, user.id)));
   if (!session) notFound();
   const [exam] = await db
-    .select({ id: exams.id, title: exams.title, at: exams.at, targetPct: exams.targetPct, courseId: exams.courseId })
+    .select({ id: exams.id, title: exams.title, at: exams.at, targetPct: exams.targetPct, gradeTarget: exams.gradeTarget, courseId: exams.courseId })
     .from(exams)
     .where(and(eq(exams.id, session.examId), eq(exams.userId, user.id)));
   if (!exam) notFound();
@@ -182,8 +182,9 @@ async function Session({ params }: { params: Params }) {
       mode={session.mode}
       examShort={course ? shortNameOf(course.name) : exam.title}
       examAt={exam.at.getTime()}
-      examDay={weekdayOf.format(exam.at)}
+      examDay={byDay(exam.at, new Date())}
       targetPct={exam.targetPct}
+      targetGrade={targetGradeOf(exam.gradeTarget)}
       startedAt={session.startedAt.getTime()}
       ended={session.endedAt !== null}
       cards={cards}

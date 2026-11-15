@@ -28,7 +28,6 @@ import { RollingNumber } from "@/components/ui/rolling-number";
 import { Vitonen } from "@/components/vitonen";
 import { calmDuration, ease } from "@/lib/motion/tokens";
 import { useMotionMode, type MotionMode } from "@/lib/motion/use-calm";
-import { gradeFor } from "@/lib/study/forecast";
 import { rungOf } from "@/lib/study/ladder";
 import type { SessionMode, SessionResult } from "@/lib/study/session";
 import type { Week } from "@/lib/study/week";
@@ -44,11 +43,13 @@ export type SessionDoneProps = {
   /** Forecast percent before and after the session. */
   forecastBefore: number;
   forecastAfter: number;
-  /** Target percent; the tick reads "A <grade>". */
+  /** Target percent; the tick reads "A <targetGrade>", or "Target" when no grade is known. */
   target: number;
+  /** The grade she aims for (the exam's own grade target, never the generic scale); null: unknown. */
+  targetGrade?: number | null;
   /** Where a bite a day lands on exam day, percent. */
   planEnd: number;
-  /** Exam weekday, for example "Friday". */
+  /** Exam day as a sentence says it: "Friday" within six days, else "Mon 23 Nov". */
   examDay: string;
   /** Names (and optional icons) for the concept ids in `result.climbs`. */
   concepts: Readonly<Record<string, DoneConcept>>;
@@ -127,6 +128,7 @@ export function SessionDone({
   forecastBefore,
   forecastAfter,
   target,
+  targetGrade = null,
   planEnd,
   examDay,
   concepts,
@@ -357,12 +359,12 @@ export function SessionDone({
               style={{ left: `${clampPct(target)}%` }}
             >
               <span className="mono absolute top-[22px] left-1/2 -translate-x-1/2 whitespace-nowrap !text-[10px] text-ink-2">
-                A {gradeFor(target)}
+                {targetGrade == null ? "Target" : `A ${targetGrade}`}
               </span>
             </i>
           </div>
           <p className="text-[13px] text-ink-2">
-            Keep a bite a day and you land around <b className="text-ink">{planEnd}%</b> on{" "}
+            Keep a bite a day and you land around <b className="text-ink">{Math.round(planEnd)}%</b> on{" "}
             {examDay}.
           </p>
         </section>
