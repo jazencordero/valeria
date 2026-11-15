@@ -44,6 +44,13 @@
  * reads no request data, so it needs no Suspense) is mounted here, outside
  * the grid, so `showToast` from any signed-in page shows its pill.
  *
+ * Tutor (M2-28): mounted once here, like the notepad, and only for a user whose
+ * account has it switched on (`tutorEnabled(users.settings)`, decided here on
+ * the server): everyone else gets no button and the tutor never mounts. It runs on the free AI providers, so it does not depend on an
+ * Anthropic key. From 1100 px its drawer is a side panel; while it is open the
+ * page area gets room for it through `data-tutor` on <html> (`TUTOR_ROOM`):
+ * 380 px, or 760 px when the notepad's panel is open beside it.
+ *
  * A demo user (M1-37, `users.settings.demo`) gets a thin "Demo data" line at
  * the top of the page area, with "Restart demo" (GET /demo?reset=1).
  */
@@ -51,6 +58,7 @@ import { asc, and, count, eq, gte, inArray, isNull, not } from "drizzle-orm";
 import { connection } from "next/server";
 import { cache, Suspense, type ReactNode } from "react";
 import { Notepad } from "@/components/notes/notepad";
+import { Tutor } from "@/components/tutor/tutor";
 import { PageTransition } from "@/components/shell/page-transition";
 import {
   SideNav,
@@ -69,6 +77,7 @@ import { courses } from "@/server/db/schema/courses";
 import { exams } from "@/server/db/schema/study";
 import { assignments } from "@/server/db/schema/work";
 import { countNotes } from "@/server/notes/store";
+import { tutorEnabled } from "@/server/tutor/context";
 
 async function signedInUser(): Promise<User> {
   try {
@@ -169,6 +178,17 @@ async function DemoBanner() {
   );
 }
 
+async function TutorForUser() {
+  await connection();
+  const user = await signedInUser();
+  if (!tutorEnabled(user.settings)) return null;
+  return <Tutor enabled />;
+}
+
+/** Room for the tutor's side panel (src/components/tutor/tutor.tsx sets `data-tutor`). */
+const TUTOR_ROOM =
+  "min-[1100px]:[html[data-tutor=open]_&]:pr-[380px] min-[1100px]:[html[data-tutor=beside-notes]_&]:pr-[760px]";
+
 // Same key as SIDE_KEY in @/components/shell/use-side (a client module, so
 // its exports cannot be read here).
 const SIDE_BOOT = `try{var s=localStorage.getItem('ready-side');if(s==='collapsed'||s==='expanded')document.documentElement.setAttribute('data-side',s)}catch(e){}`;
@@ -190,7 +210,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </Suspense>
         <main
           id="main"
-          className="relative min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain bg-surface [container-type:inline-size]"
+          className={`relative min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain bg-surface [container-type:inline-size] ${TUTOR_ROOM}`}
         >
           <Suspense fallback={null}>
             <DemoBanner />
@@ -203,6 +223,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       </div>
       <Suspense fallback={null}>
         <Notepad />
+      </Suspense>
+      <Suspense fallback={null}>
+        <TutorForUser />
       </Suspense>
       <Toaster />
     </>

@@ -5,7 +5,18 @@ import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { aiCalls, providerCooldowns } from "@/server/db/schema/system";
 import { BROKEN_JSON, startFakeAi, type FakeAi } from "../../../tests/fake-ai/server";
 import { PROVIDERS, type ProviderEntry, type SizeClass } from "./providers.config";
-import { AiBadOutput, AiBusy, createRouter, fakeAiUrl, NotFree, retryAfterMs, type RouterDeps } from "./router";
+import {
+  AiBadOutput,
+  AiBusy,
+  ANTHROPIC_MODEL,
+  createRouter,
+  fakeAiUrl,
+  NotFree,
+  PaidNotAllowed,
+  retryAfterMs,
+  TUTOR_JOB,
+  type RouterDeps,
+} from "./router";
 
 // Real free entries from the config, so the allow-list check passes; their URLs point at the fake.
 const GROQ = PROVIDERS.small.find((e) => e.provider === "groq")!;
@@ -480,5 +491,246 @@ describe("retryAfterMs", () => {
     expect(retryAfterMs({ "retry-after": "soon" }, NOW)).toBeNull();
     expect(retryAfterMs({}, NOW)).toBeNull();
     expect(retryAfterMs(undefined, NOW)).toBeNull();
+  });
+});
+
+// M2-28: the tutor's paid path. Anthropic is never called for real: its address is a made-up
+// host answered by `anthropicFetch` below; everything else goes to the fake AI as before.
+describe("the tutor's paid path (anthropic)", () => {
+  const ANTH = "https://anthropic.invalid";
+  const KEY = "fake-anthropic-key-not-real";
+  const tutorInput = {
+    size: "small" as const,
+    systemParts: [
+      { text: "RULES-1a2b explain from zero" },
+      { text: "LECTURE-TEXT-3c4d the section", cache: true },
+      { text: "WHERE-5e6f lecture 3" },
+    ],
+    messages: [{ role: "user" as const, content: PROMPT }],
+    job: TUTOR_JOB,
+    paid: "tutor" as const,
+    maxOutputTokens: 1500,
+  };
+
+  /** Anthropic's SSE for `text`, one delta per word, as the claude-api skill's curl example shows. */
+  function sse(text: string, extra: string[] = []): string {
+    const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+    const words = text.split(/(?<= )/);
+    return [
+      ev("message_start", { type: "message_start", message: { id: "msg_1", type: "message", model: ANTHROPIC_MODEL, usage: { input_tokens: 10, output_tokens: 1 } } }),
+      ev("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }),
+      ev("content_block_stop", { type: "content_block_stop", index: 0 }),
+      ev("content_block_start", { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } }),
+      ...words.map((w) => ev("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: w } })),
+      ...extra,
+      ev("content_block_stop", { type: "content_block_stop", index: 1 }),
+      ev("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 12 } }),
+      ev("message_stop", { type: "message_stop" }),
+    ].join("");
+  }
+
+  type Sent = { url: string; headers: Record<string, string>; body: Record<string, unknown> };
+
+  /** A fetch that answers Anthropic's address with `reply` and sends the rest to the fake. */
+  function anthropicFetch(reply: () => Response | Promise<Response>) {
+    const sent: Sent[] = [];
+    const fetch: typeof globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(ANTH) || u.includes("/anthropic/")) {
+        sent.push({
+          url: u,
+          headers: Object.fromEntries(new Headers(init?.headers).entries()),
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return reply();
+      }
+      return globalThis.fetch(url, init);
+    };
+    return { fetch, sent };
+  }
+
+  const ok = (text: string) => () => new Response(sse(text), { status: 200, headers: { "content-type": "text/event-stream" } });
+  const status = (code: number) => () => Response.json({ type: "error", error: { type: "x", message: "PRIVATE" } }, { status: code });
+
+  function paidRouter(reply: () => Response | Promise<Response>, env: Record<string, string | undefined> = { ANTHROPIC_API_KEY: KEY }) {
+    const f = anthropicFetch(reply);
+    const r = router([GROQ, OPENROUTER], { env: { ...ENV, ...env }, fetch: f.fetch, anthropicBaseUrl: ANTH });
+    return { r, sent: f.sent };
+  }
+
+  it("with the key, the tutor streams from Anthropic and logs one anthropic row", async () => {
+    const { r, sent } = paidRouter(ok("A cell is a small room."));
+    const { provider, model, result } = await r.streamChat(tutorInput);
+    expect(provider).toBe("anthropic");
+    expect(model).toBe("claude-fable-5-2");
+    expect(await result.text).toBe("A cell is a small room.");
+    expect(ai.calls).toHaveLength(0);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe(`${ANTH}/v1/messages`);
+    expect(sent[0].headers).toMatchObject({
+      "x-api-key": KEY,
+      "anthropic-version": "2026-10-21",
+      "anthropic-beta": "server-side-fallback-2026-07-01",
+    });
+    const body = sent[0].body;
+    expect(body).toMatchObject({ model: "claude-fable-5-2", max_tokens: 1500, stream: true, fallbacks: "default" });
+    expect(body).not.toHaveProperty("temperature");
+    expect(body).not.toHaveProperty("thinking");
+    // The breakpoint sits on the lecture text, after the stable rules, before the volatile part.
+    expect(body.system).toEqual([
+      { type: "text", text: "RULES-1a2b explain from zero" },
+      { type: "text", text: "LECTURE-TEXT-3c4d the section", cache_control: { type: "ephemeral" } },
+      { type: "text", text: "WHERE-5e6f lecture 3" },
+    ]);
+    expect(body.messages).toEqual([{ role: "user", content: PROMPT }]);
+
+    await vi.waitFor(async () => expect(await rows()).toHaveLength(1));
+    expect(await rows()).toMatchObject([{ provider: "anthropic", model: "claude-fable-5-2", job: "tutor", ok: true }]);
+    // Never the prompt or the key in the row, and nothing printed.
+    expect(JSON.stringify(await rows())).not.toContain(PROMPT);
+    expect(JSON.stringify(await rows())).not.toContain(KEY);
+    expect(logs).toEqual([]);
+  });
+
+  it("with no key, nothing calls Anthropic: the tutor uses the free providers", async () => {
+    ai.queue("groq", { text: "Free answer." });
+    const { r, sent } = paidRouter(ok("never"), { ANTHROPIC_API_KEY: undefined });
+    const { provider, result } = await r.streamChat(tutorInput);
+    expect(provider).toBe("groq");
+    expect(await result.text).toBe("Free answer.");
+    expect(sent).toHaveLength(0);
+    // The free path gets the parts joined, and the answer cap.
+    const first = ai.calls[0].body as { messages: { role: string; content: string }[]; max_tokens?: number; max_completion_tokens?: number };
+    expect(first.messages[0]).toMatchObject({ role: "system" });
+    expect(first.messages[0].content).toContain("RULES-1a2b");
+    expect(first.messages[0].content).toContain("LECTURE-TEXT-3c4d");
+    expect(first.max_tokens ?? first.max_completion_tokens).toBe(1500);
+  });
+
+  for (const code of [401, 403, 429, 500, 529]) {
+    it(`a ${code} from Anthropic falls back to the free providers and cools Anthropic down`, async () => {
+      ai.queue("groq", { text: "Free after all." });
+      const { r, sent } = paidRouter(status(code));
+      const { provider, result } = await r.streamChat(tutorInput);
+      expect(provider).toBe("groq");
+      expect(await result.text).toBe("Free after all.");
+      expect(sent).toHaveLength(1);
+      const [cooldown] = await t.db.select().from(providerCooldowns);
+      expect(cooldown).toMatchObject({ provider: "anthropic" });
+      await vi.waitFor(async () => expect(await rows()).toHaveLength(2));
+      expect((await rows()).map((row) => [row.provider, row.ok])).toEqual([
+        ["anthropic", false],
+        ["groq", true],
+      ]);
+      expect(logs).toEqual([]);
+
+      // While it cools down, the next message does not try the broken key again.
+      ai.queue("groq", { text: "Again free." });
+      expect((await r.streamChat(tutorInput)).provider).toBe("groq");
+      expect(sent).toHaveLength(1);
+    });
+  }
+
+  it("a network error, or a 400, also falls back (without a cool-down for the 400)", async () => {
+    ai.queue("groq", { text: "Free one." });
+    const down = paidRouter(() => {
+      throw new TypeError("fetch failed");
+    });
+    expect((await down.r.streamChat(tutorInput)).provider).toBe("groq");
+
+    ai.queue("groq", { text: "Free two." });
+    const bad = paidRouter(status(400));
+    expect((await bad.r.streamChat(tutorInput)).provider).toBe("groq");
+    expect(await t.db.select().from(providerCooldowns)).toEqual([]);
+  });
+
+  it("Anthropic and every free provider busy: AiBusy", async () => {
+    ai.queue("groq", { status: 429 });
+    ai.queue("openrouter", { status: 503 });
+    const { r } = paidRouter(status(529));
+    await expect(r.streamChat(tutorInput)).rejects.toBeInstanceOf(AiBusy);
+  });
+
+  it("an error event part-way ends the stream with an error and onEnd is not called", async () => {
+    const broken = () =>
+      new Response(sse("Half an", [`event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "PRIVATE" } })}\n\n`]), {
+        status: 200,
+      });
+    const onEnd = vi.fn();
+    const { r } = paidRouter(broken);
+    const { provider, result } = await r.streamChat({ ...tutorInput, onEnd });
+    expect(provider).toBe("anthropic");
+    const seen: string[] = [];
+    for await (const part of result.fullStream) seen.push(part.type);
+    expect(seen).toContain("error");
+    expect(onEnd).not.toHaveBeenCalled();
+    expect(logs).toEqual([]);
+  });
+
+  it("no other job can reach it: paid with another job throws before anything is sent", async () => {
+    const { r, sent } = paidRouter(ok("never"));
+    await expect(r.streamChat({ ...tutorInput, job: "assignment-chat" })).rejects.toBeInstanceOf(PaidNotAllowed);
+    await expect(
+      r.streamChat({ ...tutorInput, paid: "anything" as unknown as "tutor" }),
+    ).rejects.toBeInstanceOf(PaidNotAllowed);
+    expect(sent).toHaveLength(0);
+    expect(ai.calls).toHaveLength(0);
+  });
+
+  it("runText, runObject and streamChat without `paid` never fall through to it, even with the key and every free provider busy", async () => {
+    const { r, sent } = paidRouter(ok("never"));
+    for (const job of ["explain-card", TUTOR_JOB]) {
+      ai.queue("groq", { status: 429 }, { status: 429 }, { status: 429 });
+      ai.queue("openrouter", { status: 500 }, { status: 500 }, { status: 500 });
+      await t.db.delete(providerCooldowns);
+      await expect(r.runText({ ...input, job })).rejects.toBeInstanceOf(AiBusy);
+      await t.db.delete(providerCooldowns);
+      await expect(r.runObject({ ...input, job, schema: z.object({ ok: z.boolean() }) })).rejects.toBeInstanceOf(AiBusy);
+      await t.db.delete(providerCooldowns);
+      await expect(r.streamChat({ ...input, job })).rejects.toBeInstanceOf(AiBusy);
+    }
+    expect(sent).toHaveLength(0);
+    expect((await rows()).some((row) => row.provider === "anthropic")).toBe(false);
+  });
+
+  it("AI_FAKE_URL sends it to the fake's `anthropic` route, under the same safety rules", async () => {
+    const urls: string[] = [];
+    const fetch: typeof globalThis.fetch = async (url, init) => {
+      urls.push(String(url));
+      if (String(url).includes("/anthropic/")) return new Response(sse("Faked."), { status: 200 });
+      return globalThis.fetch(url, init);
+    };
+    const make = (env: Record<string, string | undefined>) =>
+      createRouter({ providers: table([GROQ]), env: { ...ENV, ANTHROPIC_API_KEY: KEY, ...env }, database: t.db, now: () => NOW, fetch });
+
+    const local = make({ NODE_ENV: "development", AI_FAKE_URL: ai.url });
+    expect(await (await local.streamChat(tutorInput)).result.text).toBe("Faked.");
+    expect(urls).toEqual([`${ai.url}/anthropic/v1/messages`]);
+
+    // On Vercel, in production or for another host, the switch is dead: the real address is used.
+    for (const env of [
+      { NODE_ENV: "development", AI_FAKE_URL: ai.url, VERCEL: "1" },
+      { NODE_ENV: "production", AI_FAKE_URL: ai.url },
+      { NODE_ENV: "development", AI_FAKE_URL: "http://example.com:9" },
+    ]) {
+      urls.length = 0;
+      const real: typeof globalThis.fetch = async (url) => {
+        urls.push(String(url));
+        throw new TypeError("no network in tests");
+      };
+      ai.queue("groq", { text: "free" });
+      const r = createRouter({
+        providers: table([GROQ]),
+        env: { ...ENV, ANTHROPIC_API_KEY: KEY, ...env },
+        database: t.db,
+        now: () => NOW,
+        fetch: real,
+        baseUrlFor: () => `${ai.url}/groq/v1`,
+      });
+      await expect(r.streamChat(tutorInput)).rejects.toBeInstanceOf(AiBusy);
+      expect(urls[0]).toBe("https://api.anthropic.com/v1/messages");
+      await t.db.delete(providerCooldowns);
+    }
   });
 });

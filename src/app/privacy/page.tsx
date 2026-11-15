@@ -152,6 +152,15 @@ export default function PrivacyPage() {
           not want an outside service to see.
         </p>
         <p>
+          <strong>The tutor.</strong> Only if the tutor is switched on for your account: what you type to it, the chat
+          so far, and where you are in Ready (which lecture, exam, card or assignment page) go to the same free services
+          as above. The part of a lecture you are on, or a card you have already answered, goes with it only for a course
+          you marked as allowing AI for studying. Only if whoever runs Ready has set an Anthropic key, the tutor asks
+          Anthropic&rsquo;s Claude first and uses the free services when Claude does not answer. &ldquo;Copy for
+          Claude&rdquo; sends nothing: it only puts text on your clipboard. The tutor&rsquo;s chat is kept in your
+          browser tab, not by Ready.
+        </p>
+        <p>
           Ready itself keeps your chats. For each AI call it also notes which service answered and how long it took,
           not the text. Answers made from course material (cards, explanations, time estimates) are saved so the same
           question is not asked twice. That store holds no names.

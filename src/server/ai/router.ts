@@ -27,6 +27,20 @@
  * `createRouter(deps)` takes the provider table, env, database, clock, fetch and a base URL
  * override, so tests can point it at `tests/fake-ai/server.ts`.
  *
+ * The tutor's optional paid path (M2-28). `streamChat({ ..., job: "tutor", paid: "tutor" })` is the
+ * ONLY way to reach the `anthropic` provider, and only when `ANTHROPIC_API_KEY` is set:
+ * - `anthropic` is not in `PROVIDERS` or `FREE_MODELS`, so `withFallback` (runText, runObject,
+ *   streamChat without `paid`) can never pick it, whatever the job.
+ * - `paid` with any job other than `TUTOR_JOB`, or any value other than "tutor", throws
+ *   `PaidNotAllowed` before anything is sent.
+ * - With the key set it is tried first; a limit (429, 5xx, 529) writes its cool-down as for any
+ *   provider, and then, like any other failed first response, the tutor falls back to the free
+ *   providers for the same size. Without the key the paid path is skipped without a word.
+ * - It speaks Anthropic's Messages API over plain `fetch` with SSE streaming (no Anthropic SDK is
+ *   installed and package.json is not ours to change), as a small AI SDK model (`anthropicModel`),
+ *   so the stream, `onEnd`, the cool-downs and the `ai_calls` row work exactly as for the others.
+ *   `systemParts` marked `cache` get a prompt-cache breakpoint there (the free path joins them).
+ *
  * Test-only switch (M2-23): `AI_FAKE_URL` points a running dev server at the fake AI, so the
  * whole-flow tests (tests/e2e/chat.spec.ts) can script replies. See `fakeAiUrl` below for when
  * it is honoured; everywhere else it is ignored without a word. The allow-list still applies,
@@ -43,6 +57,12 @@ import {
   type ModelMessage,
   type ToolSet,
 } from "ai";
+import type {
+  LanguageModelV4,
+  LanguageModelV4CallOptions,
+  LanguageModelV4FinishReason,
+  LanguageModelV4StreamPart,
+} from "@ai-sdk/provider";
 import { gt } from "drizzle-orm";
 import { z } from "zod";
 import { db as defaultDb, type Db } from "@/server/db/client";
@@ -77,6 +97,25 @@ export class NotFree extends Error {
   }
 }
 
+/** A call asked for the paid provider from a job that may not use it. Nothing was sent. */
+export class PaidNotAllowed extends Error {
+  constructor(readonly job: string) {
+    super(`Job "${job}" may not use the paid provider.`);
+    this.name = "PaidNotAllowed";
+  }
+}
+
+/** The only job that may ask for the paid provider (`paid: "tutor"`). */
+export const TUTOR_JOB = "tutor";
+/** Anthropic's model for the tutor (claude-api skill, model table cached 2026-11-03). */
+export const ANTHROPIC_MODEL = "claude-fable-5-2";
+export const ANTHROPIC_ENV_KEY = "ANTHROPIC_API_KEY";
+export const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+/** Anthropic API version header (claude-api skill, curl examples). */
+export const ANTHROPIC_VERSION = "2026-10-21";
+/** Server-side refusal fallback, opted into by default for claude-fable-5-2 (claude-api skill). */
+export const ANTHROPIC_FALLBACK_BETA = "server-side-fallback-2026-07-01";
+
 /** The model's answer was not valid JSON for the schema, even after one repair. */
 export class AiBadOutput extends Error {
   constructor(
@@ -97,7 +136,12 @@ export type RouterDeps = {
   fetch?: typeof globalThis.fetch;
   /** Replace the resolved base URL, e.g. to point at the fake server. */
   baseUrlFor?: (entry: ProviderEntry) => string;
+  /** Replace Anthropic's base URL (`https://api.anthropic.com`), e.g. in tests. */
+  anthropicBaseUrl?: string;
 };
+
+/** One block of a system prompt. `cache` puts a prompt-cache breakpoint after it (Anthropic only). */
+export type SystemPart = { text: string; cache?: boolean };
 
 export type RunInput = {
   size: SizeClass;
@@ -129,13 +173,28 @@ export type StreamChatInput = RunInput & {
    * failed, at the start or part-way. Awaited before the stream closes.
    */
   onEnd?: (event: StreamChatEnd) => void | Promise<void>;
+  /** The answer's length cap, sent to the provider as max output tokens. */
+  maxOutputTokens?: number;
+  /** The system prompt in blocks; joined for the free providers. Used instead of `system` when set. */
+  systemParts?: SystemPart[];
+  /** "tutor": try the paid provider first when its key is set. Only for `job: TUTOR_JOB`. */
+  paid?: "tutor";
 };
 
 export type Picked = { entry: ProviderEntry; provider: ProviderName; model: string };
 
 export type RunTextResult = Picked & { text: string };
 export type RunObjectResult<T> = Picked & { object: T };
-export type StreamChatResult = Picked & { result: ReturnType<typeof streamText> };
+/** `entry` is null and `provider` is "anthropic" when the tutor's paid path answered. */
+export type StreamChatResult = {
+  entry: ProviderEntry | null;
+  provider: ProviderName | "anthropic";
+  model: string;
+  result: ReturnType<typeof streamText>;
+};
+
+/** Who is called: a free provider, or the tutor's paid path (`entry` null). */
+type Target = { entry: ProviderEntry | null; provider: ProviderName | "anthropic"; model: string; baseUrl: string };
 
 type Candidate = Picked & { baseUrl: string; apiKey: string };
 
@@ -182,7 +241,7 @@ export function createRouter(deps: RouterDeps = {}) {
     return null;
   }
 
-  async function writeCooldown(provider: ProviderName, error: APICallError) {
+  async function writeCooldown(provider: string, error: APICallError) {
     const ms = retryAfterMs(error.responseHeaders, now()) ?? DEFAULT_COOLDOWN_MS;
     const until = new Date(now().getTime() + ms);
     await database()
@@ -191,7 +250,7 @@ export function createRouter(deps: RouterDeps = {}) {
       .onConflictDoUpdate({ target: providerCooldowns.provider, set: { until } });
   }
 
-  async function logCall(c: Picked, input: RunInput, ok: boolean, ms: number) {
+  async function logCall(c: { provider: string; model: string }, input: RunInput, ok: boolean, ms: number) {
     await database()
       .insert(aiCalls)
       .values({ provider: c.provider, model: c.model, job: input.job, ok, ms: Math.round(ms), userId: input.userId ?? null });
@@ -280,78 +339,136 @@ export function createRouter(deps: RouterDeps = {}) {
   }
 
   /**
-   * Streams a chat answer. Falls through to the next provider when the first HTTP response is
-   * not a success (a limit or server error also writes a cool-down); once a provider has
-   * answered, the stream is the caller's. The `ai_calls` row is written when the stream ends.
+   * One streamed attempt on `c`. Resolves with the stream once the first HTTP response is a
+   * success; otherwise drains it, logs the attempt and throws an `APICallError` (or our own
+   * error when nothing was sent). The `ai_calls` row is written when the stream ends.
    */
-  async function streamChat(input: StreamChatInput): Promise<StreamChatResult> {
+  async function streamOn(
+    c: Target,
+    input: StreamChatInput,
+    model: (fetch: typeof globalThis.fetch) => LanguageModel,
+    system: string | undefined,
+  ): Promise<StreamChatResult> {
     const tools = sdkTools(input.tools);
     const rounds = tools ? Math.max(0, Math.floor(input.maxToolRounds ?? 0)) : 0;
-    return withFallback(input, async (c) => {
-      const started = performance.now();
-      let logged = false;
-      const log = async (ok: boolean) => {
-        if (logged) return;
-        logged = true;
-        await logCall(c, input, ok, performance.now() - started);
-      };
+    const started = performance.now();
+    let logged = false;
+    const log = async (ok: boolean) => {
+      if (logged) return;
+      logged = true;
+      await logCall(c, input, ok, performance.now() - started);
+    };
 
-      type First = { status: number; headers: Record<string, string> } | { error: unknown } | { ended: true };
-      let settle!: (first: First) => void;
-      const first = new Promise<First>((resolve) => (settle = resolve));
-      const baseFetch = deps.fetch ?? globalThis.fetch;
-      const watchedFetch: typeof globalThis.fetch = async (url, init) => {
-        try {
-          const res = await baseFetch(url, init);
-          settle({ status: res.status, headers: Object.fromEntries(res.headers.entries()) });
-          return res;
-        } catch (error) {
-          settle({ error });
-          throw error;
-        }
-      };
-
-      let streamError: unknown;
-      const result = streamText({
-        model: modelFor(c, false, watchedFetch),
-        instructions: input.system,
-        messages: input.messages,
-        maxRetries: 0,
-        tools,
-        // One step per round of tool calls, plus the step that writes the answer.
-        stopWhen: isStepCount(rounds + 1),
-        // Without onError the SDK prints the error, and its error carries the request body.
-        onError: async ({ error }) => {
-          streamError = error;
-          settle({ ended: true });
-          await log(false);
-        },
-        onEnd: async ({ steps }) => {
-          settle({ ended: true });
-          await log(true);
-          if (input.onEnd && streamError === undefined) {
-            await input.onEnd({ text: steps.map((step) => step.text).filter(Boolean).join("\n\n") });
-          }
-        },
-      });
-
-      const answer = await first;
-      if ("status" in answer && answer.status >= 200 && answer.status < 300) {
-        return { entry: c.entry, provider: c.provider, model: c.model, result };
+    type First = { status: number; headers: Record<string, string> } | { error: unknown } | { ended: true };
+    let settle!: (first: First) => void;
+    const first = new Promise<First>((resolve) => (settle = resolve));
+    const baseFetch = deps.fetch ?? globalThis.fetch;
+    const watchedFetch: typeof globalThis.fetch = async (url, init) => {
+      try {
+        const res = await baseFetch(url, init);
+        settle({ status: res.status, headers: Object.fromEntries(res.headers.entries()) });
+        return res;
+      } catch (error) {
+        settle({ error });
+        throw error;
       }
-      // Not usable: drain the failed stream quietly, log the attempt, and let withFallback move on.
-      await result.consumeStream({ onError: () => {} });
-      await log(false);
-      // Failed before any HTTP call (e.g. a bad prompt): our error, not the provider's.
-      if ("ended" in answer && streamError !== undefined && !APICallError.isInstance(streamError)) throw streamError;
-      throw new APICallError({
-        message: `${c.provider} answered ${"status" in answer ? answer.status : "without a response"}`,
-        url: c.baseUrl,
-        requestBodyValues: undefined,
-        statusCode: "status" in answer ? answer.status : undefined,
-        responseHeaders: "headers" in answer ? answer.headers : undefined,
-      });
+    };
+
+    let streamError: unknown;
+    const result = streamText({
+      model: model(watchedFetch),
+      instructions: system,
+      messages: input.messages,
+      maxRetries: 0,
+      maxOutputTokens: input.maxOutputTokens,
+      tools,
+      // One step per round of tool calls, plus the step that writes the answer.
+      stopWhen: isStepCount(rounds + 1),
+      // Without onError the SDK prints the error, and its error carries the request body.
+      onError: async ({ error }) => {
+        streamError = error;
+        settle({ ended: true });
+        await log(false);
+      },
+      onEnd: async ({ steps }) => {
+        settle({ ended: true });
+        await log(true);
+        if (input.onEnd && streamError === undefined) {
+          await input.onEnd({ text: steps.map((step) => step.text).filter(Boolean).join("\n\n") });
+        }
+      },
     });
+
+    const answer = await first;
+    if ("status" in answer && answer.status >= 200 && answer.status < 300) {
+      return { entry: c.entry, provider: c.provider, model: c.model, result };
+    }
+    // Not usable: drain the failed stream quietly, log the attempt, and let the caller move on.
+    await result.consumeStream({ onError: () => {} });
+    await log(false);
+    // Failed before any HTTP call (e.g. a bad prompt): our error, not the provider's.
+    if ("ended" in answer && streamError !== undefined && !APICallError.isInstance(streamError)) throw streamError;
+    throw new APICallError({
+      message: `${c.provider} answered ${"status" in answer ? answer.status : "without a response"}`,
+      url: c.baseUrl,
+      requestBodyValues: undefined,
+      statusCode: "status" in answer ? answer.status : undefined,
+      responseHeaders: "headers" in answer ? answer.headers : undefined,
+    });
+  }
+
+  /** Anthropic's address for the tutor, or null when there is no key. Same fake switch as the rest. */
+  function anthropicTarget(): (Target & { apiKey: string }) | null {
+    const e = env();
+    const apiKey = e[ANTHROPIC_ENV_KEY];
+    if (!apiKey) return null;
+    const fake = deps.anthropicBaseUrl ? null : fakeAiUrl(e);
+    const baseUrl = deps.anthropicBaseUrl ?? (fake ? `${fake}/anthropic` : ANTHROPIC_BASE_URL);
+    return { entry: null, provider: "anthropic", model: ANTHROPIC_MODEL, baseUrl, apiKey };
+  }
+
+  /**
+   * The tutor's paid attempt: null when there is no key, Anthropic is cooling down, or it failed
+   * in any way before the answer started (then the free providers take over). A limit, or a key
+   * it refuses (401, 403), writes a cool-down so a broken key is not retried on every message.
+   */
+  async function tryAnthropic(input: StreamChatInput): Promise<StreamChatResult | null> {
+    const target = anthropicTarget();
+    if (!target) return null;
+    if ((await coolingProviders()).has("anthropic")) return null;
+    const parts = input.systemParts ?? (input.system ? [{ text: input.system }] : []);
+    try {
+      return await streamOn(
+        target,
+        input,
+        (fetch) => anthropicModel({ baseUrl: target.baseUrl, apiKey: target.apiKey, system: parts, fetch }),
+        undefined,
+      );
+    } catch (error) {
+      if (APICallError.isInstance(error)) {
+        const status = error.statusCode;
+        if (isLimit(status) || status === 401 || status === 403) await writeCooldown("anthropic", error);
+      }
+      // Whatever went wrong (network, a bad key, a limit, a bug in the stream), the free
+      // providers still answer: a key that does not work never breaks the tutor.
+      return null;
+    }
+  }
+
+  /**
+   * Streams a chat answer. Falls through to the next provider when the first HTTP response is
+   * not a success (a limit or server error also writes a cool-down); once a provider has
+   * answered, the stream is the caller's. With `paid: "tutor"` the paid provider goes first
+   * (see the header).
+   */
+  async function streamChat(input: StreamChatInput): Promise<StreamChatResult> {
+    if (input.paid !== undefined) {
+      if (input.paid !== "tutor" || input.job !== TUTOR_JOB) throw new PaidNotAllowed(input.job);
+      const paid = await tryAnthropic(input);
+      if (paid) return paid;
+    }
+    const system = input.systemParts ? input.systemParts.map((p) => p.text).join("\n\n") : input.system;
+    return withFallback(input, (c) => streamOn(c, input, (fetch) => modelFor(c, false, fetch), system));
   }
 
   return { pick, runText, runObject, streamChat };
@@ -384,6 +501,261 @@ export function fakeAiUrl(env: Record<string, string | undefined> = process.env)
   if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return null;
   if (url.username || url.password) return null;
   return url.origin;
+}
+
+// ---------------------------------------------------------------------------
+// The tutor's paid path: Anthropic's Messages API over plain fetch (M2-28)
+//
+// Shapes from the claude-api skill (curl examples, prompt caching, model notes), checked
+// 2026-11-15. No Anthropic SDK is installed, so this is raw HTTP:
+// - POST {base}/v1/messages, headers `x-api-key`, `anthropic-version: 2026-10-21`, and
+//   `anthropic-beta: server-side-fallback-2026-07-01` for `fallbacks: "default"` (on a policy
+//   decline Anthropic re-runs the request on its own fallback model inside the same call).
+// - `stream: true`: server-sent events `message_start`, `content_block_start`,
+//   `content_block_delta` (`text_delta`), `content_block_stop`, `message_delta` (stop_reason,
+//   output usage), `message_stop`, and `error`.
+// - claude-fable-5-2 always thinks: `thinking` is left out (anything but adaptive is a 400) and
+//   `output_config.effort` is "low", because thinking counts against `max_tokens` and the tutor's
+//   answers are capped. Its thinking blocks stream with empty text by default; they are skipped.
+// - No `temperature`/`top_p`/`top_k` (a 400 on 2026-10-21) and no assistant prefill.
+// - Prompt caching: `cache_control: {type: "ephemeral"}` on the system block marked `cache`
+//   (the lecture text). The prefix up to it (rules, then the material) is cached for 5 minutes.
+//   Prefixes under 512 tokens on this model silently do not cache.
+// Prompts, answers and the key are never logged; errors carry no request body.
+
+const ANTHROPIC_EFFORT = "low";
+const DEFAULT_TUTOR_MAX_TOKENS = 1500;
+
+type AnthropicOptions = {
+  baseUrl: string;
+  apiKey: string;
+  system: SystemPart[];
+  fetch: typeof globalThis.fetch;
+};
+
+type AnthropicMessage = { role: "user" | "assistant"; content: string };
+
+/** The SDK prompt as Anthropic messages: text only, system messages added to `system`. */
+function anthropicPrompt(prompt: LanguageModelV4CallOptions["prompt"], system: SystemPart[]) {
+  const blocks = [...system];
+  const messages: AnthropicMessage[] = [];
+  for (const m of prompt) {
+    if (m.role === "system") {
+      blocks.push({ text: m.content });
+      continue;
+    }
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const text = m.content
+      .flatMap((part) => (part.type === "text" ? [part.text] : []))
+      .join("\n\n");
+    if (!text) continue;
+    const last = messages[messages.length - 1];
+    if (last && last.role === m.role) last.content += `\n\n${text}`;
+    else messages.push({ role: m.role, content: text });
+  }
+  return {
+    system: blocks.map((b) => ({
+      type: "text" as const,
+      text: b.text,
+      ...(b.cache ? { cache_control: { type: "ephemeral" as const } } : {}),
+    })),
+    messages,
+  };
+}
+
+function finishOf(stop: string | undefined): LanguageModelV4FinishReason {
+  const unified =
+    stop === "end_turn" || stop === "stop_sequence"
+      ? "stop"
+      : stop === "max_tokens"
+        ? "length"
+        : stop === "refusal"
+          ? "content-filter"
+          : "other";
+  return { unified, raw: stop };
+}
+
+type SseData = Record<string, unknown> & { type?: string };
+
+/** Anthropic's SSE text as the SDK's stream parts. */
+function anthropicParts(): TransformStream<string, LanguageModelV4StreamPart> {
+  let buffer = "";
+  let stop: string | undefined;
+  let usage = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+  let finished = false;
+  const textBlocks = new Set<number>();
+
+  function finish(controller: TransformStreamDefaultController<LanguageModelV4StreamPart>) {
+    if (finished) return;
+    finished = true;
+    controller.enqueue({
+      type: "finish",
+      finishReason: finishOf(stop),
+      usage: {
+        inputTokens: {
+          total: usage.input + usage.cacheRead + usage.cacheWrite,
+          noCache: usage.input,
+          cacheRead: usage.cacheRead,
+          cacheWrite: usage.cacheWrite,
+        },
+        outputTokens: { total: usage.output, text: undefined, reasoning: undefined },
+      },
+    });
+  }
+
+  function handle(data: SseData, controller: TransformStreamDefaultController<LanguageModelV4StreamPart>) {
+    const num = (v: unknown) => (typeof v === "number" ? v : 0);
+    switch (data.type) {
+      case "message_start": {
+        const message = (data.message ?? {}) as Record<string, unknown>;
+        const u = (message.usage ?? {}) as Record<string, unknown>;
+        usage = {
+          input: num(u.input_tokens),
+          cacheRead: num(u.cache_read_input_tokens),
+          cacheWrite: num(u.cache_creation_input_tokens),
+          output: num(u.output_tokens),
+        };
+        controller.enqueue({
+          type: "response-metadata",
+          id: typeof message.id === "string" ? message.id : undefined,
+          modelId: typeof message.model === "string" ? message.model : undefined,
+        });
+        return;
+      }
+      case "content_block_start": {
+        const block = (data.content_block ?? {}) as Record<string, unknown>;
+        const index = num(data.index);
+        if (block.type !== "text") return; // thinking and fallback blocks are not part of the answer
+        textBlocks.add(index);
+        controller.enqueue({ type: "text-start", id: String(index) });
+        if (typeof block.text === "string" && block.text) {
+          controller.enqueue({ type: "text-delta", id: String(index), delta: block.text });
+        }
+        return;
+      }
+      case "content_block_delta": {
+        const index = num(data.index);
+        const delta = (data.delta ?? {}) as Record<string, unknown>;
+        if (!textBlocks.has(index) || delta.type !== "text_delta" || typeof delta.text !== "string") return;
+        controller.enqueue({ type: "text-delta", id: String(index), delta: delta.text });
+        return;
+      }
+      case "content_block_stop": {
+        const index = num(data.index);
+        if (textBlocks.delete(index)) controller.enqueue({ type: "text-end", id: String(index) });
+        return;
+      }
+      case "message_delta": {
+        const delta = (data.delta ?? {}) as Record<string, unknown>;
+        if (typeof delta.stop_reason === "string") stop = delta.stop_reason;
+        const u = (data.usage ?? {}) as Record<string, unknown>;
+        if (typeof u.output_tokens === "number") usage.output = u.output_tokens;
+        return;
+      }
+      case "message_stop":
+        finish(controller);
+        return;
+      case "error": {
+        const err = (data.error ?? {}) as Record<string, unknown>;
+        // Only the error's type: its message could quote the request.
+        controller.enqueue({ type: "error", error: new Error(`anthropic stream error: ${String(err.type ?? "unknown")}`) });
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  function drain(controller: TransformStreamDefaultController<LanguageModelV4StreamPart>) {
+    let cut: number;
+    while ((cut = buffer.indexOf("\n\n")) !== -1) {
+      const event = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      for (const line of event.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const raw = line.slice(5).trim();
+        if (!raw) continue;
+        let data: SseData;
+        try {
+          data = JSON.parse(raw) as SseData;
+        } catch {
+          continue;
+        }
+        handle(data, controller);
+      }
+    }
+  }
+
+  return new TransformStream({
+    start(controller) {
+      controller.enqueue({ type: "stream-start", warnings: [] });
+    },
+    transform(chunk, controller) {
+      buffer += chunk.replace(/\r\n/g, "\n");
+      drain(controller);
+    },
+    flush(controller) {
+      buffer += "\n\n";
+      drain(controller);
+      if (!finished) {
+        if (stop === undefined) controller.enqueue({ type: "error", error: new Error("anthropic stream ended early") });
+        finish(controller);
+      }
+    },
+  });
+}
+
+/** A streaming-only AI SDK model for the tutor's Anthropic path. */
+export function anthropicModel(options: AnthropicOptions): LanguageModelV4 {
+  const url = `${options.baseUrl.replace(/\/+$/, "")}/v1/messages`;
+  return {
+    specificationVersion: "v4",
+    provider: "anthropic",
+    modelId: ANTHROPIC_MODEL,
+    supportedUrls: {},
+    async doGenerate() {
+      throw new Error("The tutor's Anthropic path only streams.");
+    },
+    async doStream(call) {
+      const { system, messages } = anthropicPrompt(call.prompt, options.system);
+      const body = {
+        model: ANTHROPIC_MODEL,
+        max_tokens: call.maxOutputTokens ?? DEFAULT_TUTOR_MAX_TOKENS,
+        stream: true,
+        system,
+        messages,
+        output_config: { effort: ANTHROPIC_EFFORT },
+        fallbacks: "default",
+      };
+      const res = await options.fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": options.apiKey,
+          "anthropic-version": ANTHROPIC_VERSION,
+          "anthropic-beta": ANTHROPIC_FALLBACK_BETA,
+        },
+        body: JSON.stringify(body),
+        signal: call.abortSignal,
+      });
+      const headers = Object.fromEntries(res.headers.entries());
+      if (!res.ok || !res.body) {
+        await res.body?.cancel().catch(() => {});
+        throw new APICallError({
+          message: `anthropic answered ${res.status}`,
+          url,
+          requestBodyValues: undefined,
+          statusCode: res.status,
+          responseHeaders: headers,
+          isRetryable: isLimit(res.status),
+        });
+      }
+      return {
+        stream: res.body.pipeThrough(new TextDecoderStream()).pipeThrough(anthropicParts()),
+        response: { headers },
+      };
+    },
+  };
 }
 
 /** Plain tool definitions as SDK tools, or undefined when there are none. */
