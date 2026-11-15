@@ -188,11 +188,13 @@ const GradeItemSchema = z.union(
         percent: WeightValue.nullish(),
         pct: WeightValue.nullish(),
         share: WeightValue.nullish(),
+        weightPct: WeightValue.nullish(),
         max: z.number().positive().nullish(),
+        maxPoints: z.number().positive().nullish(),
       })
       .superRefine((g, ctx) => {
         if (!(g.name ?? g.item ?? g.title ?? g.label)?.trim()) ctx.addIssue({ code: "custom", message: "needs a name." });
-        if ((g.weight ?? g.percent ?? g.pct ?? g.share) == null) ctx.addIssue({ code: "custom", message: "needs a weight." });
+        if ((g.weight ?? g.weightPct ?? g.percent ?? g.pct ?? g.share) == null) ctx.addIssue({ code: "custom", message: "needs a weight." });
       }),
     z.string().regex(/^.*\S.*?[\s:=(-]\s*\d+(?:[.,]\d+)?\s*%\)?\s*$/, { error: 'a text item must read like "Exam 60%".' }),
   ],
@@ -333,12 +335,13 @@ async function bundleFolders(root: string): Promise<{ folder: string; code: stri
     const code = exam.courseCode ?? r.courseCode ?? fallback;
     return typeof code === "string" && code.trim() ? normCode(code) : null;
   };
-  if (await exists(path.join(root, "seed.json"))) return [{ folder: ".", code: await codeOf(root, path.basename(root)) }];
   const out: { folder: string; code: string | null }[] = [];
   for (const e of (await readdir(root, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
     if (!e.isDirectory() || e.name.startsWith(".")) continue;
     if (await exists(path.join(root, e.name, "seed.json"))) out.push({ folder: e.name, code: await codeOf(path.join(root, e.name), e.name) });
   }
+  // A root that holds course folders may also keep a copy of one course at the top; the folders win.
+  if (!out.length && (await exists(path.join(root, "seed.json")))) return [{ folder: ".", code: await codeOf(root, path.basename(root)) }];
   return out;
 }
 
@@ -471,9 +474,9 @@ function gradeItemsOf(code: string, items: BundlesAccount["gradeWeights"][number
           const m = /^(.*?)[\s:=(-]*(\d+(?:[.,]\d+)?)\s*%\)?\s*$/.exec(g)!;
           return { name: m[1].trim(), weight: weightNumber(m[2]) / 100, max: null };
         }
-        const raw = (g.weight ?? g.percent ?? g.pct ?? g.share)!;
+        const raw = (g.weight ?? g.weightPct ?? g.percent ?? g.pct ?? g.share)!;
         const asPercent = typeof raw === "string" && raw.includes("%");
-        return { name: (g.name ?? g.item ?? g.title ?? g.label)!.trim(), weight: weightNumber(raw) / (asPercent ? 100 : 1), max: g.max ?? null };
+        return { name: (g.name ?? g.item ?? g.title ?? g.label)!.trim(), weight: weightNumber(raw) / (asPercent ? 100 : 1), max: g.max ?? g.maxPoints ?? null };
       })
     : Object.entries(items).map(([name, raw]) => ({
         name: name.trim(),

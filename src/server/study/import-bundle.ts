@@ -120,6 +120,18 @@ type SeedLecture = z.infer<typeof LectureListSchema>[number];
 
 const dupValues = (list: (string | number)[]) => [...new Set(list.filter((v, i) => list.indexOf(v) !== i))];
 
+const GRADE_TARGET_ERROR = "exam.gradeTarget must be a grade from 1 to 5.";
+const GradeNumber = z
+  .number({ error: GRADE_TARGET_ERROR })
+  .int({ error: GRADE_TARGET_ERROR })
+  .min(1, { error: GRADE_TARGET_ERROR })
+  .max(5, { error: GRADE_TARGET_ERROR });
+/** The grade inside a seed's `gradeTarget`, whichever way it was written. */
+export function gradeOfTarget(target: number | { grade: number } | undefined | null): number | null {
+  if (target == null) return null;
+  return typeof target === "number" ? target : target.grade;
+}
+
 export const SeedSchema = z
   .object({
     exam: z.object({
@@ -133,12 +145,12 @@ export const SeedSchema = z
         })
         .refine((s) => !Number.isNaN(Date.parse(s)), { error: "exam.at must be an ISO date and time." }),
       targetPct: z.number().int().min(0).max(100).optional(),
-      gradeTarget: z
-        .number({ error: "exam.gradeTarget must be a grade from 1 to 5." })
-        .int({ error: "exam.gradeTarget must be a grade from 1 to 5." })
-        .min(1, { error: "exam.gradeTarget must be a grade from 1 to 5." })
-        .max(5, { error: "exam.gradeTarget must be a grade from 1 to 5." })
-        .optional(),
+      /**
+       * A grade 1..5, or an object carrying it as `grade` (hand-made bundles add the points behind
+       * it). Stored whole in `exams.grade_target`. May sit beside `targetPct`: then `targetPct` is
+       * the percent to aim for and this is kept as given.
+       */
+      gradeTarget: z.union([GradeNumber, z.looseObject({ grade: GradeNumber })], { error: GRADE_TARGET_ERROR }).optional(),
       startNewOn: day("exam.startNewOn").optional(),
     }),
     startNewOn: day("startNewOn").optional(),
@@ -161,12 +173,7 @@ export const SeedSchema = z
   .superRefine((seed, ctx) => {
     const dup = dupValues;
     for (const s of dup(seed.concepts.map((c) => c.slug))) ctx.addIssue(`Concept slug "${s}" is used twice.`);
-    for (const s of dup(seed.concepts.map((c) => c.name))) ctx.addIssue(`Concept name "${s}" is used twice.`);
     for (const n of dup(seed.lectures.map((l) => l.n))) ctx.addIssue(`Lecture ${n} is listed twice.`);
-    const { targetPct, gradeTarget } = seed.exam;
-    if (targetPct !== undefined && gradeTarget !== undefined && targetPctForGrade(gradeTarget as TargetGrade) !== targetPct) {
-      ctx.addIssue("exam.targetPct and exam.gradeTarget disagree; give one of them.");
-    }
     if (seed.startNewOn && seed.exam.startNewOn && seed.startNewOn !== seed.exam.startNewOn) {
       ctx.addIssue("startNewOn and exam.startNewOn disagree; give one of them.");
     }
@@ -462,7 +469,15 @@ function accountFor(account: Account | null, courseCode: string): CourseBundle["
     : null;
 }
 
-async function loadCourse(dir: string, label: string, seed: Seed, account: Account | null, problems: string[]): Promise<CourseBundle> {
+async function loadCourse(
+  dir: string,
+  label: string,
+  seed: Seed,
+  account: Account | null,
+  problems: string[],
+  /** The bundle root, when it also keeps a stray copy of this same course's seed (see `loadBundle`). */
+  strayRoot: string | null = null,
+): Promise<CourseBundle> {
   const at = (f: string) => (label ? `${label}/${f}` : f);
   const decks: BundleDeck[] = [];
   for (const lecture of seed.lectures) {
@@ -479,7 +494,10 @@ async function loadCourse(dir: string, label: string, seed: Seed, account: Accou
 
   let map: StudyMap | null = null;
   if (seed.map) {
-    const raw = await readJson(dir, seed.map, problems, at(seed.map));
+    // The map named by the seed sits in the course folder. A root that keeps a stray copy of this
+    // course may hold the only copy of its map: read that one then.
+    const fromRoot = strayRoot !== null && !(await exists(path.join(dir, seed.map))) && (await exists(path.join(strayRoot, seed.map)));
+    const raw = await readJson(fromRoot ? strayRoot! : dir, seed.map, problems, at(seed.map));
     if (raw !== undefined) {
       const parsed = MapSchema.safeParse(raw);
       if (parsed.success) map = parsed.data;
@@ -578,9 +596,8 @@ export async function loadBundle(root: string, options: { courses?: string[] } =
 
   // Where the seeds are: the root itself, or its subfolders.
   const places: { dir: string; label: string }[] = [];
-  if (await exists(path.join(root, "seed.json"))) {
-    places.push({ dir: root, label: "" });
-  } else {
+  {
+    // Course folders win: a root that holds them may also keep a stray copy of one course's seed.
     let entries: import("node:fs").Dirent[] = [];
     try {
       entries = await readdir(root, { withFileTypes: true });
@@ -590,7 +607,10 @@ export async function loadBundle(root: string, options: { courses?: string[] } =
     for (const e of entries.filter((d) => d.isDirectory() && !d.name.startsWith(".")).sort((a, b) => a.name.localeCompare(b.name))) {
       if (await exists(path.join(root, e.name, "seed.json"))) places.push({ dir: path.join(root, e.name), label: e.name });
     }
-    if (places.length === 0) throw new BundleInvalid([`${root}: has no seed.json and no course folder with one.`]);
+    if (places.length === 0) {
+      if (await exists(path.join(root, "seed.json"))) places.push({ dir: root, label: "" });
+      else throw new BundleInvalid([`${root}: has no seed.json and no course folder with one.`]);
+    }
   }
 
   const found: { dir: string; label: string; seed: Seed; examNote: string | null }[] = [];
@@ -640,7 +660,17 @@ export async function loadBundle(root: string, options: { courses?: string[] } =
   if (problems.length) throw new BundleInvalid(problems);
 
   const coursesOut: CourseBundle[] = [];
-  for (const f of found) coursesOut.push({ ...(await loadCourse(f.dir, f.label, f.seed, account, problems)), examNote: f.examNote });
+  // Which course a stray root seed is a copy of, if any.
+  let strayCode: string | null = null;
+  if (places.some((p) => p.dir !== root) && (await exists(path.join(root, "seed.json")))) {
+    const stray = await readJson(root, "seed.json", [], "seed.json");
+    const code = isRecord(stray) && isRecord(stray.exam) ? stray.exam.courseCode : undefined;
+    if (typeof code === "string" && code.trim() !== "") strayCode = normCode(code);
+  }
+  for (const f of found) {
+    const stray = strayCode !== null && normCode(f.seed.exam.courseCode) === strayCode ? root : null;
+    coursesOut.push({ ...(await loadCourse(f.dir, f.label, f.seed, account, problems, stray)), examNote: f.examNote });
+  }
   const studyOut: StudyOnlyCourse[] = [];
   for (const f of foundStudy) studyOut.push(await loadStudyOnly(f.dir, f.label, f.code, f.seed, account, problems));
   if (problems.length) throw new BundleInvalid(problems);
@@ -704,7 +734,8 @@ export type ImportPlan = {
     /** `exams.start_new_on` (`YYYY-MM-DD`, a Helsinki day), or null when the bundle gives none. */
     startNewOn: string | null;
     /** `exams.grade_target`, as the seed gave it, or null. */
-    gradeTarget: number | null;
+    /** The seed's `gradeTarget` as given: a grade, or an object carrying it. */
+    gradeTarget: unknown;
   };
   concepts: PlannedConcept[];
   lectures: PlannedLecture[];
@@ -777,7 +808,12 @@ export function planImport(course: CourseBundle): ImportPlan {
   // Concepts: weights renormalised; position from studyOrder when the map has one.
   const total = seed.concepts.reduce((s, c) => s + c.weight, 0);
   const slugs = new Set(seed.concepts.map((c) => c.slug));
-  const ordered = map ? studyOrderSlugs(map) : [];
+  // A studyOrder may order concepts, or (as hand-made bundles do) lectures and groups. When none
+  // of its entries is a concept slug it is kept in the stored map and concepts keep the seed's order.
+  const orderGiven = map ? studyOrderSlugs(map) : [];
+  const slugSet = new Set(seed.concepts.map((c) => c.slug));
+  const orderIsOfConcepts = orderGiven.some((s) => slugSet.has(s));
+  const ordered = orderIsOfConcepts ? orderGiven : [];
   const orderIndex = new Map(ordered.map((s, i) => [s, i + 1]));
   const plannedConcepts: PlannedConcept[] = seed.concepts.map((c, i) => ({
     slug: c.slug,
@@ -797,6 +833,9 @@ export function planImport(course: CourseBundle): ImportPlan {
     const threadLists = Array.isArray(map.threads) ? map.threads.map((t) => t.concepts) : Object.values(map.threads);
     unknownIn("threads", threadLists.flat());
     unknownIn("studyOrder", ordered);
+    if (orderGiven.length && !orderIsOfConcepts) {
+      notes.push("studyOrder orders lectures or groups, not concepts: kept in the study map; concepts keep the seed's order.");
+    }
     if (ordered.length) {
       const missing = seed.concepts.filter((c) => !orderIndex.has(c.slug)).length;
       notes.push(
@@ -871,7 +910,11 @@ export function planImport(course: CourseBundle): ImportPlan {
 
   // Exam target, study start, AI policy, exam documents.
   const { exam } = seed;
-  const targetPct = exam.targetPct ?? (exam.gradeTarget ? targetPctForGrade(exam.gradeTarget as TargetGrade) : 80);
+  const targetGrade = gradeOfTarget(exam.gradeTarget);
+  const targetPct = exam.targetPct ?? (targetGrade ? targetPctForGrade(targetGrade as TargetGrade) : 80);
+  if (exam.targetPct !== undefined && targetGrade && targetPctForGrade(targetGrade as TargetGrade) !== exam.targetPct) {
+    notes.push(`exam.targetPct (${exam.targetPct}%) is used as the target; gradeTarget (grade ${targetGrade}) is kept beside it.`);
+  }
   const startDay = seed.startNewOn ?? exam.startNewOn ?? map?.startNewOn ?? null;
   const startNewAt = startDay ? helsinkiToInstant(startDay, "00:00") : null;
 
@@ -1274,7 +1317,11 @@ export async function applyImport(
       .from(concepts)
       .where(and(eq(concepts.userId, userId), eq(concepts.examId, examId)));
     const conceptBySlug = new Map(conceptRows.filter((c) => c.slug !== null).map((c) => [c.slug!, c]));
-    const conceptByName = new Map(conceptRows.filter((c) => c.slug === null).map((c) => [c.name.trim(), c]));
+    // By name only for rows without a slug yet, and only where the name points at one row and one
+    // planned concept: two concepts may share a name (the same idea under two lectures).
+    const slugless = conceptRows.filter((c) => c.slug === null);
+    const repeated = new Set([...dupValues(slugless.map((c) => c.name.trim())), ...dupValues(plan.concepts.map((c) => c.name.trim()))]);
+    const conceptByName = new Map(slugless.filter((c) => !repeated.has(c.name.trim())).map((c) => [c.name.trim(), c]));
     const conceptIdOf = new Map<string, string>();
     const newConcepts: PlannedConcept[] = [];
     for (const c of plan.concepts) {

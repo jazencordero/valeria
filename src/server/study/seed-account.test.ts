@@ -327,6 +327,59 @@ describe("applySeed", () => {
   );
 });
 
+describe("shapes a real hand-made bundles folder has (M3-57 follow-up)", () => {
+  it(
+    "takes course folders over a stray root seed, weightPct/maxPoints, a gradeTarget object beside targetPct, a repeated concept name, and a study-only seed with no courseCode",
+    async () => {
+      const real = path.join(tmp, "real-shaped");
+      await cp(bundles, real, { recursive: true });
+      // A copy of one course's seed left at the top, beside the course folders.
+      await cp(path.join(real, "TST-E0001", "seed.json"), path.join(real, "seed.json"));
+      // The exam seed: target written both ways (they disagree), and one concept name under two slugs.
+      const seedFile = path.join(real, "TST-E0001", "seed.json");
+      const examSeed = JSON.parse(await readFile(seedFile, "utf8"));
+      examSeed.exam.targetPct = 72;
+      examSeed.exam.gradeTarget = { grade: 4, examPointsNeeded: 31, of: 40, assumes: "invented" };
+      examSeed.concepts.push({ slug: "moving-average-again", name: examSeed.concepts[0].name, lecture: 1, position: 9, weight: 1 });
+      await write(seedFile, examSeed);
+      // The study-only seed carries no code: its folder name is the code.
+      const studyFile = path.join(real, "TST-E0003", "seed.json");
+      const studySeed = JSON.parse(await readFile(studyFile, "utf8"));
+      delete studySeed.courseCode;
+      await write(studyFile, studySeed);
+      await write(path.join(real, "account.json"), {
+        ...BUNDLES_ACCOUNT,
+        gradeWeights: [
+          { courseCode: "TST-E0001", items: [{ name: "Final exam", weightPct: 60, maxPoints: 40 }, { name: "Assignments", weightPct: 40 }] },
+        ],
+      });
+
+      const plan = planSeed(await loadSeed(ACCOUNT, real));
+      const r = await applySeed(t.db, plan, { name: "Testi", now: NOW });
+      expect(r.imports.map((i) => i.courseCode).sort()).toEqual(["TST-E0001", "TST-E0003"]);
+      expect(await t.db.select().from(lectureContent)).toHaveLength(2);
+
+      const [exam] = await t.db.select().from(exams).where(eq(exams.userId, r.userId));
+      expect(exam.targetPct).toBe(72);
+      expect(exam.gradeTarget).toEqual({ grade: 4, examPointsNeeded: 31, of: 40, assumes: "invented" });
+
+      const sameName = (await t.db.select().from(concepts).where(eq(concepts.userId, r.userId))).filter((c) => c.name === examSeed.concepts[0].name);
+      expect(sameName.map((c) => c.slug).sort()).toEqual(["moving-average", "moving-average-again"]);
+
+      const items = await t.db.select().from(gradeItems).where(eq(gradeItems.userId, r.userId));
+      const final = items.find((g) => g.name === "Final exam")!;
+      expect(Number(final.weight)).toBeCloseTo(0.6);
+      expect(Number(final.max)).toBe(40);
+      expect(Number(items.find((g) => g.name === "Assignments")!.weight)).toBeCloseTo(0.4);
+
+      // A second run still changes nothing.
+      const again = await applySeed(t.db, planSeed(await loadSeed(ACCOUNT, real)), { name: "Testi", now: NOW });
+      expect(touched(again)).toBe(0);
+    },
+    T,
+  );
+});
+
 describe("CLI", () => {
   it("parses its arguments", () => {
     expect(parseArgs(["a", "b", "--name", "Testi", "--dry-run"])).toMatchObject({ ok: true, args: { name: "Testi", dryRun: true, linkOnly: false, origin: "http://localhost:3000" } });

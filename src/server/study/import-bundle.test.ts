@@ -272,16 +272,84 @@ describe("loadBundle", () => {
     expect(problems.some((p) => p.startsWith("page.json") && p.includes("at least one section"))).toBe(true);
   });
 
-  it("refuses non-positive weights, a bad gradeTarget, and targetPct and gradeTarget that disagree", async () => {
+  it("refuses non-positive weights, a bad gradeTarget and a bad start date", async () => {
     const exam = { courseCode: "C", title: "T", kind: "exam", at: "2026-12-10T09:00:00Z" };
     for (const seed of [
       { exam, concepts: [{ slug: "a", name: "A", weight: 0 }], lectures: [] },
       { exam: { ...exam, gradeTarget: 6 }, concepts: [{ slug: "a", name: "A", weight: 1 }], lectures: [] },
-      { exam: { ...exam, gradeTarget: 3, targetPct: 90 }, concepts: [{ slug: "a", name: "A", weight: 1 }], lectures: [] },
+      { exam: { ...exam, gradeTarget: { grade: 9 } }, concepts: [{ slug: "a", name: "A", weight: 1 }], lectures: [] },
       { exam: { ...exam, startNewOn: "2026-02-30" }, concepts: [{ slug: "a", name: "A", weight: 1 }], lectures: [] },
     ]) {
       await write(path.join(dir, "seed.json"), seed);
       await expect(loadBundle(dir)).rejects.toBeInstanceOf(BundleInvalid);
+    }
+  });
+});
+
+describe("targets and names as a hand-made bundle writes them", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "bundle-"));
+    await cp(FIXTURE, dir, { recursive: true });
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+  const edit = async (change: (seed: { exam: Record<string, unknown>; concepts: Record<string, unknown>[] }) => void) => {
+    const seed = JSON.parse(await readFile(path.join(dir, "seed.json"), "utf8"));
+    change(seed);
+    await write(path.join(dir, "seed.json"), seed);
+    return planImport((await loadBundle(dir)).courses[0]);
+  };
+
+  it("reads the grade from a gradeTarget object and keeps the object whole", async () => {
+    const p = await edit((s) => (s.exam.gradeTarget = { grade: 3, examPointsNeeded: 24, of: 40 }));
+    expect(p.exam.targetPct).toBe(70);
+    expect(p.exam.gradeTarget).toEqual({ grade: 3, examPointsNeeded: 24, of: 40 });
+  });
+
+  it("accepts targetPct beside a gradeTarget that says something else: the percent is the target, both are kept", async () => {
+    const p = await edit((s) => Object.assign(s.exam, { targetPct: 66, gradeTarget: { grade: 4 } }));
+    expect(p.exam.targetPct).toBe(66);
+    expect(p.exam.gradeTarget).toEqual({ grade: 4 });
+    expect(p.notes.join("\n")).toContain("exam.targetPct (66%) is used as the target");
+  });
+
+  it("keeps a studyOrder of lectures or groups in the map and leaves concepts in the seed's order", async () => {
+    await write(path.join(dir, "map.json"), { prerequisites: {}, threads: [], studyOrder: ["lecture-1", "exam-essentials"] });
+    const p = await edit(() => {});
+    expect(p.problems).toEqual(expect.not.arrayContaining([expect.objectContaining({ file: "map.json" })]));
+    expect(p.concepts.map((c) => c.position)).toEqual([1, 2, 3]);
+    expect(p.exam.studyMap?.studyOrder).toEqual(["lecture-1", "exam-essentials"]);
+    expect(p.notes.join("\n")).toContain("studyOrder orders lectures or groups");
+  });
+
+  it("lets two concepts share a name: they are told apart by slug", async () => {
+    const p = await edit((s) => s.concepts.push({ slug: "moving-average-2", name: s.concepts[0].name, lecture: 1, position: 9, weight: 1 }));
+    expect(p.concepts.filter((c) => c.name === "Moving averages").map((c) => c.slug)).toEqual(["moving-average", "moving-average-2"]);
+  });
+
+  it("prefers course folders over a stray seed.json at the root", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "bundle-root-"));
+    try {
+      await cp(FIXTURE, path.join(root, "TST-E0001"), { recursive: true });
+      await cp(STUDY_FIXTURE, path.join(root, "TST-E0003"), { recursive: true });
+      await cp(path.join(FIXTURE, "seed.json"), path.join(root, "seed.json"));
+      const bundle = await loadBundle(root);
+      expect(bundle.courses.map((c) => c.seed.exam.courseCode)).toEqual(["TST-E0001"]);
+      expect(bundle.studyOnly.map((c) => c.courseCode)).toEqual(["TST-E0003"]);
+
+      // The stray copy's map is the only one: the course folder's seed names it, the root holds it.
+      await cp(path.join(root, "TST-E0001", "map.json"), path.join(root, "map.json"));
+      await rm(path.join(root, "TST-E0001", "map.json"));
+      const moved = await loadBundle(root);
+      expect(planImport(moved.courses[0]).exam.studyMap).toEqual(planImport(bundle.courses[0]).exam.studyMap);
+      expect(planImport(moved.courses[0]).exam.studyMap).not.toBeNull();
+      // Without the stray seed the root map belongs to nobody: the missing map is a problem again.
+      await rm(path.join(root, "seed.json"));
+      await expect(loadBundle(root)).rejects.toBeInstanceOf(BundleInvalid);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });
