@@ -237,6 +237,168 @@ function handinAnswer(fn, params, state) {
   }
 }
 
+// ---- Hand-in status and grades (M0-16), only with startMock({ account: true }) --------
+// Adds due/cut-off dates, drafts and group settings to the assignments (plus a group lab
+// 9004 and an untouched essay 9005 in CS-202), one submission status per assignment and
+// grade items per course. The grade report also carries ANOTHER user's entry, and both
+// carry feedback text, so the reader's filtering can be tested. `account: { failStatus:
+// [ids], failGrades: [courseids] }` makes those calls answer with an error.
+// Without the option every answer above is unchanged.
+
+export const OTHER_USERID = 43;
+export const ACCOUNT_FEEDBACK = "Mock feedback text: nice work on question 3.";
+
+const ACCOUNT_DETAILS = {
+  9001: { submissiondrafts: 1, cutoffdate: 1790121600, teamsubmission: 0 },
+  9002: { submissiondrafts: 1, cutoffdate: 0, teamsubmission: 0 },
+  9003: { submissiondrafts: 0, cutoffdate: 0, teamsubmission: 0 },
+};
+const ACCOUNT_EXTRA = [
+  { id: 9004, cmid: 5004, course: 202, name: "Lab 2: trees (group)", duedate: 1791849600, cutoffdate: 0, submissiondrafts: 0, teamsubmission: 1, intro: "<p>In pairs.</p>" },
+  { id: 9005, cmid: 5005, course: 202, name: "Optional essay", duedate: 0, cutoffdate: 0, submissiondrafts: 0, teamsubmission: 0, intro: "" },
+];
+
+function accountAssignments() {
+  return {
+    ...ASSIGNMENTS,
+    courses: ASSIGNMENTS.courses.map((c) => ({
+      ...c,
+      assignments: [
+        ...c.assignments.map((a) => ({ ...a, ...ACCOUNT_DETAILS[a.id] })),
+        ...ACCOUNT_EXTRA.filter((a) => a.course === c.id),
+      ],
+    })),
+  };
+}
+
+const submission = (id, status, timemodified, files = [], userid = MOCK_USERID) => ({
+  id: 880000 + id,
+  userid,
+  status,
+  timemodified,
+  groupid: 0,
+  plugins: [
+    {
+      type: "file",
+      name: "File submissions",
+      fileareas: [
+        {
+          area: "submission_files",
+          files: files.map(([filename, filesize]) => ({
+            filename,
+            filepath: "/",
+            filesize,
+            fileurl: `http://mock.local/webservice/pluginfile.php/9/assignsubmission_file/submission_files/${880000 + id}/${filename}`,
+          })),
+        },
+      ],
+    },
+    { type: "comments", name: "Submission comments" },
+  ],
+});
+
+const ACCOUNT_STATUS = {
+  // Handed in and graded, with feedback text that must not be kept.
+  9001: {
+    lastattempt: { submission: submission(9001, "submitted", 1789948800, [["ps1.pdf", 204800]]), submissionsenabled: true, graded: true, gradingstatus: "graded", canedit: false },
+    feedback: {
+      grade: { id: 1, assignment: 9001, userid: MOCK_USERID, grader: 7, grade: "18.00000" },
+      gradefordisplay: "18.00&nbsp;/&nbsp;20.00",
+      gradeddate: 1790300000,
+      plugins: [{ type: "comments", name: "Feedback comments", editorfields: [{ name: "comments", text: ACCOUNT_FEEDBACK, format: 1 }] }],
+    },
+  },
+  // Saved as a draft; Submit not pressed.
+  9002: { lastattempt: { submission: submission(9002, "draft", 1790900000, [["ps2-draft.pdf", 1500]]), submissionsenabled: true, graded: false, gradingstatus: "notgraded", canedit: true } },
+  // Never started.
+  9003: { lastattempt: { submission: submission(9003, "new", 0), submissionsenabled: true, graded: false, gradingstatus: "notgraded", canedit: true } },
+  // Group hand-in: her own submission stays "new", the group's is the one that counts.
+  9004: {
+    lastattempt: {
+      submission: submission(9004, "new", 0),
+      teamsubmission: submission(9004, "submitted", 1791700000, [["trees.zip", 3 * 1024 * 1024]], 0),
+      submissiongroupmemberswhoneedtosubmit: [OTHER_USERID],
+      submissionsenabled: true,
+      graded: true,
+      gradingstatus: "graded",
+      canedit: false,
+    },
+  },
+  // Nothing at all.
+  9005: { warnings: [] },
+};
+
+const gradeItem = (id, itemname, itemtype, extra = {}) => ({
+  id,
+  itemname,
+  itemtype,
+  itemmodule: null,
+  iteminstance: null,
+  graderaw: null,
+  grademin: 0,
+  grademax: 100,
+  gradedategraded: null,
+  gradeishidden: false,
+  gradehiddenbydate: false,
+  feedback: "",
+  ...extra,
+});
+
+function accountGrades(courseid, userid, fullname, offset) {
+  const g = (n) => (n === null ? null : n - offset);
+  if (Number(courseid) === 101) {
+    return {
+      courseid: 101,
+      userid,
+      userfullname: fullname,
+      gradeitems: [
+        gradeItem(41, "Problem set 1", "mod", { itemmodule: "assign", iteminstance: 9001, cmid: 5001, graderaw: g(18), grademax: 20, weightraw: 0.4, gradedategraded: 1790300000, feedback: ACCOUNT_FEEDBACK }),
+        gradeItem(42, "Problem set 2", "mod", { itemmodule: "assign", iteminstance: 9002, cmid: 5002, grademax: 20, weightraw: 0.4 }),
+        gradeItem(43, "Midterm exam", "manual", { graderaw: g(30), grademax: 40, gradedategraded: 1790400000, gradeishidden: true }),
+        gradeItem(44, "", "category", { graderaw: g(48), grademax: 60 }),
+        gradeItem(45, null, "course", { graderaw: g(48), grademax: 60, weightraw: null }),
+      ],
+    };
+  }
+  if (Number(courseid) === 202) {
+    return {
+      courseid: 202,
+      userid,
+      userfullname: fullname,
+      gradeitems: [
+        gradeItem(51, "Lab 1: linked lists", "mod", { itemmodule: "assign", iteminstance: 9003, cmid: 5003, grademax: 10 }),
+        gradeItem(52, "Lab 2: trees (group)", "mod", { itemmodule: "assign", iteminstance: 9004, cmid: 5004, graderaw: g(9.5), grademax: 10, weightraw: 0.5, gradedategraded: 1791800000 }),
+        gradeItem(53, null, "course", { graderaw: g(9.5), grademax: 20 }),
+      ],
+    };
+  }
+  return null;
+}
+
+function accountAnswer(fn, params, account) {
+  const fail = typeof account === "object" && account ? account : {};
+  switch (fn) {
+    case "mod_assign_get_assignments":
+      return accountAssignments();
+    case "mod_assign_get_submission_status": {
+      const id = Number(params.assignid);
+      if ((fail.failStatus || []).includes(id)) return wsError("nopermissions", "Sorry, but you do not currently have permissions to do that.", "required_capability_exception");
+      if (!ACCOUNT_STATUS[id]) return wsError("invalidrecord", "Can't find data record in database table assign.", "dml_missing_record_exception");
+      return ACCOUNT_STATUS[id];
+    }
+    case "gradereport_user_get_grade_items": {
+      const courseid = Number(params.courseid);
+      if ((fail.failGrades || []).includes(courseid)) return wsError("nopermissions", "Sorry, but you do not currently have permissions to do that.", "required_capability_exception");
+      const mine = accountGrades(courseid, MOCK_USERID, "Test Student", 0);
+      if (!mine) return wsError("invalidcourseid", "You are not enrolled in this course.");
+      // Another student's entry first, as if the site leaked it: the reader must skip it.
+      return { usergrades: [accountGrades(courseid, OTHER_USERID, "Other Student", -1), mine], warnings: [] };
+    }
+    default:
+      return undefined;
+  }
+}
+
 function wsError(errorcode, message, exception = "moodle_exception") {
   return { exception, errorcode, message };
 }
@@ -286,6 +448,7 @@ async function handle(req, res, opts, state) {
     state.calls.push({ fn, params });
     let special = opts.handin ? handinAnswer(fn, params, state) : undefined;
     if (special === undefined && opts.lectures) special = lectureAnswer(fn, params);
+    if (special === undefined && opts.account) special = accountAnswer(fn, params, opts.account);
     return send(res, 200, special !== undefined ? special : restAnswer(fn, params));
   }
 
@@ -349,11 +512,12 @@ async function handle(req, res, opts, state) {
  * `calls` logs every REST call ({ fn, params }) and every upload ({ fn: "upload" }).
  * `handin: true` turns on the hand-in answers (see handinAnswer).
  * `lectures: true` turns on the lecture PDF courses and downloads (see lectureAnswer).
+ * `account: true` (or { failStatus, failGrades }) turns on hand-in statuses and grades (see accountAnswer).
  */
-export function startMock({ port = 0, host = "127.0.0.1", handin = false, lectures = false } = {}) {
+export function startMock({ port = 0, host = "127.0.0.1", handin = false, lectures = false, account = false } = {}) {
   const state = { calls: [], drafts: new Map(), submissions: new Map() };
   const server = createServer((req, res) => {
-    handle(req, res, { handin, lectures }, state).catch((err) => send(res, 500, { error: String(err?.message || err), errorcode: "mockerror" }));
+    handle(req, res, { handin, lectures, account }, state).catch((err) => send(res, 500, { error: String(err?.message || err), errorcode: "mockerror" }));
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);
