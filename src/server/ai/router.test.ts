@@ -8,6 +8,7 @@ import { PROVIDERS, type ProviderEntry, type SizeClass } from "./providers.confi
 import {
   AiBadOutput,
   AiBusy,
+  ANTHROPIC_BALANCED_MODEL,
   ANTHROPIC_DEEP_MODEL,
   ANTHROPIC_SMALL_MODEL,
   createRouter,
@@ -606,9 +607,28 @@ describe("the tutor's paid path (anthropic)", () => {
     expect(logs).toEqual([]);
   });
 
-  it("`deeper` reruns on Claude Fable 5.2, capped at 1,200, with the server-side refusal fallback", async () => {
+  it("`level: \"balanced\"` uses Claude Sonnet 5.5, capped at 800, thinking off its own way, with the refusal fallback", async () => {
+    const { r, sent } = paidRouter(ok("Balanced."));
+    const { provider, model, result } = await r.streamChat({ ...tutorInput, level: "balanced" });
+    expect([provider, model]).toEqual(["anthropic", "claude-sonnet-5-5"]);
+    expect(ANTHROPIC_BALANCED_MODEL).toBe("claude-sonnet-5-5");
+    expect(await result.text).toBe("Balanced.");
+    expect(sent[0].headers).toMatchObject({ "anthropic-beta": "server-side-fallback-2026-07-01" });
+    // Claude Sonnet 5.5: `disabled` is a 400; `between_tools` (alone, effort high or below) is its "off".
+    expect(sent[0].body).toMatchObject({
+      model: "claude-sonnet-5-5",
+      max_tokens: 800,
+      thinking: { type: "between_tools" },
+      fallbacks: "default",
+      output_config: { effort: "low" },
+    });
+    expect(Object.keys(sent[0].body.thinking as object)).toEqual(["type"]);
+    expect(sent[0].body).not.toHaveProperty("temperature");
+  });
+
+  it("`level: \"deep\"` runs on Claude Fable 5.2, capped at 1,200, with the server-side refusal fallback", async () => {
     const { r, sent } = paidRouter(ok("Deeper."));
-    const { provider, model, result } = await r.streamChat({ ...tutorInput, deeper: true });
+    const { provider, model, result } = await r.streamChat({ ...tutorInput, level: "deep" });
     expect([provider, model]).toEqual(["anthropic", "claude-fable-5-2"]);
     expect(ANTHROPIC_DEEP_MODEL).toBe("claude-fable-5-2");
     expect(await result.text).toBe("Deeper.");
@@ -618,23 +638,31 @@ describe("the tutor's paid path (anthropic)", () => {
     expect(sent[0].body).not.toHaveProperty("thinking");
   });
 
-  it("`deeper` is the only path to the large model, and it needs the paid tutor path", async () => {
+  it("the large model is reached only by an explicit `level: \"deep\"`, and every level needs the paid tutor path", async () => {
     const { r, sent } = paidRouter(ok("Small."));
     for (let i = 0; i < 3; i++) await (await r.streamChat(tutorInput)).result.text;
-    await (await r.streamChat({ ...tutorInput, deeper: false })).result.text;
-    expect(sent.map((x) => x.body.model)).toEqual(["claude-haiku-5-5", "claude-haiku-5-5", "claude-haiku-5-5", "claude-haiku-5-5"]);
-    // Without `paid`, or from another job, `deeper` is refused before anything is sent.
+    await (await r.streamChat({ ...tutorInput, level: "quick" })).result.text;
+    await (await r.streamChat({ ...tutorInput, level: "balanced" })).result.text;
+    expect(sent.map((x) => x.body.model)).toEqual([
+      "claude-haiku-5-5",
+      "claude-haiku-5-5",
+      "claude-haiku-5-5",
+      "claude-haiku-5-5",
+      "claude-sonnet-5-5",
+    ]);
+    // Without `paid`, or from another job, a level is refused before anything is sent.
     const { paid: _paid, ...unpaid } = tutorInput;
     void _paid;
-    await expect(r.streamChat({ ...unpaid, deeper: true })).rejects.toBeInstanceOf(PaidNotAllowed);
-    await expect(r.streamChat({ ...tutorInput, deeper: true, job: "assignment-chat" })).rejects.toBeInstanceOf(PaidNotAllowed);
-    expect(sent).toHaveLength(4);
+    await expect(r.streamChat({ ...unpaid, level: "deep" })).rejects.toBeInstanceOf(PaidNotAllowed);
+    await expect(r.streamChat({ ...unpaid, level: "balanced" })).rejects.toBeInstanceOf(PaidNotAllowed);
+    await expect(r.streamChat({ ...tutorInput, level: "deep", job: "assignment-chat" })).rejects.toBeInstanceOf(PaidNotAllowed);
+    expect(sent).toHaveLength(5);
   });
 
-  it("`deeper` with no key goes to the free providers: nothing calls Anthropic", async () => {
+  it("`level: \"deep\"` with no key goes to the free providers: nothing calls Anthropic", async () => {
     ai.queue("groq", { text: "Free deeper." });
     const { r, sent } = paidRouter(ok("never"), { ANTHROPIC_API_KEY: undefined });
-    const { provider, result } = await r.streamChat({ ...tutorInput, deeper: true });
+    const { provider, result } = await r.streamChat({ ...tutorInput, level: "deep" });
     expect(provider).toBe("groq");
     expect(await result.text).toBe("Free deeper.");
     expect(sent).toHaveLength(0);

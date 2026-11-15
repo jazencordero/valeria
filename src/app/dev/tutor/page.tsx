@@ -6,20 +6,25 @@
  * Both handles work: the one between the note and the chat, and (from 700 px) the panel's left
  * edge, whose width is remembered on this device. Under 700 px the panel is the modal sheet.
  *
- * States (buttons, or /dev/tutor#empty, #mid, #budget):
+ * States (buttons, or /dev/tutor#empty, #mid, #budget, #levels, #meter8, #meter85, #study):
  * - empty: a fresh highlight, the three starters (tap one: a made-up answer streams in);
  * - mid: an answer still arriving;
- * - budget: the month's tutor budget is spent, so the answer came from a free model and
- *   "Go deeper" is not offered.
+ * - budget: the month's tutor budget is spent, so the answer came from a free model, "Go deeper"
+ *   is not offered, the picker is the one line "Free model this month" and the chip is full;
+ * - levels: the picker with its three levels (Balanced chosen), an answer from the middle model;
+ * - meter8 / meter85: the usage chip's popover open at about 8% and about 85% (amber);
+ * - study: the course's study-rule question (Yes / No / Not sure) above the chat.
  */
 import { useEffect, useState } from "react";
 import type { NotepadContextResult, NotepadSaveResult } from "@/app/(app)/notes/actions";
 import type { AddCardsResult, ExamChoicesResult } from "@/app/(app)/notes/card-actions";
 import { NotepadView, openNotepad, type NotepadActions } from "@/components/notes/notepad";
 import type { TutorApi, TutorPreview } from "@/components/tutor/tutor-chat";
+import type { TutorMeter } from "@/components/tutor/tutor-controls";
 import { Button } from "@/components/ui/button";
 
-type Demo = "empty" | "mid" | "budget";
+const DEMOS = ["empty", "mid", "budget", "levels", "meter8", "meter85", "study"] as const;
+type Demo = (typeof DEMOS)[number];
 
 const FAKE_NOTE = "00000000-0000-4000-8000-000000000001";
 const FREE_MODEL = "groq:openai/gpt-oss-120b";
@@ -31,6 +36,31 @@ const ANSWER =
   "Say you get 110 euros in one year and the bank pays 10% a year. Put 100 in the bank today and it grows to " +
   "100 × 1.10 = 110. So the 110 later is worth 100 now: PV = 110 / 1.10 = 100.\n\n" +
   "Check: what is 121 euros in two years worth today at 10%?";
+
+const MIDDLE_MODEL = "anthropic:claude-sonnet-5-5";
+const COURSE = "00000000-0000-4000-8000-0000000000c1";
+
+/** A made-up allowance: `fraction` of 150 EUR used, the estimates scaled to what is left. */
+function meter(fraction: number): TutorMeter {
+  const left = 150 * (1 - fraction);
+  return {
+    usedEur: 150 * fraction,
+    budgetEur: 150,
+    fraction,
+    resetsOn: "2026-12-01",
+    paidAvailable: fraction < 1,
+    levels: {
+      quick: { answersLeft: Math.floor(left / 0.0004), basis: "own" },
+      balanced: { answersLeft: Math.floor(left / 0.0098), basis: "default" },
+      deep: { answersLeft: Math.floor(left / 0.052), basis: "default" },
+    },
+  };
+}
+
+const ANSWERED = [
+  { id: "q1", role: "user" as const, text: "Explain this simply" },
+  { id: "a1", role: "assistant" as const, text: ANSWER, model: MIDDLE_MODEL, answerId: "00000000-0000-4000-8000-0000000000a1" },
+];
 
 const PREVIEWS: Record<Demo, TutorPreview> = {
   empty: { turns: [], deeperAvailable: true },
@@ -48,6 +78,16 @@ const PREVIEWS: Record<Demo, TutorPreview> = {
       { id: "a1", role: "assistant", text: ANSWER, model: FREE_MODEL, answerId: "00000000-0000-4000-8000-0000000000a1" },
     ],
     deeperAvailable: false,
+    meter: meter(1),
+  },
+  levels: { turns: ANSWERED, deeperAvailable: true, level: "balanced", meter: meter(0.08), draft: "And with 5% instead?" },
+  meter8: { turns: ANSWERED, deeperAvailable: true, meter: meter(0.08), meterOpen: true },
+  meter85: { turns: ANSWERED, deeperAvailable: true, level: "deep", meter: meter(0.85), meterOpen: true },
+  study: {
+    turns: [],
+    deeperAvailable: true,
+    meter: meter(0.08),
+    study: { courseId: COURSE, courseName: "Corporate Finance", rule: "unknown" },
   },
 };
 
@@ -84,6 +124,8 @@ const API: TutorApi = {
     const body = JSON.parse(String(init?.body ?? "{}")) as { mode?: string };
     if (body.mode === "load") return Response.json({ messages: [], deeperAvailable: false });
     if (body.mode === "copy") return Response.json({ text: "A study prompt would be here.", note: null });
+    if (body.mode === "usage") return Response.json({ meter: meter(0.08) });
+    if (body.mode === "study-rule") return Response.json({ ok: true, rule: "allowed" });
     return fakeStream(ANSWER);
   },
   writeClipboard: async () => {},
@@ -101,7 +143,7 @@ export default function TutorDevPage() {
   useEffect(() => {
     const fromHash = () => {
       const h = window.location.hash.slice(1);
-      if (h === "empty" || h === "mid" || h === "budget") pick(h);
+      if ((DEMOS as readonly string[]).includes(h)) pick(h as Demo);
     };
     const t = window.setTimeout(fromHash, 0);
     window.addEventListener("hashchange", fromHash);
@@ -133,6 +175,18 @@ export default function TutorDevPage() {
           </Button>
           <Button onClick={() => pick("budget")} data-testid="open-budget">
             Over budget
+          </Button>
+          <Button onClick={() => pick("levels")} data-testid="open-levels">
+            Model picker
+          </Button>
+          <Button onClick={() => pick("meter8")} data-testid="open-meter8">
+            Allowance 8%
+          </Button>
+          <Button onClick={() => pick("meter85")} data-testid="open-meter85">
+            Allowance 85%
+          </Button>
+          <Button onClick={() => pick("study")} data-testid="open-study">
+            Study rule question
           </Button>
         </div>
       </header>

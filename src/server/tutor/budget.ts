@@ -3,6 +3,7 @@
  *
  *   if (await claudeAllowed()) ai.streamChat({ ..., paid: "tutor" });   // else the free models only
  *   const line = await tutorBudgetLine();   // "Tutor this month: about 12 EUR of 150"
+ *   const meter = await tutorMeter(userId);  // the chat's usage chip and its popover
  *
  * - Spend is the sum of `tutor_messages` answers whose model starts with "anthropic:", for ALL
  *   users (one key, one bill), from the start of the calendar month in Europe/Helsinki (where
@@ -18,37 +19,73 @@
  * No AI SDK and no router in here (tests/arch/ai-boundary.test.ts); the router imports the
  * model ids and caps from here, so the ids and their prices sit in one block.
  */
-import { and, eq, gte, like, sum } from "drizzle-orm";
+import { and, count, eq, gte, like, sum } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { tutorMessages } from "@/server/db/schema/learn";
 
 /*
  * The tutor's Claude models and their prices, USD per million tokens.
- * Checked 2026-11-15 in the claude-api skill (model table "cached 2026-11-03", Claude Haiku 5.5
- * and Claude Fable 5.2 migration notes, prompt-caching economics), which points at
- * https://platform.claude.com/docs/en/about-claude/pricing for the live figures.
- * - claude-haiku-5-5 (the current small Claude, everyday answers): $0.10 in / $0.50 out for
+ * Checked 2026-11-15 in the claude-api skill (model table "cached 2026-11-03", the Claude Haiku
+ * 5.5, Claude Sonnet 5.5 and Claude Fable 5.2 migration notes, prompt-caching economics), which
+ * points at https://platform.claude.com/docs/en/about-claude/pricing for the live figures.
+ * - claude-haiku-5-5 (the current small Claude, "Quick", the default): $0.10 in / $0.50 out for
  *   prompts of 100K tokens or fewer (the tutor's are a few thousand); cache reads 0.1x the input
  *   rate, 5-minute cache writes 1.25x.
- * - claude-fable-5-2 ("Go deeper" only): $8 in / $40 out, cache reads $0.20, 5-minute cache
- *   writes 1.25x ($10). A server-side refusal fallback answers in the same call and is counted
- *   here at these (higher) rates.
- * Re-check both before relying on the euro line; a price change is a one-line edit here.
+ * - claude-sonnet-5-5 (the current middle Claude, "Balanced"): $2 in / $10 out, cache reads
+ *   $0.10 (half Claude Sonnet 5's rate), 5-minute cache writes $2.50. A server-side refusal
+ *   fallback (to Claude Sonnet 5, same $2 / $10) answers in the same call and is counted here.
+ * - claude-fable-5-2 (the large Claude, "Deep" and "Go deeper"): $8 in / $40 out, cache reads
+ *   $0.20, 5-minute cache writes 1.25x ($10). A server-side refusal fallback answers in the
+ *   same call and is counted here at these (higher) rates.
+ * Re-check all three before relying on the euro line; a price change is a one-line edit here.
+ *
+ * Answer caps (output tokens, thinking included where the model thinks): Quick 500, Balanced
+ * 800, Deep 1,200 (Jazen, 2026-11-15). The keys `small` / `balanced` / `deep` are the models;
+ * `TUTOR_LEVELS` below maps the picker's levels onto them.
  */
 export const TUTOR_CLAUDE = {
   small: {
     id: "claude-haiku-5-5",
-    /** Everyday answers are capped here (output tokens). */
+    /** Quick answers are capped here (output tokens). */
     maxTokens: 500,
     usdPerMTok: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   },
+  balanced: {
+    id: "claude-sonnet-5-5",
+    /** Balanced answers are capped here (output tokens). */
+    maxTokens: 800,
+    usdPerMTok: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+  },
   deep: {
     id: "claude-fable-5-2",
-    /** "Go deeper" answers are capped here (output tokens). */
+    /** Deep and "Go deeper" answers are capped here (output tokens). */
     maxTokens: 1200,
     usdPerMTok: { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 },
   },
 } as const;
+
+/**
+ * The picker's three levels (her explicit choice; the client never sends a model id). The
+ * server maps a level to a model here; "Go deeper" is a one-shot "deep".
+ */
+export const TUTOR_LEVELS = ["quick", "balanced", "deep"] as const;
+export type TutorLevel = (typeof TUTOR_LEVELS)[number];
+export const LEVEL_MODEL: Record<TutorLevel, (typeof TUTOR_CLAUDE)[keyof typeof TUTOR_CLAUDE]> = {
+  quick: TUTOR_CLAUDE.small,
+  balanced: TUTOR_CLAUDE.balanced,
+  deep: TUTOR_CLAUDE.deep,
+};
+
+/**
+ * The picker's cost marks: 1 + round(log2(price ratio to Quick) / 2) dots, the ratio taken on
+ * the output price (the input prices have the same ratio, 1 : 20 : 80). Quick 1, Balanced 3
+ * (20x), Deep 4 (80x). The chat draws the same numbers (src/components/tutor/tutor-chat.tsx,
+ * `LEVEL_CHOICES`), tested equal on both sides.
+ */
+export function costDots(level: TutorLevel): number {
+  const ratio = LEVEL_MODEL[level].usdPerMTok.output / TUTOR_CLAUDE.small.usdPerMTok.output;
+  return 1 + Math.round(Math.log2(ratio) / 2);
+}
 
 /** Prices checked on this date (see the block above). */
 export const PRICES_CHECKED = "2026-11-15";
@@ -176,4 +213,130 @@ export async function tutorBudgetLine(env: Env = process.env, now: Date = new Da
   const { eur } = await monthSpend(now, database);
   const budget = budgetEur(env);
   return `Tutor this month: about ${Math.round(eur)} EUR of ${Number.isInteger(budget) ? budget : budget.toFixed(2)}`;
+}
+
+/*
+ * The chat's usage meter (the chip and its popover).
+ *
+ * - The bar is ALL users' tutor spend this month against the one budget (`monthSpend`): it is
+ *   Jazen's allowance, one key and one bill, so it is the same bar for everyone who sees it.
+ * - "What is left at each level" uses HER answers this month: per level, her average tokens per
+ *   answer priced at that level's model (`costEur`), then (budget - spend) / that. A level she has
+ *   not used this month uses `DEFAULT_ANSWER_TOKENS` below. "Go deeper" answers count as Deep.
+ * - Everything here is an estimate; the popover says so.
+ */
+
+/**
+ * Tokens per answer before she has any at a level (chosen 2026-11-15 from the tutor's prompt:
+ * rules plus a passage and its section are about 3,500 input tokens, most of it read from the
+ * prompt cache after the first answer; answers run to roughly 70% of their cap, Deep's output
+ * including its short thinking at effort "low").
+ */
+export const DEFAULT_ANSWER_TOKENS: Record<TutorLevel, TokenUse> = {
+  quick: { input: 2000, output: 350, cacheRead: 1500, cacheWrite: 500 },
+  balanced: { input: 2000, output: 550, cacheRead: 1500, cacheWrite: 500 },
+  deep: { input: 2000, output: 900, cacheRead: 1500, cacheWrite: 500 },
+};
+
+export type LevelLeft = {
+  /** About how many more answers at this level fit in what is left of the budget. */
+  answersLeft: number;
+  /** "own": from her answers this month; "default": `DEFAULT_ANSWER_TOKENS`. */
+  basis: "own" | "default";
+};
+
+export type TutorMeter = {
+  usedEur: number;
+  budgetEur: number;
+  /** usedEur / budgetEur, 0 to 1 (1 when the budget is 0). */
+  fraction: number;
+  /** The local date (Europe/Helsinki) the month turns, "YYYY-MM-DD". */
+  resetsOn: string;
+  /** Paid levels can be chosen now: the key is set and there is budget left. */
+  paidAvailable: boolean;
+  levels: Record<TutorLevel, LevelLeft>;
+};
+
+/** The level a stored "anthropic:<id>" answer was on, or null. */
+function levelOf(model: string | null): TutorLevel | null {
+  if (!model?.startsWith(ANTHROPIC_PREFIX)) return null;
+  const id = model.slice(ANTHROPIC_PREFIX.length);
+  return TUTOR_LEVELS.find((l) => LEVEL_MODEL[l].id === id) ?? null;
+}
+
+/** Her answers this month on the Claude path: per level, the tokens of one average answer. */
+export async function ownAverages(
+  userId: string,
+  now: Date = new Date(),
+  database: Db = defaultDb,
+): Promise<Partial<Record<TutorLevel, TokenUse>>> {
+  const { start } = monthOf(now);
+  const rows = await database
+    .select({
+      model: tutorMessages.model,
+      n: count(),
+      input: sum(tutorMessages.tokensIn),
+      output: sum(tutorMessages.tokensOut),
+      cacheRead: sum(tutorMessages.cacheReadTokens),
+      cacheWrite: sum(tutorMessages.cacheWriteTokens),
+    })
+    .from(tutorMessages)
+    .where(
+      and(
+        eq(tutorMessages.userId, userId),
+        gte(tutorMessages.createdAt, start),
+        like(tutorMessages.model, `${ANTHROPIC_PREFIX}%`),
+        eq(tutorMessages.role, "assistant"),
+      ),
+    )
+    .groupBy(tutorMessages.model);
+  const num = (v: string | null) => (v === null ? 0 : Number(v));
+  const totals: Partial<Record<TutorLevel, TokenUse & { n: number }>> = {};
+  for (const r of rows) {
+    const level = levelOf(r.model);
+    if (!level || r.n === 0) continue;
+    const t = (totals[level] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, n: 0 });
+    t.input += num(r.input);
+    t.output += num(r.output);
+    t.cacheRead += num(r.cacheRead);
+    t.cacheWrite += num(r.cacheWrite);
+    t.n += r.n;
+  }
+  const out: Partial<Record<TutorLevel, TokenUse>> = {};
+  for (const level of TUTOR_LEVELS) {
+    const t = totals[level];
+    if (t) out[level] = { input: t.input / t.n, output: t.output / t.n, cacheRead: t.cacheRead / t.n, cacheWrite: t.cacheWrite / t.n };
+  }
+  return out;
+}
+
+/** "YYYY-MM-DD" of `at` in `zone`. */
+function localDate(at: Date, zone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
+}
+
+/** The chat's usage meter for `userId`. Reads token counts only; no AI call. */
+export async function tutorMeter(
+  userId: string,
+  env: Env = process.env,
+  now: Date = new Date(),
+  database: Db = defaultDb,
+): Promise<TutorMeter> {
+  const budget = budgetEur(env);
+  const [{ eur: used }, own] = await Promise.all([monthSpend(now, database), ownAverages(userId, now, database)]);
+  const left = Math.max(0, budget - used);
+  const levels = {} as Record<TutorLevel, LevelLeft>;
+  for (const level of TUTOR_LEVELS) {
+    const use = own[level] ?? DEFAULT_ANSWER_TOKENS[level];
+    const each = costEur(`${ANTHROPIC_PREFIX}${LEVEL_MODEL[level].id}`, use);
+    levels[level] = { answersLeft: each > 0 ? Math.floor(left / each) : 0, basis: own[level] ? "own" : "default" };
+  }
+  return {
+    usedEur: used,
+    budgetEur: budget,
+    fraction: budget > 0 ? Math.min(1, used / budget) : 1,
+    resetsOn: localDate(monthOf(now).end, TUTOR_TIME_ZONE),
+    paidAvailable: Boolean(env.ANTHROPIC_API_KEY) && budget > 0 && used < budget,
+    levels,
+  };
 }

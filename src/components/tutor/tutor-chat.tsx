@@ -40,6 +40,13 @@
  * asked, `studyAskedKey`, so it is not asked again here). Until she says yes, the server answers
  * from general knowledge and says so once.
  *
+ * Model and allowance (src/components/tutor/tutor-controls.tsx): beside "Ask" she picks Quick,
+ * Balanced or Deep (remembered on this device, `LEVEL_KEY`; sent as `level`, never a model id);
+ * while no paid level is available (no key, or the month's budget is spent; the load answer's
+ * `paidLevels`) it is one disabled line, "Free model this month". "Go deeper" stays a one-shot
+ * rerun on Deep. At the top of the chat a small chip shows this month's tutor budget used
+ * (`{ mode: "usage" }`, shown only when a key is set) and opens a popover with the details.
+ *
  * `TutorChatView` is the pure view (plain props); `TutorChat` talks to POST /api/ai/tutor
  * (src/app/api/ai/tutor/route.ts) and reads its UI message stream by hand (the AI SDK stays in
  * src/server/ai, tests/arch/ai-boundary.test.ts).
@@ -47,6 +54,15 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { GRADE_GROUP_LABEL } from "@/components/session/grade-buttons";
 import { Button } from "@/components/ui/button";
+import {
+  DEFAULT_LEVEL,
+  LevelPicker,
+  readLevel,
+  rememberLevel,
+  UsageMeter,
+  type TutorLevel,
+  type TutorMeter,
+} from "@/components/tutor/tutor-controls";
 import type { TutorWhere } from "@/server/tutor/context";
 
 /** Same words as TUTOR_RESTING in src/server/tutor/context.ts (tested equal). */
@@ -83,8 +99,16 @@ export type TutorChatViewProps = {
   draft: string;
   /** One quiet line under the box (resting, an error, "Copied ..."). */
   status: string | null;
-  /** "Go deeper" can be offered (a key is set and the month's budget is not spent). */
+  /** The Claude levels and "Go deeper" can be offered (a key is set and the month's budget is not spent). */
   deeperAvailable: boolean;
+  /** The picker's level (default Quick). */
+  level?: TutorLevel;
+  onLevel?: (level: TutorLevel) => void;
+  /** This month's allowance for the chip; null or absent: no chip (no key). */
+  meter?: TutorMeter | null;
+  /** The chip's popover is open. */
+  meterOpen?: boolean;
+  onMeterOpen?: (open: boolean) => void;
   /** The chat is about a highlight: an empty chat starts with the starters. */
   aboutQuote: boolean;
   onDraft: (text: string) => void;
@@ -116,7 +140,7 @@ const LINK =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]";
 
 export function TutorChatView(props: TutorChatViewProps) {
-  const { turns, busy, draft, status, deeperAvailable, aboutQuote, studyAsk } = props;
+  const { turns, busy, draft, status, deeperAvailable, aboutQuote, studyAsk, meter } = props;
   const headingId = useId();
   const askId = useId();
   const boxId = useId();
@@ -137,10 +161,17 @@ export function TutorChatView(props: TutorChatViewProps) {
   };
 
   return (
-    <section aria-labelledby={headingId} className="flex min-h-0 flex-1 flex-col" data-testid="tutor-chat">
-      <h3 id={headingId} className="sr-only">
-        Tutor
-      </h3>
+    <section aria-labelledby={headingId} className="relative flex min-h-0 flex-1 flex-col" data-testid="tutor-chat">
+      <div className="flex flex-none items-center justify-between gap-2">
+        <h3 id={headingId} className="sr-only">
+          Tutor
+        </h3>
+        {meter ? (
+          <div className="ml-auto">
+            <UsageMeter meter={meter} open={props.meterOpen ?? false} onOpen={(o) => props.onMeterOpen?.(o)} />
+          </div>
+        ) : null}
+      </div>
       {studyAsk ? (
         <div
           role="group"
@@ -263,12 +294,20 @@ export function TutorChatView(props: TutorChatViewProps) {
         <p className="m-0 min-h-[20px] pt-1 text-[13px] text-ink-2" aria-live="polite" data-testid="tutor-status">
           {status ?? (draft.length > MESSAGE_MAX - 500 ? `${MESSAGE_MAX - draft.length} characters left` : "")}
         </p>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="flex items-start gap-2">
+          <LevelPicker
+            level={props.level ?? DEFAULT_LEVEL}
+            available={deeperAvailable}
+            disabled={busy}
+            onLevel={(l) => props.onLevel?.(l)}
+          />
+          <Button type="submit" size="sm" disabled={busy || !draft.trim()} className="min-w-[88px] flex-none" data-testid="tutor-send">
+            {busy ? "Answering…" : "Ask"}
+          </Button>
+        </div>
+        <div className="mt-1">
           <Button type="button" variant="secondary" size="sm" onClick={props.onCopy} data-testid="tutor-copy">
             Copy for Claude
-          </Button>
-          <Button type="submit" size="sm" disabled={busy || !draft.trim()} data-testid="tutor-send">
-            {busy ? "Answering…" : "Ask"}
           </Button>
         </div>
       </form>
@@ -424,8 +463,21 @@ export type StudyInView = { courseId: string; courseName: string; rule: "unknown
 type Loaded = {
   messages: { id: string; role: "user" | "assistant"; text: string; model: string | null }[];
   deeperAvailable: boolean;
+  /** Same value as `deeperAvailable` (newer name): the Claude levels can be chosen. */
+  paidLevels?: boolean;
+  /** The allowance chip's data; null without a key. */
+  meter?: TutorMeter | null;
   study?: StudyInView | null;
 };
+
+/** A meter from the route, or null when it is missing or not the expected shape. */
+function validMeter(m: unknown): TutorMeter | null {
+  if (typeof m !== "object" || m === null) return null;
+  const v = m as Partial<TutorMeter>;
+  if (typeof v.fraction !== "number" || typeof v.usedEur !== "number" || typeof v.budgetEur !== "number") return null;
+  if (typeof v.resetsOn !== "string" || typeof v.levels !== "object" || v.levels === null) return null;
+  return v as TutorMeter;
+}
 
 /** This device's note that she answered "Not sure" for a course (so it is asked once). */
 export const studyAskedKey = (courseId: string) => `ready.tutor.studyAsked.${courseId}`;
@@ -470,7 +522,18 @@ const DEFAULT_API: TutorApi = {
 };
 
 /** /dev/tutor: a chat already in a state, with no load. */
-export type TutorPreview = { turns: ChatTurn[]; busy?: boolean; deeperAvailable?: boolean; draft?: string; status?: string | null };
+export type TutorPreview = {
+  turns: ChatTurn[];
+  busy?: boolean;
+  deeperAvailable?: boolean;
+  draft?: string;
+  status?: string | null;
+  level?: TutorLevel;
+  meter?: TutorMeter | null;
+  meterOpen?: boolean;
+  /** The study-rule question, as if the load answer said the rule is unknown. */
+  study?: StudyInView | null;
+};
 
 export type TutorChatProps = {
   /** The note's stored id when it opened (null for a new note). Remount (`key`) per note. */
@@ -501,7 +564,11 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
   const [busy, setBusy] = useState(preview?.busy ?? false);
   const [status, setStatus] = useState<string | null>(preview?.status ?? null);
   const [deeperAvailable, setDeeperAvailable] = useState(preview?.deeperAvailable ?? false);
-  const [study, setStudy] = useState<StudyInView | null>(null);
+  const [study, setStudy] = useState<StudyInView | null>(preview?.study ?? null);
+  // This device's last level. The chat mounts only once the panel opens in the browser.
+  const [level, setLevel] = useState<TutorLevel>(() => preview?.level ?? (typeof window === "undefined" ? DEFAULT_LEVEL : readLevel()));
+  const [meter, setMeter] = useState<TutorMeter | null>(preview?.meter ?? null);
+  const [meterOpen, setMeterOpen] = useState(preview?.meterOpen ?? false);
   const [studySaving, setStudySaving] = useState(false);
   const key = useRef<Key>(noteId ? { decided: true, noteId } : card ? { decided: true, noteId: null } : { decided: false });
   const aborter = useRef<AbortController | null>(null);
@@ -515,6 +582,23 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
   // Stop a streaming answer when the note closes.
   useEffect(() => () => aborter.current?.abort(), []);
 
+  // The chip comes with the load answer; opening its popover reads it fresh (`mode: "usage"`).
+  const openMeter = useCallback(
+    (open: boolean) => {
+      setMeterOpen(open);
+      if (!open || preview) return;
+      void postJson<{ meter: TutorMeter | null }>(api.fetch, { mode: "usage" }).then((out) => {
+        if (out && "meter" in out) setMeter(validMeter(out.meter));
+      });
+    },
+    [api.fetch, preview],
+  );
+
+  const chooseLevel = useCallback((l: TutorLevel) => {
+    setLevel(l);
+    rememberLevel(l);
+  }, []);
+
   // The stored chat (and whether "Go deeper" can be offered), once per note.
   useEffect(() => {
     if (preview) return;
@@ -523,7 +607,8 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
     if (noteId) body.noteId = noteId;
     void postJson<Loaded>(api.fetch, body, controller.signal).then((loaded) => {
       if (!loaded || controller.signal.aborted) return;
-      setDeeperAvailable(loaded.deeperAvailable === true);
+      setDeeperAvailable((loaded.paidLevels ?? loaded.deeperAvailable) === true);
+      setMeter(validMeter(loaded.meter));
       const s = loaded.study;
       if (s && typeof s.courseId === "string" && s.rule === "unknown" && !studyAsked(s.courseId)) setStudy(s);
       // A new highlight starts empty; otherwise show the stored chat (note's or place's).
@@ -566,6 +651,7 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
       const body: Record<string, unknown> = { text: question, where: where() };
       if (id) body.noteId = id;
       if (quote && !card) body.quote = quote.slice(0, MESSAGE_MAX);
+      if (deeperAvailable) body.level = level;
       const controller = new AbortController();
       aborter.current = controller;
       const out = await askTutor(
@@ -587,7 +673,7 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
       setDraft((now) => (now.trim() ? now : question));
       setStatus(out.line);
     },
-    [api.fetch, card, chatNoteId, quote, setBusyBoth, where],
+    [api.fetch, card, chatNoteId, deeperAvailable, level, quote, setBusyBoth, where],
   );
 
   const deeper = useCallback(
@@ -680,6 +766,11 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, c
       draft={draft}
       status={status}
       deeperAvailable={deeperAvailable}
+      level={level}
+      onLevel={chooseLevel}
+      meter={meter}
+      meterOpen={meterOpen}
+      onMeterOpen={openMeter}
       aboutQuote={Boolean(quote)}
       onDraft={(text) => {
         setDraft(text);

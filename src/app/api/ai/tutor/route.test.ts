@@ -401,13 +401,108 @@ describe("POST /api/ai/tutor", () => {
     expect(call.body).toMatchObject({ model: "claude-fable-5-2", max_tokens: 1200 });
     // The same question again, with only what came before it as history.
     expect(call.body.messages).toEqual([{ role: "user", content: "What is NPV?" }]);
-    // Only "Go deeper" ever reached the large model.
+    // Only her explicit choice ("Go deeper" here) ever reached the large model.
     expect(anthropicCalls.map((c) => c.body.model)).toEqual(["claude-haiku-5-5", "claude-haiku-5-5", "claude-fable-5-2"]);
 
     await vi.waitFor(async () => expect(await t.db.select().from(tutorMessages)).toHaveLength(5));
     const loaded = (await (await POST(post({ mode: "load", where: OTHER }, s.cookie))).json()) as { messages: { role: string; text: string; replyTo: string | null }[] };
     expect(loaded.messages.map((m) => m.text)).toEqual(["What is NPV?", "Small answer.", "Deeper answer.", "And IRR?", "A second one."]);
     expect(loaded.messages[2].replyTo).toBe(meta.questionId);
+  });
+
+  it("the picker's level picks the model on the server: Quick by default, Balanced Sonnet 5.5, Deep Fable 5.2", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    anthropic = () => anthropicSse("Answer.");
+    const s = await student();
+    for (const level of [undefined, "quick", "balanced", "deep"]) {
+      const res = await POST(post({ text: QUESTION, where: OTHER, ...(level ? { level } : {}) }, s.cookie));
+      expect(await answerOf(res)).toBe("Answer.");
+    }
+    expect(anthropicCalls.map((c) => [c.body.model, c.body.max_tokens])).toEqual([
+      ["claude-haiku-5-5", 500],
+      ["claude-haiku-5-5", 500],
+      ["claude-sonnet-5-5", 800],
+      ["claude-fable-5-2", 1200],
+    ]);
+    const load = (await (await POST(post({ mode: "load", where: OTHER }, s.cookie))).json()) as { paidLevels: boolean; deeperAvailable: boolean };
+    expect(load).toMatchObject({ paidLevels: true, deeperAvailable: true });
+  });
+
+  it("the client can never name a model: anything but the three levels is refused before anything is sent", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    anthropic = () => anthropicSse("never");
+    const s = await student();
+    for (const level of ["claude-fable-5-2", "max", "", 3]) {
+      expect((await POST(post({ text: QUESTION, where: OTHER, level }, s.cookie))).status).toBe(400);
+    }
+    expect(anthropicCalls).toHaveLength(0);
+    expect(ai.calls).toHaveLength(0);
+  });
+
+  it("with no key a chosen level is ignored: the free models answer and nothing calls Anthropic", async () => {
+    const s = await student();
+    ai.queue("groq", { text: "Free deep." });
+    const res = await POST(post({ text: QUESTION, where: OTHER, level: "deep" }, s.cookie));
+    expect(await answerOf(res)).toBe("Free deep.");
+    expect(anthropicCalls).toHaveLength(0);
+    const load = (await (await POST(post({ mode: "load", where: OTHER }, s.cookie))).json()) as { paidLevels: boolean };
+    expect(load.paidLevels).toBe(false);
+  });
+
+  describe("usage mode", () => {
+    it("is 404 without the tutor switch, and null without a key; it calls no AI", async () => {
+      const off = await student({ tutor: false });
+      expect((await POST(post({ mode: "usage" }, off.cookie))).status).toBe(404);
+      const s = await student();
+      const res = await POST(post({ mode: "usage" }, s.cookie));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ meter: null });
+      const load = (await (await POST(post({ mode: "load", where: OTHER }, s.cookie))).json()) as { meter: unknown };
+      expect(load.meter).toBeNull();
+      expect(ai.calls).toHaveLength(0);
+    });
+
+    it("the bar is everyone's spend against the one budget; the estimates are from her own answers", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+      vi.stubEnv("TUTOR_BUDGET_EUR", "100");
+      const s = await student();
+      const other = await student();
+      const row = (userId: string, model: string, out: number) => ({
+        userId,
+        anchorKind: "general" as const,
+        role: "assistant" as const,
+        body: "a",
+        model,
+        tokensIn: 0,
+        tokensOut: out,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      });
+      // Someone else: 500K Fable output tokens (20 USD). Her: two Quick answers of 1,000 output tokens.
+      await t.db.insert(tutorMessages).values([
+        row(other.user.id, "anthropic:claude-fable-5-2", 500_000),
+        row(s.user.id, "anthropic:claude-haiku-5-5", 1000),
+        row(s.user.id, "anthropic:claude-haiku-5-5", 1000),
+      ]);
+      const { meter } = (await (await POST(post({ mode: "usage" }, s.cookie))).json()) as {
+        meter: { usedEur: number; budgetEur: number; fraction: number; resetsOn: string; paidAvailable: boolean; levels: Record<string, { answersLeft: number; basis: string }> };
+      };
+      const used = (20 + 0.001) * 0.92;
+      expect(meter.usedEur).toBeCloseTo(used, 6);
+      expect(meter).toMatchObject({ budgetEur: 100, paidAvailable: true });
+      expect(meter.fraction).toBeCloseTo(used / 100, 6);
+      expect(meter.resetsOn).toMatch(/^\d{4}-\d{2}-01$/);
+      // Her Quick answer costs 1,000 x 0.50 USD / 1M = 0.0005 USD.
+      expect(meter.levels.quick).toEqual({ answersLeft: Math.floor((100 - used) / (0.0005 * 0.92)), basis: "own" });
+      expect(meter.levels.balanced.basis).toBe("default");
+      expect(meter.levels.deep.basis).toBe("default");
+      expect(meter.levels.balanced.answersLeft).toBeGreaterThan(meter.levels.deep.answersLeft);
+      // The load answer carries the same meter, so the chip needs no second request.
+      const load = (await (await POST(post({ mode: "load", where: OTHER }, s.cookie))).json()) as { meter: typeof meter };
+      expect(load.meter).toEqual(meter);
+      expect(anthropicCalls).toHaveLength(0);
+      expect(ai.calls).toHaveLength(0);
+    });
   });
 
   it("Go deeper without a key is unavailable: 409, nothing sent", async () => {

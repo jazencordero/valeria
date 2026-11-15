@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState as useStateForTest } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GRADE_GROUP_LABEL } from "@/components/session/grade-buttons";
 import {
@@ -20,6 +21,18 @@ import {
   type TutorChatProps,
   type TutorChatViewProps,
 } from "./tutor-chat";
+import {
+  aboutCount,
+  AMBER_FROM,
+  ESTIMATE_LINE,
+  FREE_LEVEL_LINE,
+  LEVEL_CHOICES,
+  LEVEL_KEY,
+  meterWords,
+  resetDay,
+  ZERO_LINE,
+  type TutorMeter,
+} from "./tutor-controls";
 
 const C = "11111111-1111-4111-8111-111111111111";
 const NOTE = "22222222-2222-4222-8222-222222222222";
@@ -449,3 +462,199 @@ describe("TutorChat: the course's study rule, asked once", () => {
     expect(calls[1]).toEqual({ mode: "study-rule", courseId: C, rule: "not_allowed" });
   });
 });
+
+// ---------------------------------------------------------------------------
+// The model picker and the usage chip (M2-28 follow-up)
+
+const METER = (fraction: number, budget = 150): TutorMeter => ({
+  usedEur: fraction * budget,
+  budgetEur: budget,
+  fraction,
+  resetsOn: "2026-12-01",
+  paidAvailable: fraction < 1,
+  levels: {
+    quick: { answersLeft: 338_123, basis: "own" },
+    balanced: { answersLeft: 14_321, basis: "default" },
+    deep: { answersLeft: 2_655, basis: "default" },
+  },
+});
+
+describe("the model picker", () => {
+  const base: TutorChatViewProps = {
+    turns: [],
+    busy: false,
+    draft: "Hi",
+    status: null,
+    deeperAvailable: true,
+    aboutQuote: false,
+    onDraft: () => {},
+    onSend: () => {},
+    onStarter: () => {},
+    onSaveToNote: () => {},
+    onDeeper: () => {},
+    onCopy: () => {},
+  };
+  beforeEach(() => window.localStorage.clear());
+  afterEach(() => window.localStorage.clear());
+
+  it("is a named radio group of three plain-word levels with hints and cost marks 1, 3 and 4 (the price ratios)", () => {
+    const onLevel = vi.fn();
+    render(<TutorChatView {...base} level="quick" onLevel={onLevel} />);
+    const group = screen.getByRole("group", { name: "Answer model" });
+    const radios = within(group).getAllByRole("radio");
+    expect(radios.map((r) => (r as HTMLInputElement).value)).toEqual(["quick", "balanced", "deep"]);
+    expect(within(group).getByRole("radio", { name: /^Quick, lowest cost/ })).toHaveProperty("checked", true);
+    expect(within(group).getByRole("radio", { name: /^Balanced, about 20 times/ })).toHaveProperty("checked", false);
+    expect(within(group).getByRole("radio", { name: /^Deep, about 80 times/ })).toBeTruthy();
+    // No model ids in the labels.
+    expect(group.textContent).not.toMatch(/claude|haiku|sonnet|fable/i);
+    expect(Object.values(LEVEL_CHOICES).map((c) => c.dots)).toEqual([1, 3, 4]);
+    expect(screen.getAllByTestId("tutor-level-dots").map((d) => d.children.length)).toEqual([1, 3, 4]);
+    // The hint of the chosen level describes it.
+    const quick = within(group).getByRole("radio", { name: /^Quick/ });
+    const hint = document.getElementById(quick.getAttribute("aria-describedby")!);
+    expect(hint?.textContent).toBe(LEVEL_CHOICES.quick.hint);
+    fireEvent.click(within(group).getByRole("radio", { name: /^Deep/ }));
+    expect(onLevel).toHaveBeenCalledWith("deep");
+    // It sits beside Ask.
+    expect(screen.getByTestId("tutor-levels").parentElement).toBe(screen.getByTestId("tutor-send").parentElement);
+  });
+
+  it("with no key or no budget left it is one disabled line: Free model this month", () => {
+    render(<TutorChatView {...base} deeperAvailable={false} level="deep" />);
+    expect(screen.queryByRole("radio")).toBeNull();
+    const line = screen.getByTestId("tutor-level-free");
+    expect(line.textContent).toBe(FREE_LEVEL_LINE);
+    expect(FREE_LEVEL_LINE).toBe("Free model this month");
+    expect(line.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("is remembered on this device and sent as `level` (never a model id); Go deeper is still a one-shot rerun", async () => {
+    window.localStorage.setItem(LEVEL_KEY, "balanced");
+    const { api, calls } = fakeApi((b) => {
+      if (b.mode === "load") return Response.json({ messages: [], deeperAvailable: true, paidLevels: true, meter: null });
+      if (b.deeper) return streamResponse(["Deeper."], { model: "anthropic:claude-fable-5-2", answerId: DEEP_ID, deeper: true });
+      return streamResponse(["Sure."], { model: "anthropic:claude-sonnet-5-5" });
+    });
+    renderChat(api, { quote: null });
+    await act(async () => {});
+    expect(screen.getByRole("radio", { name: /^Balanced/ })).toHaveProperty("checked", true);
+    fireEvent.change(box(), { target: { value: "What is PV?" } });
+    fireEvent.click(screen.getByTestId("tutor-send"));
+    await screen.findByText("Sure.");
+    expect(calls[1]).toMatchObject({ text: "What is PV?", level: "balanced" });
+    // The small line still says which model answered.
+    expect(screen.getByTestId("tutor-model").textContent).toBe("anthropic · claude-sonnet-5-5");
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Deep/ }));
+    expect(window.localStorage.getItem(LEVEL_KEY)).toBe("deep");
+    fireEvent.click(screen.getByTestId("tutor-deeper"));
+    await screen.findByText("Deeper.");
+    expect(calls[2]).toMatchObject({ deeper: true, answerId: ANSWER_ID, where: WHERE });
+    expect(calls[2]).not.toHaveProperty("level");
+    expect(JSON.stringify(calls)).not.toMatch(/claude-/);
+  });
+
+  it("without paid levels nothing about a level is sent; blocked storage falls back to Quick", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    const { api, calls } = fakeApi((b) => (b.mode === "load" ? loaded() : streamResponse(["Free."])));
+    renderChat(api, { quote: null });
+    await act(async () => {});
+    expect(screen.getByTestId("tutor-level-free")).toBeTruthy();
+    fireEvent.change(box(), { target: { value: "Hi" } });
+    fireEvent.click(screen.getByTestId("tutor-send"));
+    await screen.findByText("Free.");
+    expect(calls[1]).not.toHaveProperty("level");
+    vi.restoreAllMocks();
+  });
+});
+
+describe("the usage chip", () => {
+  const base: TutorChatViewProps = {
+    turns: [],
+    busy: false,
+    draft: "",
+    status: null,
+    deeperAvailable: true,
+    aboutQuote: false,
+    onDraft: () => {},
+    onSend: () => {},
+    onStarter: () => {},
+    onSaveToNote: () => {},
+    onDeeper: () => {},
+    onCopy: () => {},
+  };
+
+  it("words: about-counts, euros, the reset day", () => {
+    expect([aboutCount(7), aboutCount(338_123), aboutCount(14_321), aboutCount(2_655)]).toEqual(["7", "340,000", "14,000", "2,700"]);
+    expect(resetDay("2026-12-01")).toBe("1 Dec");
+    const w = meterWords(METER(0.08));
+    expect(w.used).toBe("about 12 of 150 EUR used");
+    expect(w.levels).toBe("That is about 340,000 Quick answers, 14,000 Balanced, or 2,700 Deep ones.");
+    expect(w.resets).toBe("Resets 1 Dec.");
+    expect(meterWords({ ...METER(0.001), usedEur: 0.2 }).used).toBe("about under 1 of 150 EUR used");
+  });
+
+  it("no meter (no key): no chip", () => {
+    render(<TutorChatView {...base} meter={null} />);
+    expect(screen.queryByTestId("tutor-meter")).toBeNull();
+  });
+
+  it("is a button whose name has the numbers; it opens a dialog with the bar, what is left, the reset and the zero line; Escape closes it and focus returns", () => {
+    function Harness() {
+      const [open, setOpen] = useStateForTest(false);
+      return <TutorChatView {...base} meter={METER(0.08)} meterOpen={open} onMeterOpen={setOpen} />;
+    }
+    render(<Harness />);
+    const chip = screen.getByRole("button", { name: /about 12 of 150 EUR used/ });
+    expect(chip.getAttribute("aria-expanded")).toBe("false");
+    expect(chip.textContent).toBe("8%");
+    expect(chip.dataset.amber).toBeUndefined();
+    fireEvent.click(chip);
+    const dialog = screen.getByRole("dialog", { name: "Tutor allowance this month" });
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(dialog);
+    const meter = within(dialog).getByRole("meter", { name: "Allowance used" });
+    expect(meter.getAttribute("aria-valuetext")).toBe("about 12 of 150 EUR used");
+    expect(dialog.textContent).toContain("About 12 of 150 EUR used, about 138 EUR left.");
+    expect(dialog.textContent).toContain("340,000 Quick answers");
+    expect(dialog.textContent).toContain("Resets 1 Dec.");
+    expect(dialog.textContent).toContain(ZERO_LINE);
+    expect(ZERO_LINE).toBe("At zero, answers come from the free models until it resets.");
+    expect(dialog.textContent).toContain(ESTIMATE_LINE);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(chip);
+    // A tap outside also closes it.
+    fireEvent.click(chip);
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it(`is amber from ${AMBER_FROM * 100}%, never red, and the ring does not animate with reduced motion`, () => {
+    render(<TutorChatView {...base} meter={METER(0.85)} meterOpen onMeterOpen={() => {}} />);
+    const chip = screen.getByTestId("tutor-meter");
+    expect(chip.dataset.amber).toBe("true");
+    expect(screen.getByTestId("tutor-meter-ring").getAttribute("stroke")).toBe("var(--due)");
+    expect(screen.getByTestId("tutor-meter-ring").getAttribute("class")).toContain("motion-reduce:transition-none");
+    expect(screen.getByTestId("tutor-meter-bar").getAttribute("style")).toContain("var(--due)");
+    expect(document.body.innerHTML).not.toMatch(/text-red|bg-red|danger|stroke="var\(--accent\)"/);
+  });
+
+  it("the wired chat shows the chip from the load answer and reads the usage mode again when it opens", async () => {
+    const { api, calls } = fakeApi((b) => {
+      if (b.mode === "load") return Response.json({ messages: [], deeperAvailable: true, paidLevels: true, meter: METER(0.08) });
+      if (b.mode === "usage") return Response.json({ meter: METER(0.5) });
+      return streamResponse(["x"]);
+    });
+    renderChat(api, { quote: null });
+    const chip = await screen.findByRole("button", { name: /about 12 of 150 EUR used/ });
+    expect(calls.map((c) => c.mode)).toEqual(["load"]);
+    fireEvent.click(chip);
+    await screen.findByRole("button", { name: /about 75 of 150 EUR used/ });
+    expect(calls.map((c) => c.mode)).toEqual(["load", "usage"]);
+  });
+});
+

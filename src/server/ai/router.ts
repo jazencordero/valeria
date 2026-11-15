@@ -30,9 +30,11 @@
  * The tutor's optional paid path (M2-28). `streamChat({ ..., job: "tutor", paid: "tutor" })` is the
  * ONLY way to reach the `anthropic` provider, and only when `ANTHROPIC_API_KEY` is set (the route
  * also leaves `paid` out once the month's budget is spent, src/server/tutor/budget.ts):
- * - Everyday answers use the small Claude model (`TUTOR_CLAUDE.small`, capped at its maxTokens);
- *   `deeper: true` reruns one question on `TUTOR_CLAUDE.deep`. `deeper` is the only way to the
- *   large model, and it needs `paid: "tutor"` too (else `PaidNotAllowed`).
+ * - `level` picks the model (`LEVEL_MODEL` in src/server/tutor/budget.ts, each capped at its
+ *   maxTokens): "quick" (the default) the small Claude model, "balanced" the middle one, "deep"
+ *   the large one. The large model is reached only by her explicit choice: Deep in the chat's
+ *   picker, or "Go deeper" (the route sends `level: "deep"` for both). `level` needs
+ *   `paid: "tutor"` too (else `PaidNotAllowed`).
  * - `anthropic` is not in `PROVIDERS` or `FREE_MODELS`, so `withFallback` (runText, runObject,
  *   streamChat without `paid`) can never pick it, whatever the job.
  * - `paid` with any job other than `TUTOR_JOB`, or any value other than "tutor", throws
@@ -78,7 +80,7 @@ import { gt } from "drizzle-orm";
 import { z } from "zod";
 import { db as defaultDb, type Db } from "@/server/db/client";
 import { aiCalls, providerCooldowns } from "@/server/db/schema/system";
-import { TUTOR_CLAUDE } from "@/server/tutor/budget";
+import { LEVEL_MODEL, TUTOR_CLAUDE, type TutorLevel } from "@/server/tutor/budget";
 import {
   isFreeModel,
   PROVIDERS,
@@ -121,12 +123,13 @@ export class PaidNotAllowed extends Error {
 export const TUTOR_JOB = "tutor";
 /** Anthropic's models for the tutor: ids, caps and prices live in src/server/tutor/budget.ts. */
 export const ANTHROPIC_SMALL_MODEL = TUTOR_CLAUDE.small.id;
+export const ANTHROPIC_BALANCED_MODEL = TUTOR_CLAUDE.balanced.id;
 export const ANTHROPIC_DEEP_MODEL = TUTOR_CLAUDE.deep.id;
 export const ANTHROPIC_ENV_KEY = "ANTHROPIC_API_KEY";
 export const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 /** Anthropic API version header (claude-api skill, curl examples). */
 export const ANTHROPIC_VERSION = "2026-10-21";
-/** Server-side refusal fallback for claude-fable-5-2 (claude-api skill). Claude Haiku 5.5 has none. */
+/** Server-side refusal fallback for claude-sonnet-5-5 and claude-fable-5-2 (claude-api skill). Claude Haiku 5.5 has none. */
 export const ANTHROPIC_FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
 /** The model's answer was not valid JSON for the schema, even after one repair. */
@@ -198,8 +201,8 @@ export type StreamChatInput = RunInput & {
   systemParts?: SystemPart[];
   /** "tutor": try the paid provider first when its key is set. Only for `job: TUTOR_JOB`. */
   paid?: "tutor";
-  /** "Go deeper": the paid path uses the large model. Needs `paid: "tutor"`. */
-  deeper?: boolean;
+  /** Which Claude model the paid path uses (default "quick"). Needs `paid: "tutor"`. */
+  level?: TutorLevel;
 };
 
 export type Picked = { entry: ProviderEntry; provider: ProviderName; model: string };
@@ -444,13 +447,13 @@ export function createRouter(deps: RouterDeps = {}) {
   }
 
   /** Anthropic's address for the tutor, or null when there is no key. Same fake switch as the rest. */
-  function anthropicTarget(deeper: boolean): (Target & { apiKey: string }) | null {
+  function anthropicTarget(level: TutorLevel): (Target & { apiKey: string }) | null {
     const e = env();
     const apiKey = e[ANTHROPIC_ENV_KEY];
     if (!apiKey) return null;
     const fake = deps.anthropicBaseUrl ? null : fakeAiUrl(e);
     const baseUrl = deps.anthropicBaseUrl ?? (fake ? `${fake}/anthropic` : ANTHROPIC_BASE_URL);
-    const model = deeper ? ANTHROPIC_DEEP_MODEL : ANTHROPIC_SMALL_MODEL;
+    const model = LEVEL_MODEL[level].id;
     return { entry: null, provider: "anthropic", model, baseUrl, apiKey };
   }
 
@@ -460,12 +463,12 @@ export function createRouter(deps: RouterDeps = {}) {
    * it refuses (401, 403), writes a cool-down so a broken key is not retried on every message.
    */
   async function tryAnthropic(input: StreamChatInput): Promise<StreamChatResult | null> {
-    const deeper = input.deeper === true;
-    const target = anthropicTarget(deeper);
+    const level = input.level ?? "quick";
+    const target = anthropicTarget(level);
     if (!target) return null;
     if ((await coolingProviders()).has("anthropic")) return null;
     const parts = input.systemParts ?? (input.system ? [{ text: input.system }] : []);
-    const maxTokens = deeper ? TUTOR_CLAUDE.deep.maxTokens : TUTOR_CLAUDE.small.maxTokens;
+    const maxTokens = LEVEL_MODEL[level].maxTokens;
     try {
       return await streamOn(
         target,
@@ -494,7 +497,7 @@ export function createRouter(deps: RouterDeps = {}) {
    * (see the header).
    */
   async function streamChat(input: StreamChatInput): Promise<StreamChatResult> {
-    if (input.deeper !== undefined && input.paid === undefined) throw new PaidNotAllowed(input.job);
+    if (input.level !== undefined && input.paid === undefined) throw new PaidNotAllowed(input.job);
     if (input.paid !== undefined) {
       if (input.paid !== "tutor" || input.job !== TUTOR_JOB) throw new PaidNotAllowed(input.job);
       const paid = await tryAnthropic(input);
@@ -544,9 +547,11 @@ export function fakeAiUrl(env: Record<string, string | undefined> = process.env)
 // Shapes from the claude-api skill (curl examples, prompt caching, model notes), checked
 // 2026-11-15. No Anthropic SDK is installed, so this is raw HTTP:
 // - POST {base}/v1/messages, headers `x-api-key`, `anthropic-version: 2026-10-21`. For
-//   claude-fable-5-2 only, also `anthropic-beta: server-side-fallback-2026-07-01` with
-//   `fallbacks: "default"` (on a policy decline Anthropic re-runs the request on its own fallback
-//   model inside the same call). Claude Haiku 5.5 has no server-side fallback, so neither is sent.
+//   claude-sonnet-5-5 and claude-fable-5-2, also `anthropic-beta: server-side-fallback-2026-07-01`
+//   with `fallbacks: "default"` (on a policy decline Anthropic re-runs the request on its own
+//   fallback model inside the same call; for Claude Sonnet 5.5 that covers "cyber" and
+//   "frontier_llm" declines, others end as a refusal and fall back to the free providers). Claude
+//   Haiku 5.5 has no server-side fallback, so neither is sent.
 // - `stream: true`: server-sent events `message_start`, `content_block_start`,
 //   `content_block_delta` (`text_delta`), `content_block_stop`, `message_delta` (stop_reason,
 //   output usage), `message_stop`, and `error`.
@@ -555,12 +560,18 @@ export function fakeAiUrl(env: Record<string, string | undefined> = process.env)
 //   answers are capped. Its thinking blocks stream with empty text by default; they are skipped.
 // - claude-haiku-5-5 thinks by default too; `thinking: {type: "disabled"}` is accepted at effort
 //   `high` or below, so it is sent with effort "low": the whole 500-token cap goes to the answer.
+// - claude-sonnet-5-5 rejects `thinking: {type: "disabled"}` (a 400); its "thinking off" is
+//   `thinking: {type: "between_tools"}`, accepted only at effort `high` or below, with no other
+//   field inside `thinking` and no per-message effort change. It is sent that way with effort
+//   "low", so the 800-token cap goes to the answer. `between_tools` is a 400 on every other
+//   model, so it is never sent to them.
 // - No `temperature`/`top_p`/`top_k` (a 400 on 2026-10-21) and no assistant prefill.
 // - Prompt caching: `cache_control: {type: "ephemeral"}` on the system block marked `cache`
 //   (the passage, its section and the concept names). The prefix up to it (rules, then the
 //   material) is cached for 5 minutes, so follow-ups on the same passage read it from the cache.
-//   Prefixes under 512 tokens silently do not cache (the minimum for both Claude Haiku 5.5 and
-//   Claude Fable 5.2, claude-api skill, prompt caching); the rules alone are close to that.
+//   Prefixes under 512 tokens silently do not cache (the minimum for Claude Haiku 5.5, Claude
+//   Sonnet 5.5 and Claude Fable 5.2, claude-api skill, prompt caching); the rules alone are close
+//   to that. Caches are per model, so switching level starts a new cache.
 // Prompts, answers and the key are never logged; errors carry no request body.
 
 const ANTHROPIC_EFFORT = "low";
@@ -570,7 +581,7 @@ type AnthropicOptions = {
   apiKey: string;
   system: SystemPart[];
   fetch: typeof globalThis.fetch;
-  /** `ANTHROPIC_SMALL_MODEL` or `ANTHROPIC_DEEP_MODEL`. */
+  /** `ANTHROPIC_SMALL_MODEL`, `ANTHROPIC_BALANCED_MODEL` or `ANTHROPIC_DEEP_MODEL`. */
   model: string;
   /** The answer cap when the call does not give one. */
   maxTokens: number;
@@ -851,6 +862,8 @@ export function anthropicModel(options: AnthropicOptions): LanguageModelV4 {
     async doStream(call) {
       const { system, messages } = anthropicPrompt(call.prompt, options.system);
       const deep = options.model === ANTHROPIC_DEEP_MODEL;
+      const balanced = options.model === ANTHROPIC_BALANCED_MODEL;
+      const fallback = deep || balanced;
       const body = {
         model: options.model,
         max_tokens: call.maxOutputTokens ?? options.maxTokens,
@@ -858,7 +871,9 @@ export function anthropicModel(options: AnthropicOptions): LanguageModelV4 {
         system,
         messages,
         output_config: { effort: ANTHROPIC_EFFORT },
-        ...(deep ? { fallbacks: "default" } : { thinking: { type: "disabled" } }),
+        ...(fallback ? { fallbacks: "default" } : {}),
+        // Fable 5.2: no `thinking` at all; Sonnet 5.5: "between_tools"; Haiku 5.5: "disabled".
+        ...(deep ? {} : { thinking: { type: balanced ? "between_tools" : "disabled" } }),
       };
       const res = await options.fetch(url, {
         method: "POST",
@@ -866,7 +881,7 @@ export function anthropicModel(options: AnthropicOptions): LanguageModelV4 {
           "content-type": "application/json",
           "x-api-key": options.apiKey,
           "anthropic-version": ANTHROPIC_VERSION,
-          ...(deep ? { "anthropic-beta": ANTHROPIC_FALLBACK_BETA } : {}),
+          ...(fallback ? { "anthropic-beta": ANTHROPIC_FALLBACK_BETA } : {}),
         },
         body: JSON.stringify(body),
         signal: call.abortSignal,

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { aiRoute } from "@/server/ai/doorway";
 import { db } from "@/server/db/client";
 import { aiCalls } from "@/server/db/schema/system";
-import { claudeAllowed } from "@/server/tutor/budget";
+import { claudeAllowed, TUTOR_LEVELS, tutorMeter } from "@/server/tutor/budget";
 import {
   ANSWER_MAX_TOKENS,
   buildCopyPrompt,
@@ -28,11 +28,11 @@ import {
 } from "@/server/tutor/store";
 
 /*
- * M2-28: the tutor. One POST route, four modes (all after aiRoute's sign-in, hourly and body
+ * M2-28: the tutor. One POST route, seven modes (all after aiRoute's sign-in, hourly and body
  * checks, and all 404 `{error:'not_found'}` unless the tutor is switched on for her account,
  * `users.settings.tutor.enabled === true`; the same answer as any id that is not hers):
  *
- * chat (default) `{ text, where, noteId?, quote? }`
+ * chat (default) `{ text, where, noteId?, quote?, level? }`
  *   Her question, answered as the AI SDK's UI message stream (server-sent events). The chat is
  *   the note's (`noteId`, hers) or, without a note, the place's anchor (lecture, exam, card or
  *   general, from `where`). `quote` is the passage she highlighted (default: the note's quote);
@@ -44,12 +44,20 @@ import {
  *   The stream's `start` chunk carries `messageMetadata: { model, questionId, answerId, deeper }`
  *   (`model` is "provider:model", for the small line under the answer); the same model is in the
  *   `x-tutor-model` header.
+ *   `level` is her choice in the chat's picker: "quick" (default), "balanced" or "deep" (a
+ *   validated enum; the server maps it to a model in src/server/tutor/budget.ts, `LEVEL_MODEL`,
+ *   and the client never sends a model id). Caps: Quick 500, Balanced 800, Deep 1,200 output
+ *   tokens. With no key or no budget left it is ignored and the free models answer, as before.
  * chat with `{ deeper: true, answerId, where, noteId? }`
- *   "Go deeper": the question that answer belongs to is asked again on the large Claude model
- *   (the only way to it), with the history before that question. The new answer is stored under
+ *   "Go deeper": a one-shot rerun of the question that answer belongs to on Deep (the large
+ *   Claude model), with the history before that question. The large model is reached only by
+ *   her explicit choice: Deep in the picker, or "Go deeper". The new answer is stored under
  *   the same question. 409 `{error:'deeper_unavailable'}` when there is no key or no budget left.
- * load `{ mode: "load", where, noteId? }` -> `{ messages, deeperAvailable, study }`
+ * load `{ mode: "load", where, noteId? }` -> `{ messages, deeperAvailable, paidLevels, meter, study }`
  *   The stored chat, oldest first (each question followed by its answers). No AI call.
+ *   `paidLevels` (and the older name `deeperAvailable`, the same value): the key is set and the
+ *   month's budget is not spent, so the picker and "Go deeper" can offer the Claude levels.
+ *   `meter`: as in the usage mode below, so the chat's chip shows without a second request.
  *   `study` is the course in view and its study rule, `{ courseId, courseName, rule }` with
  *   rule 'unknown' | 'allowed' | 'not_allowed', derived here from `where` (a lecture, an exam
  *   or a study session of her own course; null anywhere else). The chat asks its one question
@@ -58,6 +66,11 @@ import {
  *   Her answer to that question: stores `courses.ai_study` for HER course only (404 for any
  *   other id). No AI call. Unlike the exam page's own question it does not queue the concepts
  *   job.
+ * usage `{ mode: "usage" }` -> `{ meter }`
+ *   The chat's usage chip: `meter` is src/server/tutor/budget.ts's `TutorMeter` (this month's
+ *   spend of ALL users against the one budget, her own averages for the per-level estimates,
+ *   the reset date), or null when no key is set (the chip is then not shown). No AI call. The
+ *   chat reads it again when she opens the chip's popover.
  * copy `{ mode: "copy", text, where }` -> `{ text, note }`
  *   The "Copy for Claude" text. No AI call, nothing sent anywhere.
  * save `{ mode: "save", noteId, answerId }` -> `{ ok: true, body }`
@@ -81,12 +94,14 @@ const STREAM_ERROR_TEXT = "The answer stopped early. Try again.";
 const Turn = z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(MESSAGE_MAX_CHARS * 2) });
 
 const Body = z.object({
-  mode: z.enum(["chat", "copy", "load", "save", "study-rule"]).optional(),
+  mode: z.enum(["chat", "copy", "load", "save", "study-rule", "usage"]).optional(),
   text: z.string().max(MESSAGE_MAX_CHARS).optional(),
   where: whereSchema.optional(),
   noteId: z.uuid().optional(),
   quote: z.string().max(MESSAGE_MAX_CHARS).optional(),
   deeper: z.boolean().optional(),
+  /** chat: the picker's level. Never a model id. */
+  level: z.enum(TUTOR_LEVELS).optional(),
   answerId: z.uuid().optional(),
   /** study-rule: her course and her answer. */
   courseId: z.uuid().optional(),
@@ -126,6 +141,10 @@ export const POST = aiRoute(
       return stored === null ? notFound() : json(200, { ok: true, rule: stored });
     }
 
+    if (mode === "usage") {
+      return json(200, { meter: process.env.ANTHROPIC_API_KEY ? await tutorMeter(user.id) : null });
+    }
+
     const note = body.noteId ? await ownNote(user.id, body.noteId) : null;
     if (body.noteId && !note) return notFound();
 
@@ -148,9 +167,12 @@ export const POST = aiRoute(
 
     if (mode === "load") {
       const messages = await loadChat(user.id, placeKey);
+      const paidLevels = await claudeAllowed();
       return json(200, {
         messages: messages.map((m) => ({ ...m, createdAt: m.createdAt.toISOString() })),
-        deeperAvailable: await claudeAllowed(),
+        deeperAvailable: paidLevels,
+        paidLevels,
+        meter: process.env.ANTHROPIC_API_KEY ? await tutorMeter(user.id) : null,
         study,
       });
     }
@@ -187,8 +209,7 @@ export const POST = aiRoute(
         systemParts: context.parts,
         messages,
         job: "tutor",
-        ...(paidOk ? { paid: "tutor" as const } : {}),
-        ...(deeper ? { deeper: true } : {}),
+        ...(paidOk ? { paid: "tutor" as const, level: deeper ? ("deep" as const) : (body.level ?? "quick") } : {}),
         maxOutputTokens: ANSWER_MAX_TOKENS,
         onEnd: async ({ text: answer, usage }) => {
           const model = await answeredBy;
