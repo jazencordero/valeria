@@ -36,6 +36,11 @@
  *   confirm) saves what is pending and goes back the same way without ending
  *   the session, as the prototype's closeSession: a stopped bite is not a
  *   done bite, and opening it again resumes it.
+ * - Return (M9-15). With `returnTo` (or `?return=<path>` in the URL, which
+ *   GET /study/new adds), the done screen's back button, Escape and Stop go
+ *   there instead of the exam page, and there is no "One more bite". A
+ *   lecture page reads "Back to the lecture"; any other path "Back". Only a
+ *   same-site path counts (`safeReturnPath`); anything else is ignored.
  * - Fix this card. A flagged or skipped card leaves the queue (every copy of
  *   it, a requeued miss included) and the next card shows; the last one
  *   leaving ends the session.
@@ -66,7 +71,7 @@
  *   nothing on a match card's front, and Enter on the feedback strip goes on.
  */
 import { useIsPresent } from "motion/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { DoodleDefs } from "@/components/doodle";
 import { Button } from "@/components/ui/button";
@@ -115,6 +120,8 @@ export const FINISHING_TEXT = "Saving your session…";
 export const FINISH_FAILED_TEXT = "Could not finish the session. Check your connection.";
 export const TRY_AGAIN = "Try again";
 export const BACK_LABEL = "Back to the exam";
+export const LECTURE_BACK_LABEL = "Back to the lecture";
+export const RETURN_BACK_LABEL = "Back";
 
 /** Retries after the first failed save. */
 export const SAVE_RETRIES = 3;
@@ -175,6 +182,11 @@ export type SessionPlayerProps = {
   endSession: EndSession;
   dropCard?: DropAction;
   check?: ExplainCheck;
+  /**
+   * Where back goes instead of the exam page (a same-site path). Defaults to
+   * the URL's `?return=`.
+   */
+  returnTo?: string | null;
   /** Base delay of the save retries (tests pass 0). */
   retryMs?: number;
   /** "Now" for intervals; tests pin it. */
@@ -183,6 +195,26 @@ export type SessionPlayerProps = {
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for tests)
+
+/**
+ * A path on this site, or null: starts with one "/" (never "//" or "/\",
+ * which a browser reads as another host), no backslash, whitespace or control
+ * character, at most 500 characters. Starting with "/" rules out a scheme.
+ * The same rule as `safeReturn` in src/server/study/lecture-session.ts.
+ */
+export function safeReturnPath(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > 500) return null;
+  if (!value.startsWith("/") || value.startsWith("//")) return null;
+  if (/[\\\s\u0000-\u001f\u007f]/.test(value)) return null;
+  return value;
+}
+
+const LECTURE_PATH = /^\/courses\/[^/?#]+\/lectures\/\d+(?:[?#].*)?$/;
+
+/** The done screen's back label for a return path. */
+export function returnLabel(path: string): string {
+  return LECTURE_PATH.test(path) ? LECTURE_BACK_LABEL : RETURN_BACK_LABEL;
+}
 
 /** A stable 32-bit seed from the session id (FNV-1a), so a reload requeues the same way. */
 export function seedOf(id: string): number {
@@ -393,6 +425,8 @@ export function SessionPlayer(props: SessionPlayerProps) {
     retryMs = RETRY_MS,
   } = props;
   const router = useRouter();
+  const search = useSearchParams();
+  const returnTo = safeReturnPath(props.returnTo !== undefined ? props.returnTo : search?.get("return"));
   const now = props.now ?? Date.now;
 
   const byId = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
@@ -420,7 +454,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
   const frame = useRef<SessionFrameHandle>(null);
   const explainRef = useRef<CardExplainHandle>(null);
   const saver = useSaver(sessionId, saveProgress, retryMs);
-  const backHref = (from: number) => `/exams/${examId}?from=${Math.round(from)}`;
+  const backHref = (from: number) => returnTo ?? `/exams/${examId}?from=${Math.round(from)}`;
 
   // The end: wait for the saves, then the done screen.
   const finishing = useRef(false);
@@ -485,7 +519,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
     await saver.flush();
     router.push(backHref(props.forecastBefore));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [send, saver, router, props.forecastBefore]);
+  }, [send, saver, router, props.forecastBefore, returnTo]);
 
   const onDrop = useCallback((cardId: string) => {
     const prev = sRef.current;
@@ -521,6 +555,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
       <DoneLayer
         data={view.data}
         props={props}
+        returnTo={returnTo}
         onMore={() => router.push(`/study/new?exam=${examId}&kind=bite`)}
         onBack={() => router.push(backHref(view.data.forecastBeforeShown))}
       />
@@ -761,11 +796,13 @@ function CardBody({
 function DoneLayer({
   data,
   props,
+  returnTo,
   onMore,
   onBack,
 }: {
   data: DoneScreen;
   props: SessionPlayerProps;
+  returnTo: string | null;
   onMore: () => void;
   onBack: () => void;
 }) {
@@ -829,8 +866,8 @@ function DoneLayer({
           freeSkipsLeft={data.week.freeSkipsLeft}
           dayNew={dayNew}
           goalNew={goalNew}
-          nextBiteMinutes={data.anotherBite ? biteMinutes(props.cards.length) : null}
-          backLabel={BACK_LABEL}
+          nextBiteMinutes={data.anotherBite && !returnTo ? biteMinutes(props.cards.length) : null}
+          backLabel={returnTo ? returnLabel(returnTo) : BACK_LABEL}
           onMore={onMore}
           onBack={onBack}
         />

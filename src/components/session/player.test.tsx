@@ -3,8 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const push = vi.fn();
+let search = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), refresh: vi.fn() }),
+  useSearchParams: () => search,
   // As Next's: redirect throws, so nothing after it runs.
   redirect: (to: string) => {
     throw Object.assign(new Error("NEXT_REDIRECT"), { to });
@@ -19,8 +21,16 @@ vi.mock("@/server/study/store", () => {
 });
 vi.mock("@/server/auth/session", () => {
   class NotSignedIn extends Error {}
-  return { NotSignedIn };
+  return { NotSignedIn, currentUser: vi.fn(async () => ({ id: "user-1" })) };
 });
+// GET /study/new?lecture=: the real `safeReturn`, a stand-in for the session start.
+vi.mock("@/server/study/lecture-session", async () => {
+  const real = await vi.importActual<typeof import("@/server/study/lecture-session")>(
+    "@/server/study/lecture-session",
+  );
+  return { safeReturn: real.safeReturn, beginLectureSession: vi.fn() };
+});
+vi.mock("@/server/db/client", () => ({ db: {} }));
 vi.mock("@/server/db/schema/study", () => ({ SESSION_MODES: ["bite", "tile", "concept", "extra"] }));
 vi.mock("@/components/ui/confetti", () => ({ burst: vi.fn() }));
 // The card menu's Server Action; the player gets its own mock through props.
@@ -28,13 +38,17 @@ vi.mock("@/app/(app)/study/card-actions", () => ({ dropCard: vi.fn() }));
 
 import type { NextRequest } from "next/server";
 import { GET } from "@/app/(app)/study/new/route";
-import { NotSignedIn } from "@/server/auth/session";
+import { currentUser, NotSignedIn } from "@/server/auth/session";
+import { beginLectureSession } from "@/server/study/lecture-session";
 import { beginSession, type BegunSession, type DoneScreen, type SavedProgress } from "@/server/study/actions";
 import { StudyNotFound } from "@/server/study/store";
 import { initSession, step } from "@/lib/study/session";
 import {
+  LECTURE_BACK_LABEL,
   SAVE_FAILED_TEXT,
   SessionPlayer,
+  returnLabel,
+  safeReturnPath,
   exitOf,
   matchEvents,
   resumeSession,
@@ -178,6 +192,7 @@ async function answer(user: ReturnType<typeof userEvent.setup>, key: "1" | "2") 
 beforeEach(() => {
   document.documentElement.dataset.fast = "1";
   push.mockReset();
+  search = new URLSearchParams();
   if (!("getAnimations" in Element.prototype)) {
     Object.defineProperty(Element.prototype, "getAnimations", { value: () => [], configurable: true });
   }
@@ -467,6 +482,65 @@ describe("SessionPlayer: the end", () => {
   });
 });
 
+describe("SessionPlayer: back to the lecture", () => {
+  const LECTURE = "/courses/7c0e1a52-0000-4000-8000-0000000000cc/lectures/5";
+
+  it("ends with 'Back to the lecture', which returns there, and offers no other bite", async () => {
+    const { user } = setup({ cards: [A], mode: "concept", returnTo: LECTURE });
+    await answer(user, "2");
+    await screen.findByTestId("session-done");
+    expect(screen.queryByRole("button", { name: /One more bite/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Done for now" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: LECTURE_BACK_LABEL }));
+    expect(push).toHaveBeenLastCalledWith(LECTURE);
+  });
+
+  it("reads ?return= from the URL, and Stop goes back there too", async () => {
+    search = new URLSearchParams({ return: LECTURE });
+    const { user } = setup({ mode: "concept" });
+    await answer(user, "2");
+    await user.click(screen.getByRole("button", { name: "Stop session" }));
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Stop" }));
+    });
+    await waitFor(() => expect(push).toHaveBeenCalledWith(LECTURE));
+  });
+
+  it("ignores a return that is not a path on this site", async () => {
+    search = new URLSearchParams({ return: "//evil.example/x" });
+    const { user } = setup({ cards: [A] });
+    await answer(user, "2");
+    await screen.findByTestId("session-done");
+    await user.click(screen.getByRole("button", { name: "Done for now" }));
+    expect(push).toHaveBeenLastCalledWith("/exams/exam-1?from=58");
+  });
+
+  it("safeReturnPath keeps same-site paths only", () => {
+    expect(safeReturnPath(LECTURE)).toBe(LECTURE);
+    expect(safeReturnPath("/exams/x?from=3")).toBe("/exams/x?from=3");
+    for (const bad of [
+      "//evil.example",
+      "/\\evil.example",
+      "https://evil.example",
+      "javascript:alert(1)",
+      "evil.example/x",
+      "",
+      "/a b",
+      "/a\nb",
+      "/" + "a".repeat(600),
+      null,
+      42,
+    ]) {
+      expect(safeReturnPath(bad)).toBeNull();
+    }
+  });
+
+  it("labels a lecture page 'Back to the lecture' and anything else 'Back'", () => {
+    expect(returnLabel(LECTURE)).toBe("Back to the lecture");
+    expect(returnLabel("/courses/abc")).toBe("Back");
+  });
+});
+
 describe("GET /study/new", () => {
   const EXAM = "7c0e1a52-0000-4000-8000-0000000000aa";
   const begun = { sessionId: SID } as BegunSession;
@@ -516,5 +590,47 @@ describe("GET /study/new", () => {
     expect(await go(`exam=${EXAM}&kind=bite`)).toBe("/exams");
     vi.mocked(beginSession).mockRejectedValueOnce(new NotSignedIn());
     expect(await go(`exam=${EXAM}&kind=bite`)).toBe("/");
+  });
+
+  const LEC = "7c0e1a52-0000-4000-8000-0000000000bb";
+  const LEC_PATH = "/courses/7c0e1a52-0000-4000-8000-0000000000cc/lectures/5";
+  const ret = encodeURIComponent(LEC_PATH);
+
+  it("starts a lecture session and passes the return on to the session", async () => {
+    vi.mocked(beginLectureSession).mockReset();
+    vi.mocked(beginLectureSession).mockResolvedValue({ sessionId: SID, examId: EXAM, cards: 3 });
+    expect(await go(`lecture=${LEC}&return=${ret}`)).toBe(`/study/${SID}?return=${ret}`);
+    expect(beginLectureSession).toHaveBeenCalledWith("user-1", LEC);
+    expect(beginSession).not.toHaveBeenCalled();
+  });
+
+  it("goes back to the lecture when it has no cards, and to Courses without a valid return", async () => {
+    vi.mocked(beginLectureSession).mockReset();
+    vi.mocked(beginLectureSession).mockResolvedValue(null);
+    expect(await go(`lecture=${LEC}&return=${ret}`)).toBe(LEC_PATH);
+    expect(await go(`lecture=nope&return=${ret}`)).toBe(LEC_PATH);
+    expect(await go(`lecture=${LEC}`)).toBe("/courses");
+    expect(beginLectureSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops a return that is not a same-site path", async () => {
+    vi.mocked(beginLectureSession).mockReset();
+    vi.mocked(beginLectureSession).mockResolvedValue({ sessionId: SID, examId: EXAM, cards: 3 });
+    for (const bad of ["//evil.example", "https://evil.example/x", "/\\evil.example", "javascript:alert(1)"]) {
+      expect(await go(`lecture=${LEC}&return=${encodeURIComponent(bad)}`)).toBe(`/study/${SID}`);
+    }
+    vi.mocked(beginLectureSession).mockResolvedValue(null);
+    expect(await go(`lecture=${LEC}&return=${encodeURIComponent("//evil.example")}`)).toBe("/courses");
+  });
+
+  it("passes a return through an exam session, and goes back there when there is nothing to study", async () => {
+    expect(await go(`exam=${EXAM}&kind=bite&return=${ret}`)).toBe(`/study/${SID}?return=${ret}`);
+    vi.mocked(beginSession).mockResolvedValueOnce(null);
+    expect(await go(`exam=${EXAM}&kind=bite&return=${ret}`)).toBe(LEC_PATH);
+  });
+
+  it("sends a signed-out lecture start to /", async () => {
+    vi.mocked(currentUser).mockRejectedValueOnce(new NotSignedIn());
+    expect(await go(`lecture=${LEC}&return=${ret}`)).toBe("/");
   });
 });

@@ -1,38 +1,73 @@
 /*
- * GET /study/new?exam=<id>&kind=<bite|tile|concept|extra>[&arg=<type or concept id>]
- * (M3-43): starts a study session with `beginSession` (M3-18) and sends her to
- * it, `/study/<sessionId>`.
+ * GET /study/new?exam=<id>&kind=<bite|tile|concept|extra>[&arg=<type or concept id>][&return=<path>]
+ * GET /study/new?lecture=<id>[&return=<path>]
+ * (M3-43, M9-15): starts a study session and sends her to it,
+ * `/study/<sessionId>` (with `?return=<path>` when one was given).
  *
+ * - `exam`: `beginSession` (M3-18).
+ * - `lecture` (M9-15, "Practise this lecture"): every card tied to the
+ *   lecture's concepts, through `beginLectureSession`
+ *   (src/server/study/lecture-session.ts). A lecture with no cards, a
+ *   malformed id or someone else's lecture: back to `return`, else Courses.
+ * - `return`: where the done screen's back button, Stop and "nothing to
+ *   study" go instead of the exam page. Only a same-site path counts
+ *   (`safeReturn`: starts with "/", not "//", no backslash, no scheme);
+ *   anything else is dropped as if it were not there.
  * - Nothing to study (today's bites are done, or no card fits): back to the
- *   exam page, where the bite block already says so. No session row is made.
+ *   exam page (or `return`), where the bite block already says so. No
+ *   session row is made.
  * - A kind that is not one of the four, or a tile / concept session without
  *   its `arg`: back to the exam page as well; nothing is written.
  * - No exam id, a malformed one, or an exam that does not exist or is
  *   someone else's: to the Exams tab, `/exams`.
  * - Not signed in: to `/`.
  *
- * The exam page starts sessions with `router.push`, never a <Link>, so no
- * prefetch ever runs this handler.
+ * Screens start sessions with `router.push`, never a <Link> to this URL, so
+ * no prefetch ever runs this handler.
  */
 import { redirect } from "next/navigation";
 import { connection, type NextRequest } from "next/server";
-import { NotSignedIn } from "@/server/auth/session";
+import { currentUser, NotSignedIn } from "@/server/auth/session";
 import { SESSION_MODES } from "@/server/db/schema/study";
 import { beginSession } from "@/server/study/actions";
+import { beginLectureSession, safeReturn } from "@/server/study/lecture-session";
 import { StudyNotFound } from "@/server/study/store";
 import type { SessionMode } from "@/lib/study/session";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const sessionUrl = (id: string, ret: string | null) =>
+  ret ? `/study/${id}?return=${encodeURIComponent(ret)}` : `/study/${id}`;
+
+async function lectureSession(lecture: string, ret: string | null): Promise<never> {
+  const back = ret ?? "/courses";
+  if (!UUID.test(lecture)) redirect(back);
+  let sessionId: string | null;
+  try {
+    const user = await currentUser();
+    sessionId = (await beginLectureSession(user.id, lecture))?.sessionId ?? null;
+  } catch (err) {
+    if (err instanceof NotSignedIn) redirect("/");
+    if (err instanceof StudyNotFound) sessionId = null;
+    else throw err;
+  }
+  if (!sessionId) redirect(back);
+  redirect(sessionUrl(sessionId, ret));
+}
+
 export async function GET(request: NextRequest) {
   await connection();
   const q = request.nextUrl.searchParams;
+  const ret = safeReturn(q.get("return"));
+  const lecture = q.get("lecture");
+  if (lecture !== null) return lectureSession(lecture, ret);
+
   const exam = q.get("exam") ?? "";
   const kind = q.get("kind") ?? "bite";
   const arg = q.get("arg") ?? undefined;
   if (!UUID.test(exam)) redirect("/exams");
 
-  const back = `/exams/${exam}`;
+  const back = ret ?? `/exams/${exam}`;
   const known = (SESSION_MODES as readonly string[]).includes(kind);
   if (!known || ((kind === "tile" || kind === "concept") && !arg)) redirect(back);
 
@@ -50,5 +85,5 @@ export async function GET(request: NextRequest) {
   if (sessionId === "not-found") redirect("/exams");
   if (sessionId === "signed-out") redirect("/");
   if (!sessionId) redirect(back);
-  redirect(`/study/${sessionId}`);
+  redirect(sessionUrl(sessionId, ret));
 }
