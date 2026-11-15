@@ -3,8 +3,8 @@
 /**
  * Course grade page, Overview tab: the verdict large in its tone (on track,
  * within reach, out of reach), "Aiming for" with a 1 to 5 control, and two
- * facts: what she needs ("You need about 83% on what is left" /
- * "Everything is graded." / "Out of reach: the best possible is 4.6.") and what
+ * facts: what she needs ("You need about 83% on what is left", shown only when
+ * the heading is "On track for your 5." since every other heading says it) and what
  * matters most ("Exam matters most (60% of the grade)" / "Nothing left to
  * grade"). Numbers roll when the target changes (static when motion is calm or
  * ?fast=1).
@@ -121,9 +121,12 @@ export function Overview({
       </div>
 
       <ul className="mt-5 list-none border-t border-solid border-line">
-        <li data-testid="overview-need" className="border-b border-solid border-line py-3.5 text-[15px]">
-          <NeedFact verdict={verdict} />
-        </li>
+        {/* The heading already says what she needs, except "On track for your 5." */}
+        {verdict.kind === "on" && (
+          <li data-testid="overview-need" className="border-b border-solid border-line py-3.5 text-[15px]">
+            <NeedFact verdict={verdict} />
+          </li>
+        )}
         <li data-testid="overview-mm" className="border-b border-solid border-line py-3.5 text-[15px]">
           {mattersMost
             ? `${mattersMost.name} matters most (${Math.round(mattersMost.weight * 100)}% of the grade)`
