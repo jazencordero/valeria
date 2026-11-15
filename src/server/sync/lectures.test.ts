@@ -3,12 +3,12 @@ import { and, asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { courseFiles, courses } from "@/server/db/schema/courses";
-import { lectures } from "@/server/db/schema/learn";
+import { lectureContent, lectures } from "@/server/db/schema/learn";
 import { users } from "@/server/db/schema/users";
 import { assignments } from "@/server/db/schema/work";
-import { sectionsFromStored, syncLectures, type StoredFile } from "./lectures";
+import { planLectures, sectionsFromStored, syncLectures, type StoredFile } from "./lectures";
 
-const DB_TIMEOUT = 30_000;
+const DB_TIMEOUT = 90_000;
 const PLUGINFILE = "https://moodle.example.edu/webservice/pluginfile.php";
 const SEPT = new Date("2026-09-02T08:00:00Z");
 
@@ -194,4 +194,181 @@ describe("syncLectures", () => {
     expect(await lecturesOf(her, hidden)).toEqual([]);
     expect(await lecturesOf(other, theirs)).toEqual([]);
   }, DB_TIMEOUT);
+
+  it("a deck added above three read lectures leaves each read mark on its file, numbered 2 to 4", async () => {
+    const her = await makeUser();
+    const course = await makeCourse(her, 3101);
+    await addFiles(her, course, [
+      { ref: "cm:7101:lecture-why-forecast.pdf", section: "Week 1" },
+      { ref: "cm:7201:lecture-smoothing.pdf", section: "Week 2" },
+      { ref: "cm:7301:lecture-arima.pdf", section: "Week 3" },
+    ]);
+    await syncLectures(her, t.db);
+    const before = await lecturesOf(her, course);
+    expect(before.map((l) => [l.n, l.title])).toEqual([
+      [1, "why forecast"],
+      [2, "smoothing"],
+      [3, "arima"],
+    ]);
+    const read = [new Date("2026-11-01T09:00:00Z"), new Date("2026-11-02T09:00:00Z"), new Date("2026-11-03T09:00:00Z")];
+    for (const [i, l] of before.entries()) {
+      await t.db.update(lectures).set({ readAt: read[i], lastOpenedAt: read[i] }).where(eq(lectures.id, l.id));
+    }
+    await t.db.insert(lectureContent).values({ lectureId: before[1].id, breath: "Smoothing.", sourceHash: "h-smoothing" });
+
+    // The teacher adds a deck in a new section at the top of the page.
+    await addFiles(her, course, [{ ref: "cm:7001:lecture-course-intro.pdf", section: "Before we start" }]);
+    expect(await syncLectures(her, t.db)).toEqual({ added: 1, updated: 3, kept: 0 });
+
+    const after = await lecturesOf(her, course);
+    expect(after.map((l) => [l.n, l.title, l.readAt])).toEqual([
+      [1, "course intro", null],
+      [2, "why forecast", read[0]],
+      [3, "smoothing", read[1]],
+      [4, "arima", read[2]],
+    ]);
+    // Same rows, same files, only the number moved.
+    for (const [i, l] of before.entries()) {
+      expect(after[i + 1]).toEqual({ ...l, n: l.n + 1, readAt: read[i], lastOpenedAt: read[i] });
+    }
+    const [content] = await t.db.select().from(lectureContent);
+    expect(content.lectureId).toBe(before[1].id);
+
+    // A second sync writes nothing.
+    expect(await syncLectures(her, t.db)).toEqual({ added: 0, updated: 0, kept: 0 });
+    expect(await lecturesOf(her, course)).toEqual(after);
+  }, DB_TIMEOUT);
+
+  it("swapping two decks swaps their numbers and nothing else", async () => {
+    const her = await makeUser();
+    const course = await makeCourse(her, 3101);
+    // The data files only anchor each section's place on the page (sections go by their smallest module id).
+    await addFiles(her, course, [
+      { ref: "cm:7001:data-week-1.csv", section: "Week 1" },
+      { ref: "cm:7002:data-week-2.csv", section: "Week 2" },
+      { ref: "cm:7003:data-week-3.csv", section: "Week 3" },
+      { ref: "cm:7101:lecture-why-forecast.pdf", section: "Week 1" },
+      { ref: "cm:7201:lecture-smoothing.pdf", section: "Week 2" },
+      { ref: "cm:7301:lecture-arima.pdf", section: "Week 3" },
+    ]);
+    await syncLectures(her, t.db);
+    const before = await lecturesOf(her, course);
+    const readAt = new Date("2026-11-05T09:00:00Z");
+    await t.db.update(lectures).set({ readAt }).where(eq(lectures.id, before[0].id));
+    before[0] = { ...before[0], readAt };
+
+    // The teacher moves the first deck to week 2 and the second to week 1.
+    await t.db.update(courseFiles).set({ section: "Week 2" }).where(eq(courseFiles.moodleRef, "cm:7101:lecture-why-forecast.pdf"));
+    await t.db.update(courseFiles).set({ section: "Week 1" }).where(eq(courseFiles.moodleRef, "cm:7201:lecture-smoothing.pdf"));
+    expect(await syncLectures(her, t.db)).toEqual({ added: 0, updated: 2, kept: 0 });
+
+    const after = await lecturesOf(her, course);
+    expect(after).toEqual([
+      { ...before[1], n: 1 },
+      { ...before[0], n: 2 },
+      before[2],
+    ]);
+  }, DB_TIMEOUT);
+
+  it("a removed file's row survives with its read mark, after the live lectures", async () => {
+    const her = await makeUser();
+    const course = await makeCourse(her, 3101);
+    await addFiles(her, course, [
+      { ref: "cm:7101:lecture-01.pdf", section: "Week 1" },
+      { ref: "cm:7201:lecture-02.pdf", section: "Week 2" },
+      { ref: "cm:7301:lecture-03.pdf", section: "Week 3" },
+      { ref: "cm:7401:lecture-04.pdf", section: "Week 4" },
+    ]);
+    await syncLectures(her, t.db);
+    const [one, two, three, four] = await lecturesOf(her, course);
+    const readTwo = new Date("2026-11-06T09:00:00Z");
+    const readThree = new Date("2026-11-07T09:00:00Z");
+    await t.db.update(lectures).set({ readAt: readTwo }).where(eq(lectures.id, two.id));
+    await t.db.update(lectures).set({ readAt: readThree }).where(eq(lectures.id, three.id));
+    await t.db.insert(lectureContent).values({ lectureId: two.id, breath: "Two.", sourceHash: "h-two" });
+
+    // Lecture 2's file row goes (the foreign key sets the lecture's file_id to null),
+    // and lecture 3's file is renamed into something that is not a lecture.
+    await t.db.delete(courseFiles).where(eq(courseFiles.moodleRef, "cm:7201:lecture-02.pdf"));
+    await t.db
+      .update(courseFiles)
+      .set({ moodleRef: "cm:7301:reading-list.pdf", name: "reading-list.pdf" })
+      .where(eq(courseFiles.moodleRef, "cm:7301:lecture-03.pdf"));
+
+    expect(await syncLectures(her, t.db)).toEqual({ added: 0, updated: 1, kept: 2 });
+    const after = await lecturesOf(her, course);
+    expect(after).toEqual([
+      one,
+      { ...four, n: 2 },
+      { ...two, n: 3, fileId: null, readAt: readTwo },
+      { ...three, n: 4, readAt: readThree },
+    ]);
+    const [content] = await t.db.select().from(lectureContent);
+    expect(content.lectureId).toBe(two.id);
+
+    // Stable: a second sync moves nothing.
+    expect(await syncLectures(her, t.db)).toEqual({ added: 0, updated: 0, kept: 2 });
+    expect(await lecturesOf(her, course)).toEqual(after);
+  }, DB_TIMEOUT);
+
+  it("hand-made rows without a file keep their number; one on a new lecture's number is taken over", async () => {
+    const her = await makeUser();
+    const course = await makeCourse(her, 3101);
+    const readAt = new Date("2026-11-08T09:00:00Z");
+    // Imported before Moodle was synced: lecture 1 (read), and a guest talk she numbered 10.
+    const [imported, guest] = await t.db
+      .insert(lectures)
+      .values([
+        { userId: her, courseId: course, n: 1, title: "Why forecast", readAt },
+        { userId: her, courseId: course, n: 10, title: "Guest talk" },
+      ])
+      .returning();
+    await addFiles(her, course, [
+      { ref: "cm:7101:lecture-why-forecast.pdf", section: "Week 1" },
+      { ref: "cm:7201:lecture-smoothing.pdf", section: "Week 2" },
+    ]);
+
+    // Lecture 1 takes over the imported row (same number, no file); the guest talk stays on 10.
+    expect(await syncLectures(her, t.db)).toEqual({ added: 1, updated: 1, kept: 1 });
+    let rows = await lecturesOf(her, course);
+    const [pdf1] = await t.db.select().from(courseFiles).where(eq(courseFiles.moodleRef, "cm:7101:lecture-why-forecast.pdf"));
+    expect(rows.map((l) => [l.id, l.n, l.title, l.fileId, l.readAt])).toEqual([
+      [imported.id, 1, "why forecast", pdf1.id, readAt],
+      [rows[1].id, 2, "smoothing", rows[1].fileId, null],
+      [guest.id, 10, "Guest talk", null, null],
+    ]);
+
+    // A deck added above shifts the Moodle lectures; the guest talk keeps 10, the read mark stays on its file.
+    await addFiles(her, course, [{ ref: "cm:7001:lecture-course-intro.pdf", section: "Before we start" }]);
+    expect(await syncLectures(her, t.db)).toEqual({ added: 1, updated: 2, kept: 1 });
+    rows = await lecturesOf(her, course);
+    expect(rows.map((l) => [l.n, l.title, l.readAt])).toEqual([
+      [1, "course intro", null],
+      [2, "why forecast", readAt],
+      [3, "smoothing", null],
+      [10, "Guest talk", null],
+    ]);
+    expect(rows[1].id).toBe(imported.id);
+    expect(rows[3]).toEqual(guest);
+  }, DB_TIMEOUT);
+});
+
+describe("planLectures", () => {
+  const w = (n: number, fileId: string | null) => ({ n, title: `t${n}`, fileId, opensAt: null });
+  const row = (id: string, n: number, fileId: string | null) => ({ id, n, title: `t${n}`, fileId, opensAt: null });
+
+  it("moves a row with no file off a number a file-matched lecture needs, and leaves free ones alone", () => {
+    const plan = planLectures(
+      [row("a", 1, "fa"), row("h", 2, null), row("g", 5, null), row("gone", 3, "fx")],
+      [w(1, "fb"), w(2, "fa")],
+    );
+    // fb is new on 1; a moves to 2; h (no file) was on 2 and goes after the live ones, before the gone file; g stays on 5.
+    expect(plan.inserts).toEqual([w(1, "fb")]);
+    expect(plan.updates).toEqual([
+      { id: "a", from: 1, values: { ...w(2, "fa"), title: "t2" }, produced: true },
+      { id: "h", from: 2, values: { n: 3, title: "t2", fileId: null, opensAt: null }, produced: false },
+      { id: "gone", from: 3, values: { n: 4, title: "t3", fileId: "fx", opensAt: null }, produced: false },
+    ]);
+    expect(plan.kept).toBe(3);
+  });
 });

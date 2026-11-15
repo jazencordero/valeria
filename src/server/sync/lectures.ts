@@ -13,19 +13,38 @@
  *   `cm:<id>:<file name>`) are rebuilt into the section shape `lecturesFrom`
  *   (src/lib/courses/lectures.ts) reads; see `sectionsFromStored`. Brief
  *   attachments are never lectures.
- * - One `lectures` row per (user_id, course_id, n). When two files share a
- *   number (the PDF and the PowerPoint of lecture 1, or two parts of lecture
- *   3), the row takes the first PDF, else the first in `lecturesFrom`'s
- *   order, for its file and title.
- * - A new number is inserted; an existing one gets `title`, `file_id` and
- *   `opens_at` set, and only when one of them differs. `read_at` and
- *   `last_opened_at` are never written here: what she has read survives
- *   every sync.
- * - A lecture whose number `lecturesFrom` no longer gives is kept as it is
- *   (counted in `kept`), never deleted: her read mark, highlights and lecture
- *   page hang off the row. Stored files are never deleted either (M2-08), so
- *   this only happens when the lecture rules change or a file is renamed
- *   into a different number.
+ * - `lecturesFrom` numbers the lectures 1..k in page order (M9-04). When two
+ *   files share a number (the PDF and the PowerPoint of one deck), the
+ *   lecture takes the first PDF, else the first in `lecturesFrom`'s order,
+ *   for its file and title.
+ * - Matching (M9-24): a lecture belongs to the row that has its file
+ *   (`file_id`), whatever number that row had. A lecture whose file no row
+ *   has (or that has no file yet) takes a row with no `file_id` and the same
+ *   number: an imported or hand-made lecture that Moodle now has the file
+ *   for. A row that has a file never matches by number. Otherwise it is a
+ *   new row. A file the teacher replaces with a new upload under a new name
+ *   is a new file row, so a new lecture: we do not guess two files are one
+ *   deck.
+ * - A matched row gets `n`, `title`, `file_id` and `opens_at` set, and only
+ *   when one of them differs. `read_at`, `last_opened_at`, the lecture page,
+ *   notes, highlights and cards hang off the row id and are never touched:
+ *   what she has read moves with the file when its number changes.
+ * - Rows this run did not produce are kept (counted in `kept`), never
+ *   deleted:
+ *   - A row with no file keeps its number when no lecture of this run has
+ *     it (hand-made rows usually sit after Moodle's, or were taken over
+ *     above). If a lecture matched by file needs that number, the row moves
+ *     after the live lectures like a gone file.
+ *   - A row whose file no longer gives a lecture (renamed into something
+ *     that is not a lecture, or its file row deleted) is placed after the
+ *     live lectures: in its old order, on the lowest numbers above k that a
+ *     kept row with no file does not hold. A second sync gives the same
+ *     numbers.
+ * - Renumbering runs in this one transaction without ever tripping
+ *   `unique(user_id, course_id, n)`: every row whose number changes is first
+ *   moved to a number below all of the course's numbers (negative), then to
+ *   its final number; new rows are inserted last, on numbers that are free
+ *   by then.
  *
  * Gaps (what the stored rows do not have, and what that costs):
  * - No module name and no module kind are stored. A module with one file is
@@ -44,9 +63,12 @@
  *   `opens_at` is always null today and no lecture is ever `soon`. Fixing
  *   it needs the reader to pass those fields on and a place to store a
  *   module that has no file yet.
- * - Numbers are tied to the row, not to the file: if a new unnumbered file
- *   shifts the numbers `lecturesFrom` fills in, a read mark stays on its
- *   number. Numbered files (the usual case) never shift.
+ * - No "gone from Moodle" flag: `syncFiles` never deletes a file row, so a
+ *   deck the teacher removed stays a lecture with its number until its file
+ *   row goes. A row whose file row was deleted has `file_id` null (the
+ *   foreign key sets it), and then reads like a hand-made row: it keeps its
+ *   number, and a new lecture with no row of its own on that number takes
+ *   it over.
  */
 import { and, eq, isNull } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/server/db/client";
@@ -57,9 +79,9 @@ import { lecturesFrom, type CourseModule, type CourseSection, type Lecture } fro
 export type SyncLecturesResult = {
   /** New lecture rows. */
   added: number;
-  /** Existing rows whose title, file or opening date changed. */
+  /** Existing rows this run produced whose number, title, file or opening date changed. */
   updated: number;
-  /** Existing rows this run did not produce, left as they were. */
+  /** Existing rows this run did not produce: kept, possibly on a new number after the live ones. */
   kept: number;
 };
 
@@ -163,6 +185,90 @@ function sameTime(a: Date | null, b: Date | null): boolean {
   return (a?.getTime() ?? null) === (b?.getTime() ?? null);
 }
 
+/** What one lecture of this run is written as. */
+type Wanted = { n: number; title: string; fileId: string | null; opensAt: Date | null };
+
+/** The stored lecture fields matching reads. */
+type Existing = { id: string; n: number; title: string; fileId: string | null; opensAt: Date | null };
+
+export type LecturePlan = {
+  /**
+   * Existing rows that end up with other values; `values.n` is the final
+   * number. `produced` is false for a kept row that only moves.
+   */
+  updates: { id: string; from: number; values: Wanted; produced: boolean }[];
+  /** Lectures no row matched. */
+  inserts: Wanted[];
+  /** Existing rows this run did not produce. */
+  kept: number;
+};
+
+/**
+ * Pure: which existing row each lecture of this run belongs to, and every
+ * row's final number. See the rules at the top of this file.
+ */
+export function planLectures(existing: readonly Existing[], wanted: readonly Wanted[]): LecturePlan {
+  const byN = [...existing].sort((a, b) => a.n - b.n);
+  const rowOfFile = new Map<string, Existing>();
+  const filelessOfN = new Map<number, Existing>();
+  for (const r of byN) {
+    if (r.fileId === null) filelessOfN.set(r.n, r);
+    // Two rows with one file (left by the old by-number sync): the lower number wins, the other is kept.
+    else if (!rowOfFile.has(r.fileId)) rowOfFile.set(r.fileId, r);
+  }
+
+  const matched = new Map<string, Wanted>();
+  const inserts: Wanted[] = [];
+  // By file first, so a row with no file is only taken over when no file match needs it.
+  const rest: Wanted[] = [];
+  for (const w of wanted) {
+    const row = w.fileId !== null ? rowOfFile.get(w.fileId) : undefined;
+    if (row) matched.set(row.id, w);
+    else rest.push(w);
+  }
+  for (const w of rest) {
+    const row = filelessOfN.get(w.n);
+    if (row && !matched.has(row.id)) matched.set(row.id, w);
+    else inserts.push(w);
+  }
+
+  // Kept rows: no file and a number no lecture of this run has stays put; the rest go after the live ones.
+  const live = new Set(wanted.map((w) => w.n));
+  const finalN = new Map<string, number>();
+  const taken = new Set(live);
+  const unmatched = byN.filter((r) => !matched.has(r.id));
+  for (const r of unmatched) {
+    if (r.fileId === null && !live.has(r.n)) {
+      finalN.set(r.id, r.n);
+      taken.add(r.n);
+    }
+  }
+  let next = wanted.length + 1;
+  for (const r of unmatched) {
+    if (finalN.has(r.id)) continue;
+    while (taken.has(next)) next += 1;
+    finalN.set(r.id, next);
+    taken.add(next);
+  }
+
+  const updates: LecturePlan["updates"] = [];
+  for (const r of byN) {
+    const w = matched.get(r.id);
+    if (w) {
+      if (r.n !== w.n || r.title !== w.title || r.fileId !== w.fileId || !sameTime(r.opensAt, w.opensAt)) {
+        updates.push({ id: r.id, from: r.n, values: w, produced: true });
+      }
+    } else {
+      const n = finalN.get(r.id)!;
+      if (n !== r.n) {
+        updates.push({ id: r.id, from: r.n, values: { n, title: r.title, fileId: r.fileId, opensAt: r.opensAt }, produced: false });
+      }
+    }
+  }
+
+  return { updates, inserts, kept: unmatched.length };
+}
+
 export async function syncLectures(userId: string, database: Db = defaultDb): Promise<SyncLecturesResult> {
   return database.transaction(async (txRaw) => {
     const tx = txRaw as unknown as Db;
@@ -193,38 +299,43 @@ export async function syncLectures(userId: string, database: Db = defaultDb): Pr
         );
 
       const { sections, fileIdOf } = sectionsFromStored(rows);
-      const found = onePerNumber(lecturesFrom(sections));
+      const wanted: Wanted[] = onePerNumber(lecturesFrom(sections)).map((l) => ({
+        n: l.n,
+        title: l.title,
+        fileId: l.fileRef ? (fileIdOf.get(l.fileRef) ?? null) : null,
+        opensAt: l.opensAt ? new Date(l.opensAt) : null,
+      }));
 
       const existing = await tx
-        .select()
+        .select({ id: lectures.id, n: lectures.n, title: lectures.title, fileId: lectures.fileId, opensAt: lectures.opensAt })
         .from(lectures)
         .where(and(eq(lectures.userId, userId), eq(lectures.courseId, course.id)));
-      const rowOf = new Map(existing.map((r) => [r.n, r]));
 
-      for (const l of found) {
-        const fileId = l.fileRef ? (fileIdOf.get(l.fileRef) ?? null) : null;
-        const opensAt = l.opensAt ? new Date(l.opensAt) : null;
-        const values = { title: l.title, fileId, opensAt };
-        const row = rowOf.get(l.n);
+      const plan = planLectures(existing, wanted);
 
-        if (!row) {
-          // A parallel sync may have added the same number; then this is an update of theirs.
-          await tx
-            .insert(lectures)
-            .values({ userId, courseId: course.id, n: l.n, ...values })
-            .onConflictDoUpdate({ target: [lectures.userId, lectures.courseId, lectures.n], set: values });
-          added += 1;
-          continue;
-        }
-        if (row.title === values.title && row.fileId === values.fileId && sameTime(row.opensAt, values.opensAt)) {
-          continue;
-        }
-        await tx.update(lectures).set(values).where(eq(lectures.id, row.id));
-        updated += 1;
+      // Phase 1: every row whose number changes steps aside, below all of this course's numbers.
+      const moving = plan.updates.filter((u) => u.from !== u.values.n);
+      const floor = Math.min(0, ...existing.map((r) => r.n));
+      for (const [i, u] of moving.entries()) {
+        await tx.update(lectures).set({ n: floor - 1 - i }).where(eq(lectures.id, u.id));
+      }
+      // Phase 2: final numbers and values.
+      for (const u of plan.updates) {
+        await tx.update(lectures).set(u.values).where(eq(lectures.id, u.id));
+      }
+      // New rows last, on numbers that are free now.
+      for (const w of plan.inserts) {
+        // A parallel sync may have added the same number; then this is an update of theirs.
+        const { title, fileId, opensAt } = w;
+        await tx
+          .insert(lectures)
+          .values({ userId, courseId: course.id, ...w })
+          .onConflictDoUpdate({ target: [lectures.userId, lectures.courseId, lectures.n], set: { title, fileId, opensAt } });
       }
 
-      const produced = new Set(found.map((l) => l.n));
-      kept += existing.filter((r) => !produced.has(r.n)).length;
+      added += plan.inserts.length;
+      updated += plan.updates.filter((u) => u.produced).length;
+      kept += plan.kept;
     }
 
     return { added, updated, kept };
