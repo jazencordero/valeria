@@ -51,6 +51,14 @@
  *   (re)learning, in review (due).
  * - Section of a card comes from the page (see its header).
  *
+ * - Ask about this card (M2-28 follow-up). With `tutor` (her account has the
+ *   tutor switched on, read by the page on the server), a card that is answered
+ *   or revealed (grade buttons or the feedback strip showing) gets "Ask about
+ *   this card" beside the card menu: it opens the notes panel over the session
+ *   on that card (`askAboutCard`, ./ask-card.ts). Before the answer the entry is
+ *   not there, and when the card leaves the screen (next card, the end) the
+ *   panel closes (`cardMovedOn`). Without `tutor` nothing of this renders.
+ *
  * The whole screen is the frame (fixed, everything behind it inert), and the
  * done screen is the same kind of full-screen layer.
  *
@@ -104,6 +112,7 @@ import { CardExplain, type CardExplainHandle, type ExplainCheck } from "./card-e
 import { CardHead } from "./card-head";
 import { CardMatch, MatchPrompt, matchSub, type MatchResult } from "./card-match";
 import { CardMcq, PickPrompt } from "./card-mcq";
+import { ASK_CARD_TEXT, askAboutCard, cardMovedOn, cardPassage } from "./ask-card";
 import { CardMenu, DROP_TOAST_TEXT } from "./card-menu";
 import { SessionDone } from "./done";
 import { FeedbackStrip } from "./feedback-strip";
@@ -191,6 +200,8 @@ export type SessionPlayerProps = {
   retryMs?: number;
   /** "Now" for intervals; tests pin it. */
   now?: () => number;
+  /** Her account has the tutor switched on: "Ask about this card" once a card is answered. */
+  tutor?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -540,6 +551,12 @@ export function SessionPlayer(props: SessionPlayerProps) {
 
   const card = currentCard(s);
   const pc = card ? byId.get(card.id) : undefined;
+  // Changes when the card on screen changes, is graded, or is back on its front (a miss that returns).
+  const shownKey =
+    view.kind === "play" && card ? `${card.id}:${s.passed}:${s.reviews.length}:${s.phase === "front" ? "front" : "shown"}` : "none";
+
+  // A notes panel opened for a card closes when that card leaves the screen or starts over.
+  useEffect(() => () => cardMovedOn(), [shownKey]);
 
   useSessionKeys(
     { phase: view.kind === "play" ? s.phase : "done", cardType: card?.type, gradeMode },
@@ -652,7 +669,18 @@ export function SessionPlayer(props: SessionPlayerProps) {
                 now={now}
               />
             </SessionStage>
-            <div className="mt-2 flex justify-end">
+            <div className="mt-2 flex items-center justify-end gap-2">
+              {props.tutor && view.kind === "play" && (s.phase === "graded" || s.phase === "fb") ? (
+                <Button
+                  variant="text"
+                  size="sm"
+                  className="mr-auto"
+                  data-testid="ask-card"
+                  onClick={() => askAboutCard(pc.id, cardPassage(pc.type, pc.body))}
+                >
+                  {ASK_CARD_TEXT}
+                </Button>
+              ) : null}
               <CardMenu key={cardKey} cardId={card.id} action={dropCard} onDrop={onDrop} />
             </div>
           </>

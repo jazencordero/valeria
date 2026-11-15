@@ -28,6 +28,11 @@
  *   has messages it carries on there, so the notes button gives the same chat about where she
  *   is. A new highlight starts empty, with the starters.
  *
+ * A study card ("Ask about this card", `card`): the note's quote is the card she has just
+ * answered, but the chat is the card's own (keyed by the place from the start, so its stored chat
+ * shows even with the quote) and the quote is never sent: the server reads the card from `where`,
+ * and only when she has answered or revealed it and her course allows its text.
+ *
  * `TutorChatView` is the pure view (plain props); `TutorChat` talks to POST /api/ai/tutor
  * (src/app/api/ai/tutor/route.ts) and reads its UI message stream by hand (the AI SDK stays in
  * src/server/ai, tests/arch/ai-boundary.test.ts).
@@ -413,6 +418,8 @@ export type TutorChatProps = {
   resolveNoteId: () => Promise<string | null>;
   /** "Save to note": the notepad appends the text to the note's body and saves it its own way. */
   onSaveToNote: (text: string) => void;
+  /** About the study card on screen: the card's chat, and `quote` (the card) is not sent. */
+  card?: boolean;
   api?: TutorApi;
   preview?: TutorPreview;
 };
@@ -423,13 +430,13 @@ const localId = () => `turn-${++turnSeq}`;
 /** The chat's key: undecided, the note's id, or the place (null). */
 type Key = { decided: false } | { decided: true; noteId: string | null };
 
-export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, api = DEFAULT_API, preview }: TutorChatProps) {
+export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, card = false, api = DEFAULT_API, preview }: TutorChatProps) {
   const [turns, setTurns] = useState<ChatTurn[]>(preview?.turns ?? []);
   const [draft, setDraft] = useState(preview?.draft ?? "");
   const [busy, setBusy] = useState(preview?.busy ?? false);
   const [status, setStatus] = useState<string | null>(preview?.status ?? null);
   const [deeperAvailable, setDeeperAvailable] = useState(preview?.deeperAvailable ?? false);
-  const key = useRef<Key>(noteId ? { decided: true, noteId } : { decided: false });
+  const key = useRef<Key>(noteId ? { decided: true, noteId } : card ? { decided: true, noteId: null } : { decided: false });
   const aborter = useRef<AbortController | null>(null);
   const busyRef = useRef(busy);
 
@@ -451,7 +458,7 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, a
       if (!loaded || controller.signal.aborted) return;
       setDeeperAvailable(loaded.deeperAvailable === true);
       // A new highlight starts empty; otherwise show the stored chat (note's or place's).
-      if (quote && !noteId) return;
+      if (quote && !noteId && !card) return;
       const messages = Array.isArray(loaded.messages) ? loaded.messages : [];
       if (messages.length > 0) {
         if (!key.current.decided) key.current = { decided: true, noteId: null };
@@ -489,7 +496,7 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, a
       const id = await chatNoteId();
       const body: Record<string, unknown> = { text: question, where: where() };
       if (id) body.noteId = id;
-      if (quote) body.quote = quote.slice(0, MESSAGE_MAX);
+      if (quote && !card) body.quote = quote.slice(0, MESSAGE_MAX);
       const controller = new AbortController();
       aborter.current = controller;
       const out = await askTutor(
@@ -511,7 +518,7 @@ export function TutorChat({ noteId, quote, where, resolveNoteId, onSaveToNote, a
       setDraft((now) => (now.trim() ? now : question));
       setStatus(out.line);
     },
-    [api.fetch, chatNoteId, quote, setBusyBoth, where],
+    [api.fetch, card, chatNoteId, quote, setBusyBoth, where],
   );
 
   const deeper = useCallback(

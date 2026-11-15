@@ -454,3 +454,59 @@ describe("Notepad with the tutor (M2-28)", () => {
     expect(actions.save).toHaveBeenLastCalledWith(expect.objectContaining({ id: NOTE_ID, body: "My line\n\nPV is today's worth." }));
   });
 });
+
+describe("Notepad over a study session (Ask about this card)", () => {
+  const SESSION = "/study/5b1d2c3e-0000-4000-8000-000000000001";
+  const CARD = "6c2e3d4f-0000-4000-8000-00000000000a";
+  const ask = () =>
+    act(() => {
+      window.dispatchEvent(new CustomEvent("ready:notepad", { detail: { quote: "Q?\n\nAnswer: A.", card: { id: CARD } } }));
+    });
+  const api = {
+    fetch: vi.fn(async () => Response.json({ messages: [], deeperAvailable: false })) as unknown as typeof globalThis.fetch,
+    writeClipboard: vi.fn(async () => {}),
+  };
+
+  it("without the switch the card ask opens nothing", async () => {
+    render(<NotepadView pathname={SESSION} actions={fakeActions()} />);
+    ask();
+    await flush(20);
+    expect(screen.queryByRole("dialog", { name: "Notepad" })).toBeNull();
+  });
+
+  it("outside a session the card ask opens nothing", async () => {
+    render(<NotepadView pathname="/home" actions={fakeActions()} tutor tutorApi={api} />);
+    ask();
+    await flush(20);
+    expect(screen.queryByRole("dialog", { name: "Notepad" })).toBeNull();
+  });
+
+  it("with the switch it opens over the session on the card, takes the inert mark off its layer, and closes when the card goes", async () => {
+    render(<NotepadView pathname={SESSION} actions={fakeActions()} tutor tutorApi={api} />);
+    await flush(0);
+    const layer = document.querySelector<HTMLElement>("[data-notepad-layer]")!;
+    layer.inert = true;
+    layer.setAttribute("aria-hidden", "true");
+    ask();
+    await flush(20);
+    const pad = screen.getByRole("dialog", { name: "Notepad" });
+    expect(pad.className).toBe("np tutor over");
+    expect(pad.querySelector(".np-quote")?.textContent).toBe("Q?\n\nAnswer: A.");
+    expect(layer.hasAttribute("data-open")).toBe(true);
+    expect(layer.inert).toBe(false);
+    expect(layer.hasAttribute("aria-hidden")).toBe(false);
+    act(() => {
+      window.dispatchEvent(new CustomEvent("ready:notepad-card-gone"));
+    });
+    await flush(400);
+    expect(screen.queryByRole("dialog", { name: "Notepad" })).toBeNull();
+    expect(layer.hasAttribute("data-open")).toBe(false);
+  });
+
+  it("a plain open during a session still closes at once, as before", async () => {
+    render(<NotepadView pathname={SESSION} actions={fakeActions()} tutor tutorApi={api} />);
+    act(() => openNotepad({ quote: "Something" }));
+    await flush(400);
+    expect(screen.queryByRole("dialog", { name: "Notepad" })).toBeNull();
+  });
+});

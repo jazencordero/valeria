@@ -16,7 +16,8 @@
  *
  * Top: close, one progress segment per card (coloured by section, filled for
  * cards before `index`), "N new · N learning · N due" and an m:ss timer.
- * Close or Escape opens the stop confirm; Escape again closes it. The cap
+ * Close or Escape opens the stop confirm; Escape again closes it. While the notes
+ * panel is open over the session (`notepadOver`), Escape is the panel's. The cap
  * peeks in on mount. The "N in a row" pill shows from 2 with a flame, turns
  * hot from 5, and every multiple of 5 fires 14 confetti pieces and a cheer.
  * Everything behind the frame is inert. Presentational: the caller owns the
@@ -40,6 +41,7 @@ import { useInertOthers } from "@/lib/a11y/inert";
 import { calmDuration, ease } from "@/lib/motion/tokens";
 import { useMotionMode } from "@/lib/motion/use-calm";
 import type { SectionKind } from "@/lib/study/bite";
+import { notepadOver } from "./ask-card";
 
 export const MISS_TEXT = "Back in the pile. That is how it sticks.";
 export const STOP_TEXT = "Stop here? Your progress is saved.";
@@ -236,6 +238,8 @@ export function SessionFrame({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
+      // The notes panel over the session closes on its own Escape (notepad.tsx).
+      if (notepadOver()) return;
       e.preventDefault();
       if (confirming) closeConfirm();
       else openConfirm();

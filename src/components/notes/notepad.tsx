@@ -64,6 +64,18 @@
  * note holds words, then by the note's id, fixed at the first question).
  * Without the switch none of this renders: the panel is exactly as above.
  *
+ * Over a study session (M2-28 follow-up): with the switch on, the session offers "Ask about
+ * this card" once a card is answered or revealed (src/components/session/ask-card.ts). That
+ * opens the panel on a new note whose quote is the card in plain text, and the chat is the
+ * card's (keyed by the place, never by the note; the quote is not sent to the tutor, which reads
+ * the card itself from `where`, after she answered it, and only where her course allows it).
+ * Only this kind of open works during a session, and only with the switch; any other stays shut
+ * as before. The session marks everything but itself inert, so while this panel is open its
+ * layer on <body> takes the inert mark off itself and sits above the session; the layer is
+ * `data-open` meanwhile, so the session's keys and its Escape stand down (Escape closes the
+ * panel only). When the card leaves the screen (next card, the end, leaving the session) the
+ * panel closes, so a later card never shows in it before she has answered that one.
+ *
  * `Notepad` wires the path and the real actions; `NotepadView` takes both as
  * props so tests can drive it.
  */
@@ -86,6 +98,7 @@ import { addCardsFromNote, noteCardExams } from "@/app/(app)/notes/card-actions"
 import type { AddCardsResult, ExamChoice, ExamChoicesResult } from "@/app/(app)/notes/card-actions";
 import { DraftCards, type DraftMessage } from "@/components/notes/draft-cards";
 import { TutorChat, whereFromPage, type TutorApi, type TutorPreview } from "@/components/tutor/tutor-chat";
+import { NOTEPAD_CARD_GONE_EVENT, NOTEPAD_OPEN_EVENT, type CardAsk } from "@/components/session/ask-card";
 import { Button } from "@/components/ui/button";
 import { showToast } from "@/components/ui/toast";
 import { inertOthers } from "@/lib/a11y/inert";
@@ -134,7 +147,7 @@ const RETRY_MAX_MS = 30_000;
 const RETRIES_AFTER_CLOSE = 6;
 const WIDE_QUERY = "(min-width: 700px)";
 const HINT_KEY = "ready-notes-hint";
-const OPEN_EVENT = "ready:notepad";
+const OPEN_EVENT = NOTEPAD_OPEN_EVENT;
 /** Fired on window after each save that stored a note; detail is `NoteSavedDetail`. */
 export const NOTE_SAVED_EVENT = "ready:note-saved";
 
@@ -478,6 +491,8 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
   const [width, setWidth] = useState(storedWidth);
   const splitRef = useRef<HTMLDivElement | null>(null);
   const draftRef = useRef<Draft>(EMPTY);
+  /** Open over a study session about this card ("Ask about this card"), and the path then. */
+  const [cardAnchor, setCardAnchor] = useState<{ id: string; path: string } | null>(null);
 
   const saver = useRef<NoteSaver | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -536,7 +551,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
   );
 
   const startNote = useCallback(
-    (quote: string | null, stored?: OpenNote, withCards = false) => {
+    (quote: string | null, stored?: OpenNote, withCards = false, cardId?: string) => {
       saver.current?.close();
       cardsSeq.current += 1;
       setCards(null);
@@ -547,6 +562,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
       setDraft(fresh);
       setSaveState("idle");
       setChat({ seq, noteId: stored?.id ?? null });
+      setCardAnchor(cardId ? { id: cardId, path } : null);
       const onState = (s: SaveState) => {
         if (noteSeq.current === seq) setSaveState(s);
       };
@@ -643,6 +659,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
     saver.current = null;
     noteSeq.current += 1;
     setOpen(false);
+    setCardAnchor(null);
     const back = opener.current;
     opener.current = null;
     requestAnimationFrame(() => {
@@ -775,7 +792,14 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
 
   useEffect(() => {
     const onOpen = (e: Event) => {
-      const detail = (e as CustomEvent<{ quote?: string; note?: OpenNote; cards?: boolean }>).detail;
+      const detail = (e as CustomEvent<{ quote?: string; note?: OpenNote; cards?: boolean; card?: CardAsk["card"] }>).detail;
+      if (detail?.card) {
+        // "Ask about this card": only over a session, only with the tutor switched on.
+        const quote = detail.quote?.trim();
+        if (!tutor || !inSession || typeof detail.card.id !== "string" || !quote) return;
+        startNote(quote, undefined, false, detail.card.id);
+        return;
+      }
       if (detail?.note) {
         startNote(null, detail.note, detail.cards === true);
         return;
@@ -785,7 +809,25 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
     };
     window.addEventListener(OPEN_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_EVENT, onOpen);
-  }, [startNote]);
+  }, [startNote, tutor, inSession]);
+
+  // The card it was opened for left the screen: close, so the next card never shows here.
+  useEffect(() => {
+    if (!open || !cardAnchor) return;
+    const gone = () => close();
+    window.addEventListener(NOTEPAD_CARD_GONE_EVENT, gone);
+    return () => window.removeEventListener(NOTEPAD_CARD_GONE_EVENT, gone);
+  }, [open, cardAnchor, close]);
+
+  // Over the session, which made everything else inert (this layer too): take the mark off.
+  // Once closed the layer is empty, and the session's own undo clears it in the end anyway.
+  const overSession = open && cardAnchor !== null;
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!overSession || !layer) return;
+    layer.inert = false;
+    layer.removeAttribute("aria-hidden");
+  }, [overSession, mounted]);
 
   // Phones: the sheet is modal, so the rest of the app is inert.
   const modal = open && !wide;
@@ -795,13 +837,14 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
     return inertOthers(layer);
   }, [modal, mounted]);
 
-  // Leaving for a study session closes the drawer (the session covers the screen).
+  // Leaving for a study session closes the drawer (the session covers the screen); a panel
+  // opened over the session for a card closes when she leaves that page.
   useEffect(() => {
-    if (inSession && open) {
+    if (open && (cardAnchor ? cardAnchor.path !== path : inSession)) {
       const t = setTimeout(close, 0);
       return () => clearTimeout(t);
     }
-  }, [inSession, open, close]);
+  }, [inSession, open, close, cardAnchor, path]);
 
   // The body grows with what she writes.
   useEffect(() => {
@@ -967,14 +1010,14 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
   );
 
   const drawer = (
-    <div ref={layerRef} data-notepad-layer="">
+    <div ref={layerRef} data-notepad-layer="" data-open={open ? "" : undefined}>
       <AnimatePresence>
         {open && !wide ? (
           <motion.div
             key="scrim"
             {...scrimAnim}
             aria-hidden="true"
-            className="np-scrim"
+            className={overSession ? "np-scrim over" : "np-scrim"}
             data-testid="notepad-scrim"
             onClick={close}
           />
@@ -990,7 +1033,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
             aria-labelledby="np-h"
             data-layout={wide ? "side" : "bottom"}
             data-testid="notepad"
-            className={tutor ? "np tutor" : "np"}
+            className={`${tutor ? "np tutor" : "np"}${overSession ? " over" : ""}`}
             style={tutor && wide ? { width: panelWidth } : undefined}
             onKeyDown={onPanelKey}
           >
@@ -1057,6 +1100,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
                     key={chat.seq}
                     noteId={chat.noteId}
                     quote={draft.quote}
+                    card={cardAnchor !== null}
                     where={tutorWhere}
                     resolveNoteId={resolveNoteId}
                     onSaveToNote={appendToBody}

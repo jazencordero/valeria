@@ -124,3 +124,7 @@
   .pad-fab { transition: none; }
   .np-mark.wipe { animation: np-fade 150ms linear; }
 }
+
+/* Over a study session ("Ask about this card"): above the session frame (z-index 60). */
+.np-scrim.over { z-index: 61; }
+.np.over { z-index: 62; }

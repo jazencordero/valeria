@@ -19,13 +19,15 @@
  * | fb (feedback strip)           | Enter, Space        | continue                       |
  *
  * Escape is not handled here: `SessionFrame` owns it (opens and closes the stop
- * confirm, and calls preventDefault). While that confirm is open, or the
- * session is done, every key here is ignored. Typing in a textarea or input
+ * confirm, and calls preventDefault). While that confirm is open, while the
+ * notes panel is open over the session ("Ask about this card", `notepadOver`),
+ * or the session is done, every key here is ignored. Typing in a textarea or input
  * never fires anything except Cmd/Ctrl + Enter. Events already
  * defaultPrevented, key repeats, IME composition and any other modifier
  * (Alt, Shift, Cmd or Ctrl on other keys) are ignored. No remapping.
  */
 import { useEffect, useRef } from "react";
+import { notepadOver } from "./ask-card";
 import type { CardType } from "@/lib/study/bite";
 import type { Grade } from "@/lib/study/memory";
 import type { GradeMode, SessionPhase } from "@/lib/study/session";
@@ -126,7 +128,7 @@ export function useSessionKeys(state: SessionKeyState, handlers: SessionKeyHandl
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const { state: s, handlers: h } = latest.current;
-      const action = sessionKeyAction(e, { ...s, paused: s.paused || stopConfirmOpen() });
+      const action = sessionKeyAction(e, { ...s, paused: s.paused || stopConfirmOpen() || notepadOver() });
       if (!action) return;
       const run = {
         reveal: h.onReveal,

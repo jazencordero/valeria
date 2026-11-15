@@ -24,6 +24,9 @@
  *   most 4) of non-boss cards she had graded before the session started is
  *   the warm-up, the rest learn. Only boss matters to the rules (the requeue
  *   keeps the boss last); warm and learn only colour the head and progress.
+ * - Whether her account has the tutor switched on (`tutorEnabled`, as the
+ *   app layout decides it for the notes panel): the player then offers "Ask
+ *   about this card" once a card is answered (M2-28 follow-up).
  * - Whether she had reviewed anything earlier today (the done screen pops
  *   today's dot only for the first session of the day).
  */
@@ -43,6 +46,7 @@ import { exams, reviews, studySessions } from "@/server/db/schema/study";
 import { dropCard } from "@/app/(app)/study/card-actions";
 import { endSession, saveProgress } from "@/server/study/actions";
 import { dayKey, loadDeck, StudyNotFound, type DeckCard } from "@/server/study/store";
+import { tutorEnabled } from "@/server/tutor/context";
 
 type Params = Promise<{ sessionId: string }>;
 
@@ -193,6 +197,7 @@ async function Session({ params }: { params: Params }) {
       saveProgress={saveProgress}
       endSession={endSession}
       dropCard={dropCard}
+      tutor={tutorEnabled(user.settings)}
     />
   );
 }

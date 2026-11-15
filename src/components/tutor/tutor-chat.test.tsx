@@ -312,3 +312,24 @@ describe("whereFromPage", () => {
     expect(whereFromPage(`/study/${C}`, document)).toEqual({ kind: "study", sessionId: C, cardId: CARD, revealed: true });
   });
 });
+
+describe("TutorChat about a study card (Ask about this card)", () => {
+  const STUDY = { kind: "study" as const, sessionId: C, cardId: CARD, revealed: true };
+
+  it("shows the card's stored chat even with the card as the quote", async () => {
+    const { api, calls } = fakeApi(() => loaded([{ id: ANSWER_ID, role: "assistant", text: "Earlier answer", model: FREE }]));
+    renderChat(api, { card: true, quote: "What is PV?\n\nAnswer: Today's worth.", where: () => STUDY });
+    await screen.findByText("Earlier answer");
+    expect(calls).toEqual([{ mode: "load", where: STUDY }]);
+  });
+
+  it("asks by the card's place, never sends the card text, and never stores the note first", async () => {
+    const { api, calls } = fakeApi((b) => (b.mode === "load" ? loaded() : streamResponse(["Because."])));
+    const props = renderChat(api, { card: true, quote: "What is PV?\n\nAnswer: Today's worth.", where: () => STUDY });
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: STARTERS[0] }));
+    await screen.findByText("Because.");
+    expect(calls[1]).toEqual({ text: STARTERS[0], where: STUDY });
+    expect(props.resolveNoteId).not.toHaveBeenCalled();
+  });
+});
