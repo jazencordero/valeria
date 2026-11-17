@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { shownOptions } from "@/lib/study/option-order";
 import { DATA_RULE } from "@/server/ai/as-data";
 import { ensureSessionFor } from "@/server/auth/session";
 import { courses } from "@/server/db/schema/courses";
@@ -12,6 +13,7 @@ import { createTestDb, type TestDb } from "@/server/db/test-db";
 import {
   buildCopyPrompt,
   buildTutorContext,
+  cardText,
   copyNoCourseText,
   findPassage,
   tutorAnchor,
@@ -548,5 +550,57 @@ describe("tutorPlace", () => {
     expect(await setStudyRule(s.user.id, "not-a-uuid", "allowed", t.db)).toBeNull();
     const [row] = await t.db.select({ aiStudy: courses.aiStudy }).from(courses).where(eq(courses.id, other.course.id));
     expect(row.aiStudy).toBe("unknown");
+  });
+});
+
+describe("a multiple-choice card for the tutor (options as she saw them)", () => {
+  // File order: the right option first, as bundles write it.
+  const MCQ = {
+    type: "mcq",
+    q: "MCQ-QUESTION?",
+    opts: [
+      ["OPT-RIGHT", true],
+      ["OPT-TWO", false],
+      ["OPT-THREE", false],
+      ["OPT-FOUR", false],
+    ],
+  };
+  const optionLines = (text: string) => text.split("\n").filter((l) => l.startsWith("- "));
+
+  it("lists the options in the shown order for the player's seed, marks the right one, and uses no letters", () => {
+    // A seed whose shown order differs from the file's, so the test cannot pass by accident.
+    const seed = ["c1:s1", "c1:s2", "c1:s3", "c1:s4", "c1:s5"].find(
+      (x) => shownOptions(MCQ.opts as unknown as [string, boolean][], x)[0][0] !== "OPT-RIGHT",
+    )!;
+    expect(seed).toBeDefined();
+    const shown = shownOptions(MCQ.opts as unknown as [string, boolean][], seed).map(([text]) => text);
+
+    const text = cardText(MCQ, null, seed);
+    expect(optionLines(text).map((l) => l.replace(/^- /, "").replace(" (the right answer)", ""))).toEqual(shown);
+    expect(optionLines(text).filter((l) => l.includes("(the right answer)"))).toEqual(["- OPT-RIGHT (the right answer)"]);
+    expect(optionLines(text)[0]).not.toContain("OPT-RIGHT");
+    expect(text).not.toMatch(/\b[A-D][).:]\s/);
+    expect(text).toContain("in the order on her screen");
+    // Same seed, same order; without a seed, the file's order (other callers).
+    expect(cardText(MCQ, null, seed)).toBe(text);
+    expect(optionLines(cardText(MCQ, null))[0]).toContain("OPT-RIGHT");
+  });
+
+  it("the context uses card id plus session id as the seed, tells the model to name options by their words, and sends nothing before she answers", async () => {
+    const s = await student({ study: "allowed" });
+    await t.db.update(cards).set({ type: "mcq", body: MCQ }).where(eq(cards.id, s.card.id));
+    const where = { kind: "study", sessionId: s.session.id, cardId: s.card.id } as const;
+
+    const before = all((await buildTutorContext(s.user.id, { ...where, revealed: false }, { now: NOW }, t.db)).parts);
+    expect(before).not.toContain("OPT-RIGHT");
+    expect(before).not.toContain("the right answer");
+
+    const after = all((await buildTutorContext(s.user.id, { ...where, revealed: true }, { now: NOW }, t.db)).parts);
+    const shown = shownOptions(MCQ.opts as unknown as [string, boolean][], `${s.card.id}:${s.session.id}`).map(([text]) => text);
+    const at = shown.map((text) => after.indexOf(text));
+    expect(at.every((i) => i >= 0)).toBe(true);
+    expect([...at].sort((x, y) => x - y)).toEqual(at);
+    expect(after).toContain("OPT-RIGHT (the right answer)");
+    expect(after).toContain("name an option by its words, never by a letter or its position");
   });
 });
