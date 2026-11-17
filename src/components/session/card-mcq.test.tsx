@@ -51,7 +51,7 @@ function key(k: string, init: KeyboardEventInit = {}) {
 
 describe("CardMcq", () => {
   it("labels options A to D and has no why before a pick", () => {
-    render(<CardMcq card={CARD} />);
+    render(<CardMcq card={CARD} seed={null} />);
     for (const [i, l] of ["A", "B", "C", "D"].entries()) {
       expect(screen.getByTestId(`mcq-opt-${i}`).textContent).toContain(l);
     }
@@ -60,7 +60,7 @@ describe("CardMcq", () => {
 
   it.each([1, 2, 3, 4])("key %i chooses that option", (n) => {
     const onResult = vi.fn();
-    render(<CardMcq card={CARD} onResult={onResult} />);
+    render(<CardMcq card={CARD} seed={null} onResult={onResult} />);
     key(String(n));
     expect(onResult).toHaveBeenCalledTimes(1);
     expect(onResult).toHaveBeenCalledWith({ picked: n - 1, right: 1, correct: n === 2, grade: n === 2 ? 3 : 1 });
@@ -72,7 +72,7 @@ describe("CardMcq", () => {
     render(
       <>
         <input data-testid="field" />
-        <CardMcq card={three} onResult={onResult} />
+        <CardMcq card={three} seed={null} onResult={onResult} />
       </>,
     );
     key("4");
@@ -83,7 +83,7 @@ describe("CardMcq", () => {
   });
 
   it("a right pick marks it right with a check and shows the why and source", () => {
-    render(<CardMcq card={CARD} />);
+    render(<CardMcq card={CARD} seed={null} />);
     fireEvent.click(screen.getByTestId("mcq-opt-1"));
     expect(screen.getByTestId("mcq-opt-1").dataset.state).toBe("right");
     expect(screen.getByTestId("mcq-check")).toBeTruthy();
@@ -94,7 +94,7 @@ describe("CardMcq", () => {
   });
 
   it("a wrong pick marks it wrong and shows the right one", () => {
-    render(<CardMcq card={CARD} />);
+    render(<CardMcq card={CARD} seed={null} />);
     key("3");
     expect(screen.getByTestId("mcq-opt-2").dataset.state).toBe("wrong");
     expect(screen.getByTestId("mcq-opt-1").dataset.state).toBe("right");
@@ -103,7 +103,7 @@ describe("CardMcq", () => {
 
   it("ignores a second pick and reports the result once", () => {
     const onResult = vi.fn();
-    render(<CardMcq card={CARD} onResult={onResult} />);
+    render(<CardMcq card={CARD} seed={null} onResult={onResult} />);
     key("1");
     key("2");
     fireEvent.click(screen.getByTestId("mcq-opt-3"));
@@ -116,14 +116,14 @@ describe("CardMcq", () => {
 
   it("keys off: only taps choose", () => {
     const onResult = vi.fn();
-    render(<CardMcq card={CARD} onResult={onResult} keys={false} />);
+    render(<CardMcq card={CARD} seed={null} onResult={onResult} keys={false} />);
     key("2");
     expect(onResult).not.toHaveBeenCalled();
   });
 
   it("initialPick starts answered without reporting", () => {
     const onResult = vi.fn();
-    render(<CardMcq card={CARD} onResult={onResult} initialPick={0} />);
+    render(<CardMcq card={CARD} seed={null} onResult={onResult} initialPick={0} />);
     expect(screen.getByTestId("mcq-opt-0").dataset.state).toBe("wrong");
     key("2");
     expect(onResult).not.toHaveBeenCalled();
@@ -221,9 +221,55 @@ describe("FeedbackStrip", () => {
 describe("multi-line why (M3-55)", () => {
   it("keeps the why's line breaks after a pick", () => {
     const why = "First line.\nSecond line.\nThird line.";
-    render(<CardMcq card={{ ...CARD, why }} initialPick={0} />);
+    render(<CardMcq card={{ ...CARD, why }} seed={null} initialPick={0} />);
     const p = screen.getByTestId("mcq-why").querySelector("p")!;
     expect(p.textContent).toContain(why);
     expect(p.className).toContain("whitespace-pre-line");
+  });
+});
+
+describe("shown order (the bundle's right option comes first)", () => {
+  const RIGHT_FIRST: CardMcqProps["card"] = {
+    ...CARD,
+    opts: [
+      ["It goes down", true],
+      ["It goes up", false],
+      ["It stays the same", false],
+      ["It doubles", false],
+    ],
+  };
+  const shownTexts = () => [0, 1, 2, 3].map((i) => screen.getByTestId(`mcq-opt-${i}`).textContent ?? "");
+
+  it("the same seed shows the same order, and keys 1 to 4 follow it", () => {
+    const seeds = ["card-1:session-a", "card-1:session-b", "card-1:session-c", "card-1:session-d", "card-1:session-e"];
+    const rightSlots = new Set<number>();
+    for (const seed of seeds) {
+      const onResult = vi.fn();
+      const { unmount } = render(<CardMcq card={RIGHT_FIRST} seed={seed} onResult={onResult} />);
+      const first = shownTexts();
+      const slot = first.findIndex((t) => t.includes("It goes down"));
+      rightSlots.add(slot);
+      key(String(slot + 1));
+      expect(onResult).toHaveBeenCalledWith({ picked: slot, right: slot, correct: true, grade: 3 });
+      expect(screen.getByTestId(`mcq-opt-${slot}`).dataset.state).toBe("right");
+      unmount();
+      // A reload of the same session shows the same order.
+      render(<CardMcq card={RIGHT_FIRST} seed={seed} />);
+      expect(shownTexts()).toEqual(first);
+      cleanup();
+    }
+    // Across sessions the right option does not sit in one place.
+    expect(rightSlots.size).toBeGreaterThan(1);
+  });
+
+  it("a wrong pick in the shown order is graded wrong and the right one is marked", () => {
+    const onResult = vi.fn();
+    render(<CardMcq card={RIGHT_FIRST} seed="card-9:session-x" onResult={onResult} />);
+    const texts = shownTexts();
+    const right = texts.findIndex((t) => t.includes("It goes down"));
+    const wrong = right === 0 ? 1 : 0;
+    fireEvent.click(screen.getByTestId(`mcq-opt-${wrong}`));
+    expect(onResult).toHaveBeenCalledWith({ picked: wrong, right, correct: false, grade: 1 });
+    expect(screen.getByTestId(`mcq-opt-${right}`).dataset.state).toBe("right");
   });
 });

@@ -668,6 +668,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
                 check={check}
                 send={send}
                 now={now}
+                sessionId={props.sessionId}
               />
             </SessionStage>
             <div className="mt-2 flex items-center justify-end gap-2">
@@ -719,6 +720,8 @@ type CardBodyProps = {
   check?: ExplainCheck;
   send: (e: SessionEvent) => void;
   now: () => number;
+  /** The session's id: with the card's id it seeds the order a card's options are shown in. */
+  sessionId: string;
 };
 
 /**
@@ -757,6 +760,7 @@ function CardBody({
   check,
   send,
   now,
+  sessionId,
 }: CardBodyProps) {
   const b = bodyOf(pc);
   const common = { section, conceptNames, rung, actionsEl, autoFocus: true };
@@ -786,6 +790,7 @@ function CardBody({
         <CardMcq
           card={{ q: str(b.q), opts: Array.isArray(b.opts) ? (b.opts as McqOption[]) : [], source, why }}
           head={head}
+          seed={`${pc.id}:${sessionId}`}
           onResult={(r) => send({ type: "pick", option: r.picked, correct: r.correct, at: now() })}
         />
       );

@@ -9,7 +9,9 @@
  *     <CardMcq card={card} head={<CardHead … />} onResult={(r) => { … }} />
  *   </SessionFrame>
  *
- * Options are labelled A to D. Keys 1 to 4 (or a tap) choose. The right one
+ * Options are shown in a seeded order (`seed`; see src/lib/study/option-order.ts), never the
+ * bundle's, whose right option comes first. They are labelled A to D in that order, and keys
+ * 1 to 4 (or a tap) choose by it. The right one
  * turns mint with a drawn check; when she picked it, it also bumps. A wrong
  * pick gets a due-coloured border and shakes, and the right one is shown.
  * Then a divider draws and "Why." with the card's why and its source fades
@@ -23,6 +25,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { calmDuration, ease } from "@/lib/motion/tokens";
 import { useMotionMode } from "@/lib/motion/use-calm";
 import type { McqCard } from "@/lib/study/card-schema";
+import { shownOptions } from "@/lib/study/option-order";
 
 export const PICK_TEXT = "Pick an answer.";
 export const WHY_LABEL = "Why.";
@@ -30,9 +33,9 @@ export const OPTION_KEYS = ["A", "B", "C", "D"] as const;
 export const SHAKE_MS = 220;
 
 export type McqResult = {
-  /** Index of the option she picked. */
+  /** Index of the option she picked, in the shown order. */
   picked: number;
-  /** Index of the right option. */
+  /** Index of the right option, in the shown order. */
   right: number;
   correct: boolean;
   /** Grade for the session: 3 when right, 1 when missed (as the prototype). */
@@ -47,8 +50,14 @@ export type CardMcqProps = {
   onResult?: (result: McqResult) => void;
   /** Listen for keys 1 to 4 on the document. Default true; turn off when several cards share a page. */
   keys?: boolean;
-  /** Start already answered (previews). Does not call `onResult`. */
+  /** Start already answered (previews), as an index in the shown order. Does not call `onResult`. */
   initialPick?: number;
+  /**
+   * Seeds the order the options are shown in (the player passes card id plus session id, so the
+   * order holds on reload and changes between sessions). Default: the question. `null` keeps the
+   * file order (tests about one option's look, never a real card).
+   */
+  seed?: string | null;
   className?: string;
 };
 
@@ -91,11 +100,15 @@ export function SourceLine({ source }: { source: string }) {
   );
 }
 
-export function CardMcq({ card, head, onResult, keys = true, initialPick, className = "" }: CardMcqProps) {
+export function CardMcq({ card, head, onResult, keys = true, initialPick, seed, className = "" }: CardMcqProps) {
   const mode = useMotionMode();
   const full = mode === "full";
   const instant = mode === "instant";
-  const opts = card.opts.slice(0, OPTION_KEYS.length);
+  // Bundles put the right option first: show them shuffled, the right one carried by identity.
+  // Indexes below (picked, right, keys 1 to 4, A to D) are all in this shown order.
+  const fileOpts = card.opts.slice(0, OPTION_KEYS.length);
+  // Pure and cheap: the same card and seed give the same order on every render.
+  const opts = seed === null ? fileOpts : shownOptions(fileOpts, seed ?? card.q);
   const right = rightIndex(opts);
   const valid = (i: number | undefined): i is number => i !== undefined && i >= 0 && i < opts.length;
 

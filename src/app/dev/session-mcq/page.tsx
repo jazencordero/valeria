@@ -94,7 +94,8 @@ function Panel({ title, demo, pick, grade }: { title: string; demo: Demo; pick: 
       <p className="mono text-ink-3">
         {title.toUpperCase()} · continued {continued}
       </p>
-      <CardMcq card={demo.card} head={<Head demo={demo} />} initialPick={pick} keys={false} />
+      {/* A fixed state (this pick is right or wrong by its file position), so the file order stays. */}
+      <CardMcq card={demo.card} head={<Head demo={demo} />} initialPick={pick} keys={false} seed={null} />
       <FeedbackStrip
         grade={grade}
         concept={demo.concept}
