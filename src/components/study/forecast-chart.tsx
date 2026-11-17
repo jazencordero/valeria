@@ -227,11 +227,15 @@ export function ForecastChart({
   target,
   targetGrade,
   examDay,
+  plan,
+  planEndShown,
+  planName,
   className = "",
   style,
   ...rest
 }: ForecastChartProps) {
-  const data = { history, forecast, daysLeft, target, targetGrade, examDay };
+  // Every data field is taken out here: one left in `rest` lands on the <div> and is lost to the chart.
+  const data = { history, forecast, daysLeft, target, targetGrade, examDay, plan, planEndShown, planName };
   const mode = useMotionMode();
   const [ref, width] = useWidth();
   const themeTick = useThemeTick();
