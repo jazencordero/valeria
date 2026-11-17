@@ -43,6 +43,7 @@ import { beginLectureSession } from "@/server/study/lecture-session";
 import { beginSession, type BegunSession, type DoneScreen, type SavedProgress } from "@/server/study/actions";
 import { StudyNotFound } from "@/server/study/store";
 import { initSession, step } from "@/lib/study/session";
+import { optionSeed, shownOptions } from "@/lib/study/option-order";
 import {
   LECTURE_BACK_LABEL,
   SAVE_FAILED_TEXT,
@@ -249,6 +250,38 @@ describe("SessionPlayer: a missed card", () => {
     expect(saveProgress.mock.calls[0][1]).toEqual([expect.objectContaining({ cardId: "card-m", grade: 1, firstTry: true })]);
     expect(cardOnScreen()).toBe("card-b");
     expect(segments()).toHaveLength(3);
+  });
+});
+
+describe("SessionPlayer: a quiz card's option order", () => {
+  const OPTS = (MCQ.body as { opts: [string, boolean][] }).opts;
+  const shownTexts = () =>
+    within(screen.getByTestId("session-card"))
+      .getAllByRole("button")
+      .map((b) => OPTS.find(([t]) => b.textContent?.includes(t))?.[0])
+      .filter(Boolean);
+
+  it("follows the shared seed for each attempt: a missed card comes back in its next attempt's order", async () => {
+    const { user } = setup({ cards: [MCQ, B] });
+    const card = () => screen.getByTestId("session-card");
+    expect(card().getAttribute("data-attempt")).toBe("0");
+    const first = shownOptions(OPTS, optionSeed("card-m", SID, 0)).map(([t]) => t);
+    expect(shownTexts()).toEqual(first);
+    // Miss it: press the key of a wrong option in the shown order.
+    const wrong = first.findIndex((t) => !OPTS.find(([o]) => o === t)![1]);
+    await user.keyboard(String(wrong + 1));
+    expect(await screen.findByText("Not quite.")).toBeTruthy();
+    // While it is on screen (feedback showing) the order and the attempt hold.
+    expect(card().getAttribute("data-attempt")).toBe("0");
+    expect(shownTexts()).toEqual(first);
+    await user.keyboard("{Enter}");
+    // Card B, then the missed card again, as its second attempt.
+    await waitFor(() => expect(cardOnScreen()).toBe("card-b"));
+    await user.keyboard(" ");
+    await user.keyboard("2");
+    await waitFor(() => expect(cardOnScreen()).toBe("card-m"));
+    expect(card().getAttribute("data-attempt")).toBe("1");
+    expect(shownTexts()).toEqual(shownOptions(OPTS, optionSeed("card-m", SID, 1)).map(([t]) => t));
   });
 });
 

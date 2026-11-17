@@ -446,11 +446,13 @@ export function whereFromPage(pathname: string, doc: Document | null): TutorWher
     case "study": {
       const card = doc?.querySelector<HTMLElement>('[data-testid="session-card"]');
       const cardId = card?.dataset.cardId;
+      // Which showing of the card this is: it picks the order her options are in (option-order.ts).
+      const attempt = Number(card?.dataset.attempt ?? 0);
       const revealed = Boolean(
         doc?.querySelector(`[role="group"][aria-label="${GRADE_GROUP_LABEL}"]`) || doc?.querySelector('[data-testid="feedback"]'),
       );
       return cardId && UUID.test(cardId)
-        ? { kind: "study", sessionId: id, cardId, revealed }
+        ? { kind: "study", sessionId: id, cardId, ...(Number.isInteger(attempt) && attempt > 0 ? { attempt } : {}), revealed }
         : { kind: "study", sessionId: id, revealed: false };
     }
     default:

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { shownOptions } from "@/lib/study/option-order";
+import { optionSeed, shownOptions } from "@/lib/study/option-order";
 import { DATA_RULE } from "@/server/ai/as-data";
 import { ensureSessionFor } from "@/server/auth/session";
 import { courses } from "@/server/db/schema/courses";
@@ -602,5 +602,12 @@ describe("a multiple-choice card for the tutor (options as she saw them)", () =>
     expect([...at].sort((x, y) => x - y)).toEqual(at);
     expect(after).toContain("OPT-RIGHT (the right answer)");
     expect(after).toContain("name an option by its words, never by a letter or its position");
+
+    // A card that came back (attempt 2) is told in that attempt's order, the one on her screen.
+    const again = all((await buildTutorContext(s.user.id, { ...where, attempt: 2, revealed: true }, { now: NOW }, t.db)).parts);
+    const shown2 = shownOptions(MCQ.opts as unknown as [string, boolean][], optionSeed(s.card.id, s.session.id, 2)).map(([text]) => text);
+    const at2 = shown2.map((text) => again.indexOf(text));
+    expect(at2.every((i) => i >= 0)).toBe(true);
+    expect([...at2].sort((x, y) => x - y)).toEqual(at2);
   });
 });

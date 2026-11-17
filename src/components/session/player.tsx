@@ -87,6 +87,7 @@ import { useInertOthers } from "@/lib/a11y/inert";
 import { biteMinutes, type CardType, type SectionKind } from "@/lib/study/bite";
 import type { McqOption, MatchPair, RubricPoint } from "@/lib/study/card-schema";
 import { aimedDue } from "@/lib/study/exam-aim";
+import { optionSeed } from "@/lib/study/option-order";
 import { rungOf } from "@/lib/study/ladder";
 import { GRADES, grade as gradeMemory, newCard, type Grade, type MemoryState } from "@/lib/study/memory";
 import {
@@ -669,6 +670,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
                 send={send}
                 now={now}
                 sessionId={props.sessionId}
+                attempt={s.reviews.filter((r) => r.cardId === card.id).length}
               />
             </SessionStage>
             <div className="mt-2 flex items-center justify-end gap-2">
@@ -720,8 +722,10 @@ type CardBodyProps = {
   check?: ExplainCheck;
   send: (e: SessionEvent) => void;
   now: () => number;
-  /** The session's id: with the card's id it seeds the order a card's options are shown in. */
+  /** The session's id: with the card's id and `attempt` it seeds the order a card's options are shown in. */
   sessionId: string;
+  /** How many times this card was already answered in this session: 0 the first time. */
+  attempt: number;
 };
 
 /**
@@ -744,6 +748,7 @@ function StagedCard(props: CardBodyProps) {
       data-testid={present ? "session-card" : undefined}
       data-card-id={pc.id}
       data-card-type={pc.type}
+      data-attempt={props.attempt}
     >
       <CardBody {...props} actionsEl={present ? props.actionsEl : null} send={guarded} />
     </div>
@@ -761,6 +766,7 @@ function CardBody({
   send,
   now,
   sessionId,
+  attempt,
 }: CardBodyProps) {
   const b = bodyOf(pc);
   const common = { section, conceptNames, rung, actionsEl, autoFocus: true };
@@ -790,7 +796,7 @@ function CardBody({
         <CardMcq
           card={{ q: str(b.q), opts: Array.isArray(b.opts) ? (b.opts as McqOption[]) : [], source, why }}
           head={head}
-          seed={`${pc.id}:${sessionId}`}
+          seed={optionSeed(pc.id, sessionId, attempt)}
           onResult={(r) => send({ type: "pick", option: r.picked, correct: r.correct, at: now() })}
         />
       );

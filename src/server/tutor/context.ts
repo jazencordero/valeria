@@ -62,7 +62,7 @@ import { assignmentHelp, studyAllowed, type AiAssignments, type AiStudy } from "
 import { dateLine, dayLine, daysBetween, startOfDay } from "@/lib/dates";
 import { conceptMastery } from "@/lib/study/ladder";
 import { newCard } from "@/lib/study/memory";
-import { shownOptions } from "@/lib/study/option-order";
+import { optionSeed, shownOptions } from "@/lib/study/option-order";
 import { asData, DATA_RULE } from "@/server/ai/as-data";
 import { studyFilesRule } from "@/server/ai/consent";
 import { sectionsOf } from "@/server/data/lecture";
@@ -117,6 +117,8 @@ export const whereSchema = z.discriminatedUnion("kind", [
     kind: z.literal("study"),
     sessionId: z.uuid(),
     cardId: z.uuid().optional(),
+    /** How many times the card was already answered in this session (the player's `data-attempt`). */
+    attempt: z.number().int().min(0).max(999).optional(),
     revealed: z.boolean(),
   }),
   z.object({ kind: z.literal("assignment"), assignmentId: z.uuid() }),
@@ -287,7 +289,7 @@ export function findPassage(sections: LectureSection[], quote: string): number |
 
 /**
  * A card's text once she has seen its answer. `seed` is the one the session player shows the
- * card with (card id plus session id, src/lib/study/option-order.ts): a multiple-choice card's
+ * card with (`optionSeed(cardId, sessionId, attempt)`, src/lib/study/option-order.ts): a multiple-choice card's
  * options then come in the order on her screen, not the file's order (where the right one is
  * always first, which would also tell the model which is right before it reads the mark).
  */
@@ -306,7 +308,9 @@ export function cardText(body: unknown, why: string | null, seed?: string): stri
     case "mcq": {
       const fileOpts = (Array.isArray(b.opts) ? (b.opts as unknown[]) : [])
         .filter(Array.isArray)
-        .map((o) => [s(o[0]), o[1] === true] as const);
+        .map((o) => [s(o[0]), o[1] === true] as const)
+        // The player shows at most four (A to D) and shuffles those four: the same here.
+        .slice(0, 4);
       const opts = seed ? shownOptions(fileOpts, seed) : fileOpts;
       lines.push(`Question: ${s(b.q)}`, "The options, in the order on her screen (she sees no letters):");
       for (const [text, right] of opts) lines.push(`- ${text}${right ? " (the right answer)" : ""}`);
@@ -454,8 +458,8 @@ async function studyPlace(userId: string, w: Extract<TutorWhere, { kind: "study"
     .from(cards)
     .where(and(eq(cards.id, own.id), eq(cards.userId, userId)))
     .limit(1);
-  // Same seed as the player (`${cardId}:${sessionId}`), so the options are in the order she saw.
-  const text = card ? cardText(card.body, card.why, `${own.id}:${w.sessionId}`) : "";
+  // The player's own seed for this attempt, so the options are in the order she saw.
+  const text = card ? cardText(card.body, card.why, optionSeed(own.id, w.sessionId, w.attempt ?? 0)) : "";
   return {
     courseId: course.id,
     where: `${where} She has just answered the card below and may ask about it. If it has options, name an option by its words, never by a letter or its position.`,

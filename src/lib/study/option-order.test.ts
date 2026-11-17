@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAnchored, refersByLetter, shownOptions, type Option } from "./option-order";
+import { isAnchored, optionSeed, refersByLetter, shownOptions, type Option } from "./option-order";
 
 const four: Option[] = [
   ["Right one", true],
@@ -51,5 +51,27 @@ describe("shownOptions", () => {
 
   it("does not take ordinary words for letter references", () => {
     expect(refersByLetter([["A model learns from data", true], ["Data is a table", false], ["It uses a test set", false]])).toBe(false);
+  });
+});
+
+describe("optionSeed", () => {
+  it("keeps the plain card:session seed for the first attempt and changes it for each return", () => {
+    expect(optionSeed("card-1", "session-1")).toBe("card-1:session-1");
+    expect(optionSeed("card-1", "session-1", 0)).toBe("card-1:session-1");
+    expect(new Set([0, 1, 2, 3].map((a) => optionSeed("card-1", "session-1", a))).size).toBe(4);
+  });
+
+  it("a card that comes back usually shows a new order, and the right one moves", () => {
+    let changed = 0;
+    let moved = 0;
+    for (let s = 0; s < 200; s++) {
+      const a = shownOptions(four, optionSeed(`card-${s}`, "session-1", 0));
+      const b = shownOptions(four, optionSeed(`card-${s}`, "session-1", 1));
+      if (JSON.stringify(a) !== JSON.stringify(b)) changed++;
+      if (rightSlot(a) !== rightSlot(b)) moved++;
+    }
+    // 23 of 24 orders differ from a given one; the right one moves 3 times in 4.
+    expect(changed / 200).toBeGreaterThan(0.9);
+    expect(moved / 200).toBeGreaterThan(0.6);
   });
 });

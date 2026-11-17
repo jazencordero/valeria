@@ -326,6 +326,13 @@ describe("whereFromPage", () => {
     document.body.insertAdjacentHTML("beforeend", `<div role="group" aria-label="${GRADE_GROUP_LABEL}"></div>`);
     expect(whereFromPage(`/study/${C}`, document)).toEqual({ kind: "study", sessionId: C, cardId: CARD, revealed: true });
   });
+
+  it("sends the card's attempt, which picks the order of its options", () => {
+    document.body.innerHTML = `<div data-testid="session-card" data-card-id="${CARD}" data-attempt="2"></div>`;
+    expect(whereFromPage(`/study/${C}`, document)).toEqual({ kind: "study", sessionId: C, cardId: CARD, attempt: 2, revealed: false });
+    document.body.innerHTML = `<div data-testid="session-card" data-card-id="${CARD}" data-attempt="0"></div>`;
+    expect(whereFromPage(`/study/${C}`, document)).toEqual({ kind: "study", sessionId: C, cardId: CARD, revealed: false });
+  });
 });
 
 describe("TutorChat about a study card (Ask about this card)", () => {

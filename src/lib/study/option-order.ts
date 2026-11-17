@@ -6,8 +6,10 @@
  * seeded order: the right one is carried as its own `[text, isRight]` pair,
  * never found again by position.
  *
- * - Same seed, same order (the player seeds with card id plus session id, so
- *   a reload keeps the order and the next session gets a new one).
+ * - Same seed, same order. The seed is `optionSeed(cardId, sessionId, attempt)`,
+ *   shared by the player and the tutor: a reload of the card she is on keeps
+ *   its order, a missed card that comes back in the same session (the next
+ *   attempt) and the next session show a new one.
  * - "All of the above", "None of the above", "Both of these", "Neither of the
  *   above" keep their own slot (they only make sense where they were put).
  * - A card whose options name another option by letter ("A and B", "Both A and
@@ -20,6 +22,16 @@ const ANCHORED = /\b(?:all|none|both|neither|any)\s+of\s+(?:the\s+)?(?:above|the
 // The words in any case, the letters capital only (so "a model" is not a reference to option A).
 const LETTER_REF =
   /\b(?:[Oo]ptions?|[Aa]nswers?|[Cc]hoices?)\s+[A-D]\b|\b[A-D]\s*(?:,|and|&|or|\+)\s*[A-D]\b|\b(?:[Bb]oth|[Oo]nly|[Nn]either|[Ee]ither)\s+[A-D]\b/;
+
+/**
+ * The one seed for a card's option order, used by the player and by the tutor's context, so
+ * the tutor sees the options exactly as she does. `attempt` is how many times the card was
+ * already answered in this session (0 the first time). Attempt 0 keeps the plain
+ * `cardId:sessionId` seed.
+ */
+export function optionSeed(cardId: string, sessionId: string, attempt = 0): string {
+  return attempt > 0 ? `${cardId}:${sessionId}:${attempt}` : `${cardId}:${sessionId}`;
+}
 
 /** The option keeps its slot: "All of the above" and the like. */
 export const isAnchored = (text: string) => ANCHORED.test(text);
