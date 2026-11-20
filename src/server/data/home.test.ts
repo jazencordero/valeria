@@ -47,6 +47,7 @@ const { dismissNeverMissFor, turnOffNeverMissFor, turnOnNeverMissFor } = await i
 const { itemsForUser } = await import("@/server/calendar/feed");
 const { encodeFlash, FLASH_MAX_AGE_S, parseFlash } = await import("./flash");
 const { beginSession, examView, endSession, saveProgress } = await import("@/server/study/actions");
+const { verdictOf } = await import("@/lib/study/plan");
 
 const DB_TIMEOUT = 90_000;
 
@@ -344,8 +345,9 @@ describe("getHomeView: bite row and exam cards", () => {
       const done = await getHomeView(u.id, { now: NOW }, t.db);
       expect(done.bite).toMatchObject({ state: "done", examId: friday.id, day: "FRIDAY", href: `/exams/${friday.id}` });
       const d = done.bite as Extract<typeof done.bite, { state: "done" }>;
-      expect(d.forecast).toBe(done.exams[0].forecast);
-      expect(d.forecast).toBeGreaterThan(0);
+      // Labelled FRIDAY, so it is Friday's number: where the exam's plan lands, not today's forecast.
+      expect(d.forecast).toBe(Math.round(done.exams[0].spark.plan.at(-1)!));
+      expect(d.forecast).toBeGreaterThanOrEqual(done.exams[0].forecast);
       expect(done.exams[0].biteMinutes).toBeNull();
       expect(done.biteFirst).toBe(false);
 
@@ -541,10 +543,25 @@ describe("getHomeView: a reviews-only day whose important reviews are done", () 
       const soon = await exam(u.id, fm.id, "Forecasting exam", FRIDAY);
       const pace = { open: false, budget: 0, left: 0, bites: 0, impossible: false, done: false, cards: 0, minutes: 0, long: true };
       // The exam's own view, with the pace a paced exam has once the important reviews are done.
-      const enough = async (id: string) => ({ ...(await examView(id)), pace: { ...pace, enough: true, optional: { cards: 43, gain: 0.6 } } });
+      // Today's forecast is 74; the plan lands on 82 on exam day, and the status says that number.
+      const plan = { pace: { kind: "core" as const, open: false, perDay: 0, bitesToday: 0 }, curve: [74, 79, 82.3], end: 82.3, endShown: 82, reaches: false };
+      const verdict = verdictOf(74, 85, plan, { day: "Friday" });
+      const enough = async (id: string) => ({
+        ...(await examView(id)),
+        forecast: 74.2,
+        forecastShown: 74,
+        plan,
+        planEnd: plan.end,
+        verdict,
+        pace: { ...pace, enough: true, optional: { cards: 43, gain: 0.6 } },
+      });
       const view = await getHomeView(u.id, { now: NOW, view: enough }, t.db);
       expect((await examView(soon.id)).bite).not.toBeNull();
       expect(view.bite).toMatchObject({ state: "done", examId: soon.id, href: `/exams/${soon.id}` });
+      // One exam-day number: the row's percent, labelled with the exam's day, is the plan's, the one the status says.
+      expect(view.bite).toMatchObject({ forecast: 82, day: "FRIDAY" });
+      expect(verdict.text).toContain("about 82%");
+      expect(view.exams[0].verdict.text).toBe(verdict.text);
       expect(view.exams[0].biteMinutes).toBeNull();
       expect(view.biteFirst).toBe(false);
 

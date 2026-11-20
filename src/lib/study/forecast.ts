@@ -148,6 +148,43 @@ export function reviewWorth(deck: Deck, ids: readonly string[]): Map<string, num
   return out;
 }
 
+/**
+ * A card's other possible memory in a projection: with probability `p` she
+ * missed it at a planned review, and `state` is its memory in that case.
+ */
+export type Doubt = { p: number; state: MemoryState };
+
+/**
+ * The forecast a projection expects, 0..100, not rounded: `deckForecast` with
+ * each card's predicted recall on exam day replaced by its expected value,
+ * `(1 - p) * recall(states[id]) + p * recall(doubt.state)`, for the cards that
+ * have a doubt. With no doubts it is `deckForecast(deck, states)`.
+ */
+export function expectedForecast(
+  deck: Deck,
+  states: Readonly<Record<string, MemoryState>>,
+  doubts: ReadonlyMap<string, Doubt>,
+): number {
+  const examAt = new Date(time(deck.examAt));
+  const counted = countedCards(deck, states);
+  let total = 0;
+  let sum = 0;
+  for (const concept of deck.concepts) {
+    total += concept.weight;
+    const cards = counted.get(concept.id) ?? [];
+    if (cards.length === 0) continue;
+    let recall = 0;
+    for (const c of cards) {
+      const state = states[c.id];
+      const sure = state ? recallAt(state, examAt) : 0;
+      const doubt = doubts.get(c.id);
+      recall += doubt ? (1 - doubt.p) * sure + doubt.p * recallAt(doubt.state, examAt) : sure;
+    }
+    sum += (concept.weight * recall) / cards.length;
+  }
+  return total > 0 ? (100 * sum) / total : 0;
+}
+
 /** The deck's forecast, 0..100, not rounded, for the given card memories. */
 export function deckForecast(deck: Deck, states: Readonly<Record<string, MemoryState>> = deck.states): number {
   const mastery = deckMasteries(deck, states);

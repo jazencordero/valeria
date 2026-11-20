@@ -157,6 +157,7 @@ import {
   conceptSession,
   extraSession,
   minutesFor,
+  planMinutes,
   reviewDay,
   tileSession,
   type Bite,
@@ -647,7 +648,7 @@ function todayAsk(state: ExamState, now: Date): { bites: number; cards: number; 
   const { exam } = state;
   if (examOver(exam, now) || !newCardsAllowed(exam, now)) return { bites: 0, cards: 0, minutes: 0 };
   const asked = todayPlan(state.studyDeck);
-  return { ...asked, minutes: minutesFor(asked.cards, state.perCard) };
+  return { ...asked, minutes: planMinutes(asked.cards, asked.bites, state.perCard) };
 }
 
 /**

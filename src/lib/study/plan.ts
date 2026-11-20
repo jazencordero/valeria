@@ -11,11 +11,27 @@
  * Pure: no clock, no storage. The projection is a simulation of the same
  * model as the forecast (`deckForecast`): day by day from `deck.now` to the
  * day before the exam, exactly the bites the screen asks for are built by
- * the app's own builder (`biteSections`) and played with every card recalled
- * (graded Good), and the forecast is read after each day. It is what the
- * plan gives when she keeps it and remembers; not a promise about her memory.
- * Because the projection is the plan played forward, a day on which she does
- * what the screen asked leaves the projected end where it was.
+ * the app's own builder (`biteSections`) and played, and the forecast is
+ * read after each day.
+ *
+ * What the projection expects. A planned review is not counted as surely
+ * recalled. For a card she has met, the model's own predicted recall at the
+ * moment of the review is the chance she gets it; with the rest she misses
+ * it, passes it on the retry a minute later, and carries the weaker memory a
+ * miss leaves (`doubt`). A card that may have been missed is reviewed again
+ * on the next day of the plan in that case (`repair`). The projected forecast
+ * is the expected value over the two cases (`expectedForecast`); which cards
+ * a day serves follows the recalled case. A card she has never met is learned
+ * (there is nothing to recall yet).
+ * So the projection is what the plan gives at the recall the model expects of
+ * her, not at perfect recall. A session in which she recalls every card
+ * leaves the projected end where it was or higher; a miss lowers it only by
+ * what that miss costs beyond what was already expected.
+ * Before this every planned review counted as recalled: on a real deck two
+ * days before the exam each missed card took about 0.08 points off the
+ * projected end, so a day of reviews with one answer in five wrong lowered it
+ * by about two points and could turn "on track" into "not reachable" while
+ * she did exactly what was asked.
  *
  * The pace:
  * - A paced exam (core marks, `./pace`): the core-first plan. What it asks of
@@ -76,8 +92,8 @@ import {
   type Section,
 } from "./bite";
 import { dueNow } from "./exam-aim";
-import { deckForecast, VERDICTS, type Verdict } from "./forecast";
-import { grade, newCard, type MemoryState } from "./memory";
+import { deckForecast, expectedForecast, VERDICTS, type Doubt, type Verdict } from "./forecast";
+import { grade, newCard, recallAt, type MemoryState } from "./memory";
 import { impossibleLine, isPaced, NEW_PER_BITE, onTrackLine, paceOf, type Pace } from "./pace";
 
 export type PlanPace =
@@ -117,6 +133,44 @@ export const TIME_FROM_BITES = 3;
 
 type Played = { t: number; cards: number };
 
+type Doubts = Map<string, Doubt>;
+/** A missed card comes back in its session and is passed then: this long after the miss. */
+const RETRY_MS = 60_000;
+
+/** The card's memory when she misses it at `at` and passes it on the retry. */
+const missed = (state: MemoryState, at: Date) => grade(grade(state, 1, at), 3, new Date(at.getTime() + RETRY_MS));
+
+/**
+ * Books the chance that a planned review of a card she has met is missed (see
+ * "What the projection expects" in the header). `state` is the card's memory
+ * going into the review at `at`.
+ */
+function doubt(doubts: Doubts, id: string, state: MemoryState, at: Date): void {
+  const had = doubts.get(id);
+  const was = had?.p ?? 0;
+  // Missed now, having recalled it every time so far.
+  const fresh = (1 - was) * (1 - recallAt(state, at));
+  // One memory stands for the missed case: the likelier of "missed now" and "missed earlier, reviewed again now".
+  const stands = !had || fresh >= was ? missed(state, at) : grade(had.state, 3, at);
+  doubts.set(id, { p: was + fresh, state: stands });
+}
+
+/**
+ * The end of a projected day: a card she may have missed earlier and that the
+ * plan did not review today is reviewed in that case (a missed card is the
+ * most valuable one to see again), if it is due by tonight.
+ */
+function repair(deck: Deck, doubts: Doubts, played: ReadonlySet<string>, t: number): void {
+  const exam = ms(deck.examAt);
+  if (t >= exam) return;
+  const by = Math.min(endOfDay(t), exam);
+  const at = new Date(t);
+  for (const [id, d] of doubts) {
+    if (played.has(id) || dueNow(d.state, deck.examAt, by) === null) continue;
+    doubts.set(id, { p: d.p, state: grade(d.state, 3, at) });
+  }
+}
+
 /**
  * Plays one session at `t` (a bite, or with `longSections` a one-go session), every card
  * recalled; returns the time after it and its cards, or null when there is none.
@@ -127,6 +181,8 @@ function play(
   newToday: string[],
   t: number,
   build: (input: BiteInput) => Section[] | null = biteSections,
+  doubts?: Doubts,
+  played?: Set<string>,
 ): Played | null {
   const sections = build({ ...deck, states, now: t, newToday, kind: deck.kind ?? "exam", bitesDoneToday: 0 });
   if (!sections) return null;
@@ -136,16 +192,14 @@ function play(
       t += CARD_MS;
       cards++;
       const at = new Date(t);
-      if ((states[id]?.lastReviewAt ?? null) === null) newToday.push(id);
-      states[id] = grade(states[id] ?? newCard(at), 3, at);
+      const before = states[id];
+      if ((before?.lastReviewAt ?? null) === null) newToday.push(id);
+      else if (doubts) doubt(doubts, id, before, at);
+      played?.add(id);
+      states[id] = grade(before ?? newCard(at), 3, at);
     }
   }
   return { t, cards };
-}
-
-/** Plays one bite at `t`, every card recalled; returns the time after it, or null when there is no bite. */
-function playBite(deck: Deck, states: States, newToday: string[], t: number): number | null {
-  return play(deck, states, newToday, t)?.t ?? null;
 }
 
 /**
@@ -233,15 +287,17 @@ export function simulate(deck: Deck, perDay: number | "core" | "long", doneToday
   const exam = ms(deck.examAt);
   const days = Math.max(0, daysBetween(new Date(start), new Date(exam)));
   const states: States = { ...deck.states };
+  const doubts: Doubts = new Map();
   const curve = [deckForecast(deck, states)];
   for (let d = 0; d < days; d++) {
     let t = start + d * DAY_MS;
     const newToday = d === 0 ? [...(deck.newToday ?? [])] : [];
+    const played = new Set<string>();
     if (perDay === "long") {
       // The same plan done in one-go sessions: one after the other while today still asks for a bite.
       for (let s = 0; s < MAX_BITES_A_DAY && t < exam; s++) {
         if (askedToday({ ...deck, states, now: t, newToday }) === 0) break;
-        const next = play(deck, states, newToday, t, longSections);
+        const next = play(deck, states, newToday, t, longSections, doubts, played);
         if (!next) break;
         t = next.t;
       }
@@ -249,12 +305,13 @@ export function simulate(deck: Deck, perDay: number | "core" | "long", doneToday
       const bites =
         perDay === "core" ? askedToday({ ...deck, states, now: t, newToday }) : perDay - (d === 0 ? doneToday : 0);
       for (let b = 0; b < bites && t < exam; b++) {
-        const next = playBite(deck, states, newToday, t);
-        if (next === null) break;
-        t = next;
+        const next = play(deck, states, newToday, t, biteSections, doubts, played);
+        if (!next) break;
+        t = next.t;
       }
     }
-    curve.push(deckForecast(deck, states));
+    repair(deck, doubts, played, t);
+    curve.push(expectedForecast(deck, states, doubts));
   }
   return curve;
 }

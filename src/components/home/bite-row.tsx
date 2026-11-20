@@ -18,7 +18,8 @@
  *   row's "Start": a second link, to the one-go session. The row's own link
  *   is stretched over the row, so the two never nest.
  * - "done": the cup doodle, "Today's bites are done", "FORECAST 68% · FRIDAY"
- *   and "Open", linking to the exam.
+ *   (the percent the plan lands on on that day, not today's forecast) and
+ *   "Open", linking to the exam.
  *
  * Plain data in: Home works out the exam, the words for its day and the
  * numbers. The page must render <DoodleDefs /> once.
@@ -56,7 +57,7 @@ export type BiteRowProps =
     }
   | {
       state: "done";
-      /** Forecast shown today, a whole percent. */
+      /** The exam-day number the plan lands on (the one the status says), a whole percent: it is labelled with the exam's day. */
       forecast: number;
       /** "FRIDAY". */
       day: string;

@@ -208,12 +208,18 @@ describe("the plan's projection", () => {
     const curve = simulate(deck, 1);
     expect(curve).toHaveLength(8); // the 16th to the 23rd
     expect(curve[0]).toBe(deckForecast(deck));
-    expect(curve[7]).toBeCloseTo(playedByHand(deck, 1), 10);
-    expect(simulate(deck, 2)[7]).toBeCloseTo(playedByHand(deck, 2), 10);
+    // The projection expects some misses at the planned reviews: it ends a little under the same
+    // bites played with every card recalled, never above.
+    const under = (projected: number, recalled: number) => {
+      expect(projected).toBeLessThanOrEqual(recalled);
+      expect(projected).toBeGreaterThan(recalled - 1);
+    };
+    under(curve[7], playedByHand(deck, 1));
+    under(simulate(deck, 2)[7], playedByHand(deck, 2));
     expect(simulate(deck, 2)[7]).toBeGreaterThan(curve[7]);
     // A bite already done today is not played again.
     expect(simulate(deck, 1, 1)[1]).toBe(curve[0]);
-    expect(simulate(deck, 1, 1)[7]).toBeCloseTo(playedByHand(deck, 1, 1), 10);
+    under(simulate(deck, 1, 1)[7], playedByHand(deck, 1, 1));
     // On exam day, and after it, there is nothing left to play.
     expect(simulate({ ...deck, now: new Date("2026-11-23T05:00:00Z") }, 1)).toHaveLength(1);
     expect(simulate({ ...deck, now: at(25) }, 1)).toHaveLength(1);
@@ -223,10 +229,11 @@ describe("the plan's projection", () => {
     const deck = withSeen(makeDeck(6, 8, 0, at(16)), 10);
     const plan = planOf(deck, 10);
     expect(plan.pace).toEqual({ kind: "bites", perDay: 1 });
-    expect(plan.end).toBeCloseTo(playedByHand(deck, 1), 10);
+    expect(plan.end).toBe(simulate(deck, 1)[7]);
+    expect(plan.end).toBeLessThanOrEqual(playedByHand(deck, 1));
     expect(plan.end).toBe(plan.curve[plan.curve.length - 1]);
     expect(plan.endShown).toBe(Math.round(plan.end));
-    expect(planSentence(plan, "Monday")).toBe(`A bite a day gets you to about ${Math.round(playedByHand(deck, 1))}% by Monday.`);
+    expect(planSentence(plan, "Monday")).toBe(`A bite a day gets you to about ${plan.endShown}% by Monday.`);
   });
 
   it("a paced deck is projected with its core-first plan, and that plan reaches a high forecast", () => {
@@ -235,7 +242,8 @@ describe("the plan's projection", () => {
     const pace = paceOf(deck)!;
     expect(plan.pace).toEqual({ kind: "core", open: true, perDay: Math.ceil(pace.budget / 5), bitesToday: pace.bites });
     expect(plan.curve).toHaveLength(8);
-    expect(plan.end).toBeCloseTo(playedByHand(deck, "core"), 10);
+    expect(plan.end).toBeLessThanOrEqual(playedByHand(deck, "core"));
+    expect(plan.end).toBeGreaterThan(playedByHand(deck, "core") - 1);
     // 200 of 400 cards are core: seeing and holding them is what readiness measures.
     expect(plan.endShown).toBeGreaterThan(85);
     expect(plan.reaches).toBe(true);

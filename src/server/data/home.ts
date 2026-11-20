@@ -156,7 +156,7 @@ export type HomeBite =
   | {
       state: "done";
       examId: string;
-      /** Forecast shown today, a whole percent. */
+      /** The exam-day number: where the exam's plan lands (`plan.endShown`), a whole percent. */
       forecast: number;
       /** "FRIDAY", "TOMORROW", "4 DEC". */
       day: string;
@@ -306,7 +306,9 @@ function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>, now: Date)
   for (const card of list) {
     const v = views.get(card.id);
     if (!v || !(v.pace ? v.pace.done || v.pace.enough : v.bitesDoneToday >= v.bitesPerDay)) continue;
-    return { state: "done", examId: card.id, forecast: v.forecastShown, day: biteDay(v.exam.at, v.daysLeft), href: card.href };
+    // Labelled with the exam's day, so it is the exam-day number: the plan's projected end, the
+    // one the status and the done screen say (`plan.endShown`), not today's forecast.
+    return { state: "done", examId: card.id, forecast: v.plan.endShown, day: biteDay(v.exam.at, v.daysLeft), href: card.href };
   }
   return null;
 }

@@ -485,6 +485,18 @@ export function biteSections(input: BiteInput): Section[] | null {
 }
 
 /**
+ * Minutes for what today's plan still asks: `cards` cards in `bites` bites.
+ * The same estimate as a single bite's minutes (`minutesFor`), and never less
+ * than a minute a bite, because no bite says less than "1 min": so the total
+ * and its parts cannot contradict each other ("1 min" a bite, "About 2
+ * minutes" for 15 of them).
+ */
+export function planMinutes(cards: number, bites: number, secondsPerCard?: number | null): number {
+  if (cards <= 0 || bites <= 0) return 0;
+  return Math.max(Math.floor(bites), minutesFor(cards, secondsPerCard));
+}
+
+/**
  * Today's remaining plan of a paced deck as one session (see the header): the
  * bites the plan still asks of today in a row, whole bites while the total
  * stays within `max` cards. The sections repeat (warm, learn, boss, warm, ...)

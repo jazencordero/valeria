@@ -27,7 +27,8 @@
  *   each timed from the card appearing to its grade. The median, not the
  *   mean: one card left open while she fetched a coffee does not move it. It
  *   is used once she has graded 20 different cards (`PACE_MIN_CARDS`); until
- *   then the app's estimate stands (`biteMinutes`, 36 seconds a card).
+ *   then the app's estimate stands (`biteMinutes`, 36 seconds a card). It is
+ *   never taken as faster than 5 seconds a card (`PACE_MIN_SECONDS`).
  */
 import { daysBetween } from "../dates";
 import type { BiteCard, Deck } from "./bite";
@@ -45,6 +46,8 @@ export const NEW_PER_BITE = 5;
 export const PACE_MIN_CARDS = 20;
 /** Her own pace is read from this many of her newest grades. */
 export const PACE_LOG = 200;
+/** No pace is faster than this many seconds a card: quicker grades are clicks, not reading. */
+export const PACE_MIN_SECONDS = 5;
 
 const ms = (t: number | Date) => (typeof t === "number" ? t : t.getTime());
 
@@ -58,7 +61,7 @@ export function secondsPerCard(log: readonly { cardId: string; ms: number | null
   const sorted = timed.map((r) => r.ms as number).sort((a, b) => a - b);
   const mid = sorted.length >> 1;
   const median = sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-  return median / 1000;
+  return Math.max(PACE_MIN_SECONDS, median / 1000);
 }
 
 export type Pace = {

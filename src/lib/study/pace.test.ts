@@ -9,6 +9,7 @@ import {
   buildBite,
   buildLong,
   minutesFor,
+  planMinutes,
   conceptSession,
   enoughPoints,
   extraSession,
@@ -26,6 +27,7 @@ import {
   CUTOFF_DAYS,
   MAX_NEW_PER_DAY,
   MIN_NEW_PER_DAY,
+  PACE_MIN_SECONDS,
   NEW_PER_BITE,
   daysToCutoff,
   impossibleLine,
@@ -604,6 +606,32 @@ describe("her own pace", () => {
     expect(secondsPerCard(log(20, (i) => 10_000 + i * 1000))).toBe(19.5);
   });
 
+  it("is never read as faster than five seconds a card", () => {
+    expect(PACE_MIN_SECONDS).toBe(5);
+    expect(secondsPerCard(log(40, () => 1_000))).toBe(5);
+    expect(secondsPerCard(log(40, () => 9_000))).toBe(9);
+  });
+
+  it("the day's minutes and a bite's minutes come from one estimate and never contradict each other", () => {
+    // The reported case: a pace of a second a card. A 9-card bite says 1 min; 15 of them say 15, not 2.
+    const fast = secondsPerCard(log(40, () => 1_000));
+    expect(minutesFor(9, fast)).toBe(1);
+    expect(planMinutes(130, 15, fast)).toBe(15);
+    for (const pace of [null, 5, 12, 20, 36, 60]) {
+      for (const size of [5, 8, 9]) {
+        for (const bites of [1, 3, 4, 8, 15]) {
+          const total = planMinutes(size * bites, bites, pace);
+          const parts = bites * minutesFor(size, pace);
+          // At least a minute a bite, and within rounding (half a minute a bite) of the bites added up.
+          expect(total).toBeGreaterThanOrEqual(bites);
+          expect(Math.abs(total - parts)).toBeLessThanOrEqual(Math.max(1, bites));
+        }
+      }
+    }
+    expect(planMinutes(0, 0, 20)).toBe(0);
+    expect(planMinutes(63, 7, 24)).toBe(25);
+  });
+
   it("gives the minutes of a session; the app's estimate until it is known", () => {
     expect(minutesFor(63, null)).toBe(biteMinutes(63));
     expect(minutesFor(63, undefined)).toBe(38);
@@ -754,12 +782,17 @@ describe("the minutes left for today", () => {
     let deck = start;
     const first = cardsLeftToday(deck);
     let left = first;
+    let bitesLeft = askedToday(deck);
     let answered = 0;
     const check = () => {
       const now = cardsLeftToday(deck);
       expect(now).toBeLessThanOrEqual(left);
       for (const pace of [null, 12, 20, 47]) expect(minutesFor(now, pace)).toBeLessThanOrEqual(minutesFor(left, pace));
+      // The label's own number, with its bites: at a real pace and at the fastest one.
+      const bitesNow = askedToday(deck);
+      for (const pace of [5, 20]) expect(planMinutes(now, bitesNow, pace)).toBeLessThanOrEqual(planMinutes(left, bitesLeft, pace));
       left = now;
+      bitesLeft = bitesNow;
     };
     for (let s = 0; s < 60 && askedToday(deck) > 0; s++) {
       const session = (oneGo ? buildLong : buildBite)({ ...deck, kind: "exam", bitesDoneToday: s });
