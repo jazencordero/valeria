@@ -56,7 +56,15 @@
  *   due, the most overdue (more of them when the bite is otherwise short of
  *   8 cards).
  * Past the cut-off (reviews only) "due" means due by the end of today, so the
- * day's reviews come as full bites.
+ * day's reviews come as full bites. Such a day does not ask for the whole
+ * pile. The pile is every graded card that still needs a review before the
+ * exam (those she has already reviewed today included); the day asks for its
+ * share of it (`reviewShare` in `./exam-aim`: two thirds two days before the
+ * exam, everything the day before and on exam day), taken from the cards due
+ * by the end of today, earliest learned first (the plan's own order of
+ * introduction, `planPlace`), in every bite of the day. The cards beyond
+ * today's share stay due and are tomorrow's; when the share is done there is
+ * no bite left today.
  * The number of bites done today does not end the day: the next bite is there
  * as long as today's budget has new cards left or something is due. Past the
  * cut-off every session kind is reviews only: tiles, concept practice and
@@ -69,11 +77,11 @@
  */
 
 import { startOfDay } from "../dates";
-import { dueNow, type Time } from "./exam-aim";
+import { dueNow, reviewShare, type Time } from "./exam-aim";
 import { gainOf } from "./forecast";
 import { conceptMastery, focusConcept, rungOf } from "./ladder";
 import { newCard, type MemoryState } from "./memory";
-import { isPaced, newQueue, paceOf, reviewsOnly } from "./pace";
+import { isPaced, newQueue, paceOf, planPlace, reviewsOnly, type Pace } from "./pace";
 
 /** Card types, as in the prototype's TYPE_NAMES. */
 export type CardType = "basic" | "cloze" | "explain" | "mcq" | "match";
@@ -256,19 +264,75 @@ function endOfDay(t: Time): number {
   return startOfDay(new Date(startOfDay(new Date(ms(t))).getTime() + 36 * 60 * 60 * 1000)).getTime();
 }
 
-/** A bite for a paced deck: due reviews and the plan's next new cards (see the header). */
-function pacedSections(deck: Deck): Section[] | null {
-  const pace = paceOf(deck)!;
+/**
+ * The graded, active cards of a paced deck that are due: most overdue first.
+ * On a reviews-only day everything due by the end of the day is due now, so a
+ * bite is a full one instead of the two or three cards that happen to have
+ * come due this minute.
+ */
+function dueCards(deck: Deck, pace: Pace): BiteCard[] {
   const index = new Map(deck.cards.map((c, i) => [c.id, i]));
-  // On a reviews-only day everything due by the end of the day is due now, so a bite is a
-  // full one instead of the two or three cards that happen to have come due this minute.
   const by = pace.open ? ms(deck.now) : Math.min(endOfDay(deck.now), ms(deck.examAt));
-  const due = deck.cards
+  return deck.cards
     .filter((c) => c.active && isGraded(deck, c.id))
     .map((c) => ({ c, due: pace.open ? dueOf(deck, c.id) : (dueNow(stateOf(deck, c.id), deck.examAt, by) ?? Infinity) }))
     .filter((x) => x.due <= by)
     .sort((a, b) => a.due - b.due || index.get(a.c.id)! - index.get(b.c.id)!)
     .map((x) => x.c);
+}
+
+/**
+ * A reviews-only day's share of the pile (see the header): the cards the day
+ * still asks for, earliest learned first, and how many of today's due cards
+ * wait for a later day.
+ *
+ * The pile is every graded card that still needs a review before the exam
+ * (it would be due by the exam: its recall would have fallen to the wanted
+ * recall by then), counted as it stood this morning: the cards she has
+ * already reviewed today are part of it, so the share stays the same all day.
+ * Today's share of it (`reviewShare`) is served from the cards due by the end
+ * of today that she has not reviewed today (a card she missed today, due
+ * again by its own date, is one of them).
+ */
+function todaysReviews(deck: Deck, pace: Pace, due: readonly BiteCard[]): { today: BiteCard[]; later: number } {
+  const start = startOfDay(new Date(ms(deck.now))).getTime();
+  const now = ms(deck.now);
+  const exam = ms(deck.examAt);
+  const reviewedToday = (id: string) => (deck.states[id]?.lastReviewAt ?? -1) >= start;
+  const graded = deck.cards.filter((c) => c.active && isGraded(deck, c.id));
+  const done = graded.filter((c) => reviewedToday(c.id)).length;
+  // Due by the exam: asked a moment before it (from the exam on nothing is due).
+  const horizon = Math.max(now, exam - 1000);
+  const waiting = graded.filter(
+    (c) => !reviewedToday(c.id) && dueNow(stateOf(deck, c.id), deck.examAt, horizon) !== null,
+  ).length;
+  const share = reviewShare(waiting + done, Math.max(1, pace.daysToExam));
+  const place = planPlace(deck);
+  const open = due
+    .filter((c) => !reviewedToday(c.id) || stateOf(deck, c.id).dueAt <= now)
+    .sort((a, b) => place.get(a.id)! - place.get(b.id)!);
+  const today = open.slice(0, Math.max(0, share - done));
+  return { today, later: open.length - today.length };
+}
+
+/**
+ * Past a paced deck's cut-off, before the exam: how many reviews today still
+ * asks for and how many of the due cards wait for a later day. Null for any
+ * other deck or day (there, what is due is what is asked).
+ */
+export function reviewDay(deck: Deck): { today: number; later: number } | null {
+  if (!isPaced(deck)) return null;
+  const pace = paceOf(deck)!;
+  if (pace.open || ms(deck.now) >= ms(deck.examAt)) return null;
+  const { today, later } = todaysReviews(deck, pace, dueCards(deck, pace));
+  return { today: today.length, later };
+}
+
+/** A bite for a paced deck: due reviews and the plan's next new cards (see the header). */
+function pacedSections(deck: Deck): Section[] | null {
+  const pace = paceOf(deck)!;
+  const all = dueCards(deck, pace);
+  const due = pace.open ? all : todaysReviews(deck, pace, all).today;
   const reviews = due.filter((c) => !c.boss);
   const fresh = pace.open ? newQueue(deck).slice(0, Math.min(pace.left, LEARN_MAX)) : [];
   const warm = reviews.slice(0, WARM_MAX);

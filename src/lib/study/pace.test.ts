@@ -4,12 +4,15 @@ import {
   buildBite,
   conceptSession,
   extraSession,
+  reviewDay,
   tileSession,
   type Bite,
   type BiteCard,
   type BiteConcept,
   type Deck,
 } from "./bite";
+import { aimedDue, dueNow, reviewShare } from "./exam-aim";
+import { deckForecast } from "./forecast";
 import { grade, type MemoryState } from "./memory";
 import {
   CUTOFF_DAYS,
@@ -23,8 +26,10 @@ import {
   newQueue,
   onTrackLine,
   paceOf,
+  planPlace,
 } from "./pace";
 import { newCard } from "./memory";
+import { simulate } from "./plan";
 
 const DAY = 24 * 60 * 60 * 1000;
 // The exam: Monday 23 Nov 2026, 09:00 in Helsinki. The cut-off day is Friday the 20th.
@@ -331,9 +336,165 @@ describe("a reviews-only day", () => {
   it("puts the last boss reviews of the day in one bite", () => {
     const deck = dueThrough21st(makeDeck(8, 23, 5, at(16)), (c) => c.boss);
     expect(Object.keys(deck.states)).toHaveLength(8);
+    // Two days before the exam the day asks for two thirds of the pile: six of the eight, in one bite.
     const bite = buildBite({ ...deck, kind: "exam", bitesDoneToday: 0 })!;
     expect(bite.sections.map(([k]) => k)).toEqual(["boss"]);
-    expect(section(bite, "boss")).toHaveLength(8);
+    expect(section(bite, "boss")).toHaveLength(6);
+    // The day before the exam asks for all of them.
+    const eve = buildBite({ ...deck, now: at(22), kind: "exam", bitesDoneToday: 0 })!;
+    expect(eve.sections.map(([k]) => k)).toEqual(["boss"]);
+    expect(section(eve, "boss")).toHaveLength(8);
+  });
+});
+
+describe("the reviews after the cut-off", () => {
+  const dueBy = (deck: Deck, by: number) =>
+    deck.cards.filter((c) => deck.states[c.id] && dueNow(deck.states[c.id], EXAM, by) !== null);
+  /** 23:59:59 in Helsinki on a November day of 2026, or the exam when that is sooner. */
+  const endOf = (day: number) => Math.min(Date.UTC(2026, 10, day, 21, 59, 59), EXAM.getTime());
+
+  /** 360 cards, 180 of them core; she keeps the plan from Monday the 16th to the cut-off on Friday the 20th. */
+  function atTheCutoff(daysDone: number[] = [16, 17, 18, 19, 20]): { deck: Deck; learned: string[] } {
+    let deck = makeDeck(36, 10, 5, at(16));
+    const learned: string[] = [];
+    for (const day of daysDone) {
+      deck = { ...deck, now: at(day), newToday: [] };
+      const bites = paceOf(deck)!.bites;
+      for (let b = 0; b < bites; b++) {
+        const bite = buildBite({ ...deck, kind: "exam", bitesDoneToday: b })!;
+        learned.push(...ids(bite).filter((id) => !seen(deck, id)));
+        deck = play(deck, bite);
+      }
+    }
+    return { deck, learned };
+  }
+
+  /** Every bite the day offers, played; the reviews in the order she met them. */
+  function reviewDayOf(deck: Deck): { deck: Deck; served: string[]; bites: number } {
+    const served: string[] = [];
+    let bites = 0;
+    for (let guard = 0; guard < 60; guard++) {
+      const bite = buildBite({ ...deck, kind: "exam", bitesDoneToday: bites });
+      if (!bite) break;
+      expect(ids(bite).every((id) => seen(deck, id))).toBe(true);
+      served.push(...ids(bite));
+      deck = play(deck, bite);
+      bites++;
+    }
+    return { deck, served, bites };
+  }
+
+  it("asks for two thirds of the pile two days out and the rest the day before, earliest learned first", () => {
+    const start = atTheCutoff();
+    expect(start.learned).toHaveLength(180);
+    // The order she learned them in is the plan's order of introduction (a bite shows its boss cards last).
+    const place = planPlace(start.deck);
+    const plainLearned = start.learned.filter((id) => !start.deck.cards.find((c) => c.id === id)!.boss);
+    expect(plainLearned).toEqual([...plainLearned].sort((a, b) => place.get(a)! - place.get(b)!));
+    const boss = new Set(start.deck.cards.filter((c) => c.boss).map((c) => c.id));
+
+    // Saturday the 21st, two days before the exam.
+    let deck: Deck = { ...start.deck, now: at(21), newToday: [] };
+    // The pile: every card that would be due by the exam. Today's part of it is what is due by tonight.
+    const pile = dueBy(deck, EXAM.getTime() - 1000).length;
+    const dueToday = dueBy(deck, endOf(21)).map((c) => c.id);
+    expect(pile).toBeGreaterThan(40);
+    const asked = Math.min(dueToday.length, reviewShare(pile, 2));
+    expect(asked).toBeLessThan(dueToday.length);
+    expect(reviewDay(deck)).toEqual({ today: asked, later: dueToday.length - asked });
+    const sat = reviewDayOf(deck);
+    expect(sat.served).toHaveLength(asked);
+    expect(new Set(sat.served).size).toBe(asked);
+    // The share is the same all day: part-way through, what is left is the rest of it.
+    const firstBite = buildBite({ ...deck, kind: "exam", bitesDoneToday: 0 })!;
+    expect(ids(firstBite).length).toBeGreaterThanOrEqual(8);
+    expect(reviewDay(play(deck, firstBite))!.today).toBe(asked - ids(firstBite).length);
+    // Earliest learned first: the cards she is asked for are the first of today's due cards in
+    // the order she learned them, served in that order (a bite shows its boss cards last).
+    const byLearned = [...dueToday].sort((a, b) => place.get(a)! - place.get(b)!);
+    expect([...sat.served].sort((a, b) => place.get(a)! - place.get(b)!)).toEqual(byLearned.slice(0, asked));
+    const plain = sat.served.filter((id) => !boss.has(id)).map((id) => place.get(id)!);
+    expect(plain).toEqual([...plain].sort((a, b) => a - b));
+    // The day is done although cards are still due: they are tomorrow's.
+    expect(buildBite({ ...sat.deck, kind: "exam", bitesDoneToday: sat.bites })).toBeNull();
+    expect(reviewDay(sat.deck)).toEqual({ today: 0, later: dueToday.length - asked });
+
+    // Sunday the 22nd, the day before: everything that is due, and it is the lighter day.
+    deck = { ...sat.deck, now: at(22), newToday: [] };
+    expect(reviewDay(deck)!.later).toBe(0);
+    const sun = reviewDayOf(deck);
+    expect(sun.served.length).toBeGreaterThan(0);
+    expect(sun.served.length).toBeLessThan(sat.served.length);
+    // No day asks for more than twice the daily average.
+    const average = (sat.served.length + sun.served.length) / 2;
+    expect(sat.served.length).toBeLessThanOrEqual(2 * average);
+    // Exam morning (07:00, the exam is at 09:00): nothing more than a last few cards, no new card.
+    deck = { ...sun.deck, now: new Date("2026-11-23T05:00:00Z"), newToday: [] };
+    const morning = reviewDayOf(deck);
+    expect(morning.served.length).toBeLessThanOrEqual(sun.served.length);
+    // Nothing is scheduled after the exam.
+    for (const c of morning.deck.cards) {
+      const state = morning.deck.states[c.id];
+      if (!state) continue;
+      const due = aimedDue(state, EXAM, morning.deck.now);
+      expect(due === null || due <= EXAM.getTime()).toBe(true);
+    }
+    expect(reviewDay({ ...morning.deck, now: at(23) })).toBeNull();
+  });
+
+  it("costs less than a forecast point against reviewing everything due each day", () => {
+    const start = atTheCutoff();
+    // Before: each reviews-only day she reviewed every card due by its end, most overdue first.
+    let before: Deck = start.deck;
+    const beforePerDay: number[] = [];
+    for (const day of [21, 22]) {
+      before = { ...before, now: at(day), newToday: [] };
+      const due = dueBy(before, endOf(day))
+        .map((c) => ({ id: c.id, due: dueNow(before.states[c.id], EXAM, endOf(day))! }))
+        .sort((a, b) => a.due - b.due);
+      beforePerDay.push(due.length);
+      before = play(before, { sections: [["warm", due.map((d) => d.id)]], minutes: 0, gain: 0 });
+    }
+    let after: Deck = start.deck;
+    const afterPerDay: number[] = [];
+    for (const day of [21, 22]) {
+      const done = reviewDayOf({ ...after, now: at(day), newToday: [] });
+      afterPerDay.push(done.served.length);
+      after = done.deck;
+    }
+    // The first day is lighter than it was, the day before the exam still the lightest.
+    expect(afterPerDay[0]).toBeLessThan(beforePerDay[0]);
+    expect(afterPerDay[1]).toBeLessThan(afterPerDay[0]);
+    const was = deckForecast(before);
+    const is = deckForecast(after);
+    expect(was).toBeGreaterThan(80);
+    expect(is).toBeGreaterThan(was - 1);
+    // The plan's own projection lands on the same number, since it plays the same bites.
+    expect(simulate({ ...start.deck, now: at(21), newToday: [] }, "core").at(-1)).toBeCloseTo(is, 6);
+  });
+
+  it("asks for everything that is due when she is behind and the pile is small", () => {
+    // She studied on two days only: part of the 180 core cards.
+    const start = atTheCutoff([16, 18]);
+    expect(start.learned.length).toBeLessThan(100);
+    const deck: Deck = { ...start.deck, now: at(21), newToday: [] };
+    const pile = dueBy(deck, EXAM.getTime() - 1000).length;
+    const dueToday = dueBy(deck, endOf(21)).length;
+    const asked = Math.min(dueToday, reviewShare(pile, 2));
+    const sat = reviewDayOf(deck);
+    expect(sat.served).toHaveLength(asked);
+    const sun = reviewDayOf({ ...sat.deck, now: at(22), newToday: [] });
+    expect(sun.served.length).toBeLessThanOrEqual(sat.served.length);
+    // No new card on either day: the cards she never met stay unseen.
+    expect(Object.keys(sun.deck.states)).toHaveLength(start.learned.length);
+  });
+
+  it("a deck without core marks and a day with new cards keep what they had", () => {
+    const { deck } = atTheCutoff([16, 17]);
+    // The cut-off day itself still serves new cards with up to four reviews: not a reviews-only day.
+    expect(reviewDay({ ...deck, now: at(20), newToday: [] })).toBeNull();
+    const plain: Deck = { ...deck, cards: deck.cards.map((c) => ({ ...c, core: false, first: false })), now: at(21) };
+    expect(reviewDay(plain)).toBeNull();
   });
 });
 

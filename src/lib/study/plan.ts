@@ -21,7 +21,9 @@
  * - A paced exam (core marks, `./pace`): the core-first plan. What it asks of
  *   a day (`askedToday`): while new cards are open, the bites that use up the
  *   day's budget of new cards (each bite also brings up to four reviews);
- *   past the cut-off, the bites that clear the reviews due that day.
+ *   past the cut-off, the bites that clear that day's share of the due
+ *   reviews (two thirds two days before the exam, all of them the day
+ *   before: `reviewShare` in `./exam-aim`).
  * - Any other deck: the fewest bites a day that reach her target, from one up
  *   to what the app serves in a day (`BITES_PER_DAY`: two for an exam, one
  *   for a quiz). When even that falls short, that most is the pace and the
@@ -104,7 +106,7 @@ function playBite(deck: Deck, states: States, newToday: string[], t: number): nu
 /**
  * The bites a paced exam's plan still asks of today (0 for a deck that is not
  * paced): while new cards are open, the bites that use up today's budget;
- * past the cut-off, the bites that clear what is due now.
+ * past the cut-off, the bites that clear today's share of what is due.
  */
 export function askedToday(deck: Deck): number {
   const pace = paceOf(deck);

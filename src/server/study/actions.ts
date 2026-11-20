@@ -72,6 +72,13 @@
  *   `done`, which is "no bite is left and the study start has passed" (the
  *   number of bites done never ends the day for it). `bitesPerDay` is left as
  *   it is for other exams and means nothing here.
+ * - Reviews after the cut-off. A paced exam's reviews-only days do not ask
+ *   for every due card at once (`reviewShare` in `src/lib/study/exam-aim.ts`,
+ *   applied by the bite builder). On such a day the counts follow what the
+ *   day asks, not the stored due dates: `counts.learning + counts.due` is the
+ *   reviews today still asks for, and in `nextReviews` today holds that number
+ *   and the due cards that wait are added to tomorrow (`reviewDay` in
+ *   `bite.ts`). No stored due date is changed for it.
  * - Due dates. `recordReviews` grades with FSRS and writes the FSRS due date.
  *   `saveProgress` then aims it at the exam: `due_at = aimedDue(fsrs,
  *   examAt, lastReviewAt)`, which only ever moves it earlier; when aiming
@@ -121,6 +128,7 @@ import {
   buildBite,
   conceptSession,
   extraSession,
+  reviewDay,
   tileSession,
   type Bite,
   type BiteCard,
@@ -553,13 +561,41 @@ function planFor(state: ExamState, now: Date, done: number): Plan {
 
 const sizeOf = (b: Bite) => b.sections.reduce((n, [, ids]) => n + ids.length, 0);
 
+/**
+ * On a paced exam's reviews-only day: the counts as the day asks them (see the
+ * header). Any other day or exam: the stored counts as they are.
+ */
+function askedCounts(
+  state: ExamState,
+  now: Date,
+  counts: TodayCounts,
+  next: DayCount[],
+): { counts: TodayCounts; next: DayCount[] } {
+  const asked = reviewDay(state.studyDeck);
+  if (!asked) return { counts, next };
+  const learning = Math.min(counts.learning, asked.today);
+  const today = dayKey(now);
+  // 36 hours on from the start of today is inside tomorrow whatever the clock change.
+  const tomorrow = dayKey(new Date(startOfDay(now).getTime() + 36 * 60 * 60 * 1000));
+  const later = next.filter((d) => d.day > today).map((d) => ({ ...d }));
+  if (asked.later > 0) {
+    const entry = later.find((d) => d.day === tomorrow);
+    if (entry) entry.count += asked.later;
+    else later.unshift({ day: tomorrow, count: asked.later });
+  }
+  return {
+    counts: { new: counts.new, learning, due: asked.today - learning },
+    next: [...(asked.today > 0 ? [{ day: today, count: asked.today }] : []), ...later],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // examView
 
 async function buildExamView(userId: string, examId: string, now: Date, database: Db): Promise<ExamView> {
   const state = await examState(userId, examId, now, database);
   const { exam } = state;
-  const [done, counts, next, recent, week, gradeMode, snaps] = await Promise.all([
+  const [done, storedCounts, storedNext, recent, week, gradeMode, snaps] = await Promise.all([
     bitesDoneToday(userId, examId, now, database),
     countsToday(userId, examId, now, database),
     upcoming(userId, examId, now, database),
@@ -569,6 +605,7 @@ async function buildExamView(userId: string, examId: string, now: Date, database
     snapshots(userId, state, now, database),
   ]);
   const daysLeft = daysBetween(now, exam.at);
+  const { counts, next } = askedCounts(state, now, storedCounts, storedNext);
   const shown = Math.round(state.forecast);
   const plan = planFor(state, now, done);
   // Past its day (whole-day or not): the exam is over, so no bite is offered.

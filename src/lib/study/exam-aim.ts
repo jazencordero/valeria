@@ -41,6 +41,18 @@
  *   an overdue pile to do today) and neither moves the date the pile was
  *   made by. Spreading the clamp removes the pile at its source, in the one
  *   function every due date already goes through.
+ * - `reviewShare`: how much of the pile of due reviews a reviews-only day
+ *   asks for, when `daysLeft` review days are left before the exam (today
+ *   included). The days are weighted `daysLeft, ..., 2, 1`, so today's share
+ *   of a pile of n is `ceil(2n / (daysLeft + 1))`: with two days left two
+ *   thirds today and the rest tomorrow, with one day left all of it. The
+ *   heaviest day is then `2 * daysLeft / (daysLeft + 1)` times the daily
+ *   average, so always under twice, and the day before the exam carries the
+ *   smallest weight. It only says how many; which cards (earliest learned
+ *   first) is the caller's order (`bite.ts`, the paced builder). No due date
+ *   is moved: a card she is not asked for today stays due and is tomorrow's.
+ *   Before this a reviews-only day asked for every card due by its end: on a
+ *   real 400-card deck that was 17 bites on the first day after the cut-off.
  * - `spreadBacklog`: today's share is exactly
  *   `min(perDay, ceil(n / daysLeft))`, with `daysLeft = max(1, ceil(time to
  *   exam in days))`. Cards are ordered weakest concept first (lowest mean
@@ -164,6 +176,17 @@ export function dueNow(state: MemoryState, examAt: Time, now: Time): number | nu
   if (state.dueAt <= exam || recallAt(state, new Date(exam)) - wantedRecall(0) <= 0) return null;
   const slot = finalSlot(state, exam);
   return slot !== null && slot <= t0 ? t0 : null;
+}
+
+/**
+ * How many of `n` due reviews a reviews-only day asks for with `daysLeft`
+ * review days left before the exam, today included (see the header):
+ * `ceil(2n / (daysLeft + 1))`, never more than `n`.
+ */
+export function reviewShare(n: number, daysLeft: number): number {
+  const count = Math.max(0, Math.floor(n));
+  const days = Math.max(1, Math.floor(daysLeft));
+  return Math.min(count, Math.ceil((2 * count) / (days + 1)));
 }
 
 /** A card as the final pass sees it: `dueAt` is its planned due (or null). */

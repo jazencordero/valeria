@@ -462,6 +462,67 @@ describe("a paced exam (core marks)", () => {
   }, DB_TIMEOUT);
 });
 
+describe("a paced exam's reviews after the cut-off", () => {
+  it("asks for two thirds of the due cards two days out, and the counts say what the day asks", async () => {
+    // The same deck as above: 60 core cards, the exam 7 days out.
+    const [course] = await t.db.insert(courses).values({ userId: her, moodleId: 12, name: "Spread" }).returning();
+    const [exam] = await t.db
+      .insert(exams)
+      .values({ userId: her, courseId: course.id, title: "Spread final", kind: "exam", at: new Date(NOW.getTime() + 7 * D) })
+      .returning();
+    const [concept] = await t.db.insert(concepts).values({ userId: her, examId: exam.id, name: "Spread concept", position: 1, weight: 1 }).returning();
+    const order: string[] = [];
+    for (let k = 0; k < 60; k++) {
+      const [card] = await t.db
+        .insert(cards)
+        .values({ userId: her, examId: exam.id, type: "basic", rung: 1, body: { q: `Spread ${k}?`, a: "A", core: true }, origin: "manual", contentHash: `spread-${k}`, createdAt: new Date(NOW.getTime() - D + k * 1000) })
+        .returning();
+      await t.db.insert(cardConcepts).values({ cardId: card.id, conceptId: concept.id });
+      order.push(card.id);
+    }
+    // Today she does the plan: 12 new cards in three bites.
+    for (let b = 0; b < 3; b++) {
+      const bite = await beginSession(exam.id, "bite");
+      await play(bite!.cards, bite!.sessionId);
+    }
+
+    // Two days before the exam all 12 are due. The day asks for 8 of them, the 8 she learned first.
+    setNow(NOW.getTime() + 5 * D - 3 * 60 * MIN);
+    const view = await examView(exam.id);
+    expect(view.daysLeft).toBe(2);
+    expect(view.pace).toMatchObject({ open: false, bites: 1, done: false });
+    expect(view.counts.learning + view.counts.due).toBe(8);
+    const today = new Date(clock).toISOString().slice(0, 10);
+    const tomorrow = new Date(clock + D).toISOString().slice(0, 10);
+    expect(view.nextReviews).toEqual([
+      { day: today, count: 8 },
+      { day: tomorrow, count: 4 },
+    ]);
+    const bite = await beginSession(exam.id, "bite");
+    expect(bite!.cards.map((c) => c.id)).toEqual(order.slice(0, 8));
+    await play(bite!.cards, bite!.sessionId);
+
+    // Her share is done: no bite is left today although four cards are still due. They are tomorrow's.
+    const after = await examView(exam.id);
+    expect(after.bite).toBeNull();
+    expect(after.pace).toMatchObject({ bites: 0, done: true });
+    expect(after.counts.learning + after.counts.due).toBe(0);
+    expect(after.nextReviews.find((d) => d.day === today)).toBeUndefined();
+    expect(after.nextReviews.find((d) => d.day === tomorrow)!.count).toBeGreaterThanOrEqual(4);
+    expect(await beginSession(exam.id, "bite")).toBeNull();
+
+    // The day before the exam asks for everything that is due, the four that waited among them.
+    setNow(NOW.getTime() + 6 * D - 3 * 60 * MIN);
+    const eve = await examView(exam.id);
+    expect(eve.daysLeft).toBe(1);
+    const asked = eve.counts.learning + eve.counts.due;
+    expect(asked).toBeGreaterThanOrEqual(4);
+    expect(eve.nextReviews[0]).toEqual({ day: tomorrow, count: asked });
+    const last = await beginSession(exam.id, "bite");
+    for (const id of order.slice(8, 12)) expect(last!.cards.map((c) => c.id)).toContain(id);
+  }, DB_TIMEOUT);
+});
+
 describe("an exam with a study start (M3-53)", () => {
   // startNewOn is Tuesday 24 Nov 2026; that day starts at 22:00 UTC on the 23rd (Helsinki is UTC+2).
   const START_DAY = "2026-11-24";

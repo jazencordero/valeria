@@ -135,6 +135,19 @@ function planOrder(deck: Deck): BiteCard[] {
   return cards;
 }
 
+const planPlaces = new WeakMap<readonly BiteCard[], Map<string, number>>();
+
+/**
+ * Each card's place in the order the plan introduces the cards. For graded
+ * cards that is "earliest learned first": the plan served them in this order.
+ */
+export function planPlace(deck: Deck): Map<string, number> {
+  const order = planOrder(deck);
+  let places = planPlaces.get(order);
+  if (!places) planPlaces.set(order, (places = new Map(order.map((c, i) => [c.id, i]))));
+  return places;
+}
+
 /** The never-graded, active cards in the order the plan introduces them. */
 export function newQueue(deck: Deck): BiteCard[] {
   return planOrder(deck).filter((c) => c.active && !isGraded(deck, c.id));

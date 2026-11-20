@@ -7,6 +7,7 @@ import {
   FINAL_WINDOW_MS,
   finalPass,
   isLeech,
+  reviewShare,
   spreadBacklog,
   wantedRecall,
   type DueCard,
@@ -234,6 +235,40 @@ describe("finalPass", () => {
     const cards: PlannedCard[] = [{ id: "e1", conceptId: "E", state: weak, dueAt: null }];
     expect(finalPass(cards, examAt, now)).toEqual([{ id: "e1", dueAt: now }]);
     expect(finalPass(cards, examAt, examAt)).toEqual([]);
+  });
+});
+
+describe("reviewShare", () => {
+  it("is two thirds of the pile two days out, all of it on the last day", () => {
+    expect(reviewShare(9, 2)).toBe(6);
+    expect(reviewShare(10, 2)).toBe(7);
+    expect(reviewShare(131, 2)).toBe(88);
+    expect(reviewShare(9, 1)).toBe(9);
+    // No days left counts as the last day; nothing due asks for nothing.
+    expect(reviewShare(9, 0)).toBe(9);
+    expect(reviewShare(0, 2)).toBe(0);
+    expect(reviewShare(1, 2)).toBe(1);
+    expect(reviewShare(8, 3)).toBe(4);
+  });
+
+  it("no day asks for more than twice the daily average, each day is lighter than the one before, and nothing is left", () => {
+    for (let days = 1; days <= 6; days++) {
+      for (const pile of [1, 7, 60, 184, 401]) {
+        const perDay: number[] = [];
+        let left = pile;
+        for (let d = days; d >= 1; d--) {
+          const today = reviewShare(left, d);
+          perDay.push(today);
+          left -= today;
+        }
+        expect(left).toBe(0);
+        // Rounding up may add one card to a day.
+        expect(Math.max(...perDay)).toBeLessThanOrEqual(Math.ceil((2 * pile) / days));
+        for (let i = 1; i < perDay.length; i++) expect(perDay[i]).toBeLessThanOrEqual(perDay[i - 1]);
+        // The day before the exam is the lightest.
+        expect(perDay[perDay.length - 1]).toBe(Math.min(...perDay));
+      }
+    }
   });
 });
 
