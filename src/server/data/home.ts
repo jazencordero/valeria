@@ -143,8 +143,10 @@ export type HomeBite =
       /** "Friday's exam", "tomorrow's quiz", "the exam on 4 Dec". */
       forWhat: string;
       href: string;
-      /** A paced exam: "3 bites today keeps you on track for Monday". */
+      /** A paced exam: "3 bites today keeps you on track for Monday", or with more than three bites left the time. */
       pace?: string;
+      /** More than three bites are left today: where "Do them in one go" starts, `/study/new?exam=<id>&kind=long`. */
+      longHref?: string;
       /** A bite is already done today for this exam: the row says "one more". */
       more: boolean;
     }
@@ -280,7 +282,9 @@ function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>, now: Date)
   for (const card of list) {
     const v = views.get(card.id);
     if (!v?.bite) continue;
-    const pace = v.pace ? todayLine(v.pace, v.plan, byDay(v.exam.at, now), { more: v.bitesDoneToday > 0 }) : null;
+    const pace = v.pace
+      ? todayLine(v.pace, v.plan, byDay(v.exam.at, now), { more: v.bitesDoneToday > 0, minutes: v.pace.minutes })
+      : null;
     return {
       state: "bite",
       examId: card.id,
@@ -291,6 +295,7 @@ function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>, now: Date)
       href: biteHref(card.id),
       more: v.bitesDoneToday > 0,
       ...(pace ? { pace } : {}),
+      ...(v.pace?.long ? { longHref: `${biteHref(card.id).replace(/kind=bite$/, "kind=long")}` } : {}),
     };
   }
   for (const card of list) {

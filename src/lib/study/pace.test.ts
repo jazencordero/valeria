@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   LEARN_MAX,
+  LONG_MAX,
+  biteMinutes,
   buildBite,
+  buildLong,
+  minutesFor,
   conceptSession,
   extraSession,
   reviewDay,
@@ -27,9 +31,10 @@ import {
   onTrackLine,
   paceOf,
   planPlace,
+  secondsPerCard,
 } from "./pace";
 import { newCard } from "./memory";
-import { simulate } from "./plan";
+import { askedToday, simulate, todayPlan } from "./plan";
 
 const DAY = 24 * 60 * 60 * 1000;
 // The exam: Monday 23 Nov 2026, 09:00 in Helsinki. The cut-off day is Friday the 20th.
@@ -552,5 +557,146 @@ describe("a deck without core marks", () => {
     const deck = { ...makeDeck(8, 10, 5, at(16)), kind: "quiz" as const };
     expect(buildBite({ ...deck, bitesDoneToday: 0 })).not.toBeNull();
     expect(buildBite({ ...deck, bitesDoneToday: 1 })).toBeNull();
+  });
+});
+
+describe("her own pace", () => {
+  const log = (cards: number, ms: (i: number) => number | null) => Array.from({ length: cards }, (_, i) => ({ cardId: `k${i}`, ms: ms(i) }));
+
+  it("is the median time a card, once 20 different cards are timed", () => {
+    expect(secondsPerCard(log(19, () => 20_000))).toBeNull();
+    expect(secondsPerCard(log(20, () => 20_000))).toBe(20);
+    // The same card graded over and over is one card.
+    expect(secondsPerCard(Array.from({ length: 50 }, () => ({ cardId: "k0", ms: 20_000 })))).toBeNull();
+    // Untimed grades do not count; one card left open for ten minutes does not move the median.
+    expect(secondsPerCard(log(25, (i) => (i < 6 ? null : 20_000)))).toBeNull();
+    expect(secondsPerCard(log(21, (i) => (i === 0 ? 600_000 : 10_000 + i * 1000)))).toBe(21);
+    expect(secondsPerCard(log(20, (i) => 10_000 + i * 1000))).toBe(19.5);
+  });
+
+  it("gives the minutes of a session; the app's estimate until it is known", () => {
+    expect(minutesFor(63, null)).toBe(biteMinutes(63));
+    expect(minutesFor(63, undefined)).toBe(38);
+    expect(minutesFor(63, 24)).toBe(25);
+    expect(minutesFor(63, 20)).toBe(21);
+    expect(minutesFor(1, 5)).toBe(1);
+    expect(minutesFor(0, 20)).toBe(0);
+  });
+});
+
+describe("today's plan in one go", () => {
+  /** The bites the plan asks of today, each built as if the one before had just been done (the clock not moved). */
+  function bitesInARow(deck: Deck): string[][] {
+    const at = new Date(deck.now);
+    const states: Record<string, MemoryState> = { ...deck.states };
+    const newToday = [...(deck.newToday ?? [])];
+    const out: string[][] = [];
+    const most = paceOf(deck)!.open ? paceOf(deck)!.bites : 99;
+    for (let b = 0; b < most; b++) {
+      const bite = buildBite({ ...deck, states, newToday, kind: "exam", bitesDoneToday: b });
+      if (!bite) break;
+      out.push(ids(bite));
+      for (const id of ids(bite)) {
+        if (!states[id]) newToday.push(id);
+        states[id] = grade(states[id] ?? newCard(at), 3, at);
+      }
+    }
+    return out;
+  }
+
+  it("is the bites the plan still asks of today, in order, whole bites up to 40 cards", () => {
+    // Day one of 180 core cards: 36 new cards, eight bites, nothing due.
+    const fresh = makeDeck(36, 10, 5, at(16));
+    expect(paceOf(fresh)!.bites).toBe(8);
+    const all = buildLong({ ...fresh, kind: "exam", bitesDoneToday: 0 })!;
+    expect(ids(all)).toEqual(bitesInARow(fresh).flat());
+    expect(ids(all)).toHaveLength(36);
+    expect(new Set(ids(all)).size).toBe(36);
+    expect(all.minutes).toBe(biteMinutes(36));
+    expect(all.gain).toBeGreaterThan(0);
+    // A boss card sits in a boss section, as in a bite.
+    for (const [kind, list] of all.sections) for (const id of list) expect(fresh.cards.find((c) => c.id === id)!.boss).toBe(kind === "boss");
+
+    // Day two: every bite also brings reviews, so 40 cards hold only the first bites; the rest is the next session.
+    let deck = play(fresh, all);
+    expect(paceOf(deck)!.left).toBe(0);
+    deck = { ...deck, now: at(17), newToday: [] };
+    const rows = bitesInARow(deck);
+    expect(rows.flat().length).toBeGreaterThan(LONG_MAX);
+    const first = buildLong({ ...deck, kind: "exam", bitesDoneToday: 0 })!;
+    let fit = 0;
+    let n = 0;
+    while (fit < rows.length && n + rows[fit].length <= LONG_MAX) n += rows[fit++].length;
+    expect(ids(first)).toEqual(rows.slice(0, fit).flat());
+    expect(ids(first).length).toBeLessThanOrEqual(LONG_MAX);
+    expect(ids(first).length).toBeGreaterThan(LONG_MAX - 10);
+    const second = buildLong({ ...play(deck, first), kind: "exam", bitesDoneToday: 1 })!;
+    expect(ids(second).some((id) => ids(first).includes(id))).toBe(false);
+  });
+
+  it("stopped part-way, what she did counts and the next session goes on from there", () => {
+    const deck = makeDeck(36, 10, 5, at(16));
+    const whole = buildLong({ ...deck, kind: "exam", bitesDoneToday: 0 })!;
+    // She stops after 13 cards.
+    const done = ids(whole).slice(0, 13);
+    const after = play(deck, { sections: [["learn", done]], minutes: 0, gain: 0 });
+    expect(paceOf(after)!).toMatchObject({ budget: 36, newToday: 13, left: 23, bites: 5 });
+    expect(todayPlan(after)).toMatchObject({ bites: 5 });
+    expect(todayPlan(after).cards).toBeGreaterThanOrEqual(23);
+    const rest = buildLong({ ...after, kind: "exam", bitesDoneToday: 1 })!;
+    // The same cards that were left (a boss card closes whichever bite it now falls in).
+    expect(ids(rest).filter((id) => !seen(after, id)).sort()).toEqual(ids(whole).slice(13).sort());
+    // The same 13 cards done as bites leave the day in the same place.
+    expect(paceOf(play(deck, { sections: [["warm", done]], minutes: 0, gain: 0 }))!.left).toBe(23);
+  });
+
+  it("on a reviews-only day it holds today's share of the reviews, earliest learned first, 40 at a time", () => {
+    // The plan kept to the cut-off, as in the tests above.
+    let deck = makeDeck(36, 10, 5, at(16));
+    for (const day of [16, 17, 18, 19, 20]) {
+      deck = { ...deck, now: at(day), newToday: [] };
+      for (let g = 0; g < 10 && askedToday(deck) > 0; g++) deck = play(deck, buildLong({ ...deck, kind: "exam", bitesDoneToday: g })!);
+    }
+    expect(Object.keys(deck.states)).toHaveLength(180);
+    deck = { ...deck, now: at(21), newToday: [] };
+    const share = reviewDay(deck)!.today;
+    expect(share).toBeGreaterThan(LONG_MAX);
+    const place = planPlace(deck);
+    const served: string[] = [];
+    let sessions = 0;
+    for (; sessions < 10; sessions++) {
+      const long = buildLong({ ...deck, kind: "exam", bitesDoneToday: sessions });
+      if (!long) break;
+      expect(ids(long).length).toBeLessThanOrEqual(LONG_MAX);
+      expect(ids(long).every((id) => seen(deck, id))).toBe(true);
+      served.push(...ids(long));
+      deck = play(deck, long);
+    }
+    // Exactly today's share, no card twice, in as few sessions as 40 cards allow (whole bites).
+    expect(served).toHaveLength(share);
+    expect(new Set(served).size).toBe(share);
+    expect(sessions).toBeLessThanOrEqual(Math.ceil(share / (LONG_MAX - 9)));
+    const plain = served.filter((id) => !deck.cards.find((c) => c.id === id)!.boss).map((id) => place.get(id)!);
+    expect(plain).toEqual([...plain].sort((a, b) => a - b));
+    expect(reviewDay(deck)!.today).toBe(0);
+  });
+
+  it("the week lands on the same numbers whether she does bites or one-go sessions", () => {
+    const deck = makeDeck(36, 10, 5, at(16));
+    const bites = simulate(deck, "core");
+    const long = simulate(deck, "long");
+    expect(long).toHaveLength(bites.length);
+    // The same percent as the screens show it on exam day, and day by day within a point.
+    expect(Math.round(long.at(-1)!)).toBe(Math.round(bites.at(-1)!));
+    expect(Math.abs(long.at(-1)! - bites.at(-1)!)).toBeLessThan(0.5);
+    for (let d = 0; d < bites.length; d++) expect(Math.abs(long[d] - bites[d])).toBeLessThan(1);
+  });
+
+  it("a deck without core marks gets its ordinary bite", () => {
+    const plain = makeDeck(8, 10, 0, at(16));
+    const unmarked: Deck = { ...plain, cards: plain.cards.map((c) => ({ ...c, first: false })) };
+    expect(ids(buildLong({ ...unmarked, kind: "exam", bitesDoneToday: 0 }))).toEqual(ids(buildBite({ ...unmarked, kind: "exam", bitesDoneToday: 0 })));
+    expect(buildLong({ ...unmarked, kind: "exam", bitesDoneToday: 2 })).toBeNull();
+    expect(todayPlan(unmarked)).toEqual({ bites: 0, cards: 0 });
   });
 });

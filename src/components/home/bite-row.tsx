@@ -12,7 +12,11 @@
  *   `first` (nothing is open, so the bite is the DO FIRST card) drops the
  *   "Or": "A 5-minute bite for Friday's exam". Once a bite is done today
  *   (`more`): "Or one more 5-minute bite for Friday's exam". A paced exam adds one line
- *   under it: "3 bites today keeps you on track for Monday".
+ *   under it: "3 bites today keeps you on track for Monday", or with more than
+ *   three bites left the time, "About 25 minutes today keeps you on track for
+ *   Mon 23 Nov (7 bites)". Then `longHref` adds "Do them in one go" under the
+ *   row's "Start": a second link, to the one-go session. The row's own link
+ *   is stretched over the row, so the two never nest.
  * - "done": the cup doodle, "Today's bites are done", "FORECAST 68% · FRIDAY"
  *   and "Open", linking to the exam.
  *
@@ -46,6 +50,8 @@ export type BiteRowProps =
       more?: boolean;
       /** A paced exam: how many bites today keeps her on plan, one sentence. */
       pace?: string;
+      /** The one-go session, `/study/new?exam=<id>&kind=long`: shows "Do them in one go". */
+      longHref?: string;
       className?: string;
     }
   | {
@@ -89,6 +95,36 @@ export function BiteRow(props: BiteRowProps) {
   const meta = done
     ? `FORECAST ${props.forecast}% · ${props.day}`
     : `${props.cards} CARDS${gain ? ` · ${gain} FORECAST` : ""}`;
+
+  if (!done && props.longHref) {
+    return (
+      <div className={`relative ${props.className ? `${ROW} ${props.className}` : ROW}`} data-state={props.state}>
+        <span className="grid h-[52px] w-16 place-items-center rounded-[14px] bg-accent-wash">
+          <Doodle name="bite" size={52} />
+        </span>
+        <span className="grid min-w-0 gap-0.5">
+          <Link href={props.href} className="text-[15px] font-semibold text-ink no-underline after:absolute after:inset-0 after:rounded-[20px]">
+            {title}
+          </Link>
+          <span className="mono text-[11px] text-ink-3">{meta}</span>
+          {props.pace ? <span className="text-[12px] text-ink-2">{props.pace}</span> : null}
+        </span>
+        <span className="grid justify-items-end gap-1.5">
+          <span className="inline-flex items-center gap-0.5 text-[13px] font-semibold" aria-hidden="true">
+            Start
+            <Chevron />
+          </span>
+          <Link
+            href={props.longHref}
+            prefetch={false}
+            className="relative z-[1] rounded-full border border-solid border-line bg-paper px-2.5 py-1 text-[12px] font-semibold text-ink no-underline"
+          >
+            Do them in one go
+          </Link>
+        </span>
+      </div>
+    );
+  }
 
   return (
     <Link href={props.href} className={props.className ? `${ROW} ${props.className}` : ROW} data-state={props.state}>

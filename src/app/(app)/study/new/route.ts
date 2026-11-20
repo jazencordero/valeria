@@ -1,10 +1,11 @@
 /*
- * GET /study/new?exam=<id>&kind=<bite|tile|concept|extra>[&arg=<type or concept id>][&return=<path>]
+ * GET /study/new?exam=<id>&kind=<bite|tile|concept|extra|long>[&arg=<type or concept id>][&return=<path>]
  * GET /study/new?lecture=<id>[&return=<path>]
  * (M3-43, M9-15): starts a study session and sends her to it,
  * `/study/<sessionId>` (with `?return=<path>` when one was given).
  *
- * - `exam`: `beginSession` (M3-18).
+ * - `exam`: `beginSession` (M3-18). `kind=long` is today's remaining plan in
+ *   one go ("Do them in one go").
  * - `lecture` (M9-15, "Practise this lecture"): every card tied to the
  *   lecture's concepts, through `beginLectureSession`
  *   (src/server/study/lecture-session.ts). A lecture with no cards, a
@@ -16,7 +17,7 @@
  * - Nothing to study (today's bites are done, or no card fits): back to the
  *   exam page (or `return`), where the bite block already says so. No
  *   session row is made.
- * - A kind that is not one of the four, or a tile / concept session without
+ * - A kind that is not one of the five, or a tile / concept session without
  *   its `arg`: back to the exam page as well; nothing is written.
  * - An exam whose day is over (`ExamOver`, whatever the kind): to its page,
  *   `/exams/<id>`, which says "This exam is over."; `return` is not used and
@@ -36,7 +37,7 @@ import { beginSession } from "@/server/study/actions";
 import { beginLectureSession, safeReturn } from "@/server/study/lecture-session";
 import { ExamOver } from "@/server/study/start-date";
 import { StudyNotFound } from "@/server/study/store";
-import type { SessionMode } from "@/lib/study/session";
+import type { SessionKind } from "@/lib/study/session";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -72,12 +73,12 @@ export async function GET(request: NextRequest) {
   if (!UUID.test(exam)) redirect("/exams");
 
   const back = ret ?? `/exams/${exam}`;
-  const known = (SESSION_MODES as readonly string[]).includes(kind);
+  const known = kind === "long" || (SESSION_MODES as readonly string[]).includes(kind);
   if (!known || ((kind === "tile" || kind === "concept") && !arg)) redirect(back);
 
   let sessionId: string | null;
   try {
-    const begun = await beginSession(exam, kind as SessionMode, arg);
+    const begun = await beginSession(exam, kind as SessionKind, arg);
     sessionId = begun?.sessionId ?? null;
   } catch (err) {
     if (err instanceof ExamOver) sessionId = "over";

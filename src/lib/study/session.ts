@@ -16,6 +16,11 @@ import { rungOf } from "./ladder";
 import type { Grade } from "./memory";
 
 export type SessionMode = "bite" | "tile" | "concept" | "extra";
+/**
+ * What a screen can ask to start: a session mode, or `long`, today's remaining
+ * plan in one go (it runs and is stored as a `bite`).
+ */
+export type SessionKind = SessionMode | "long";
 /** Four grade buttons (Again/Hard/Good/Easy) or two (Missed/Got it). */
 export type GradeMode = "four" | "two";
 

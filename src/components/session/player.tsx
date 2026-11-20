@@ -36,6 +36,12 @@
  *   confirm) saves what is pending and goes back the same way without ending
  *   the session, as the prototype's closeSession: a stopped bite is not a
  *   done bite, and opening it again resumes it.
+ * - One go (`long`: today's remaining plan as one longer session, started by
+ *   "Do them in one go"). It can be stopped at any card: Stop then ends the
+ *   session with what she has done (every grade is already saved and counts
+ *   toward today's plan) and shows the done screen, which says how much of
+ *   today is left. Stopped before the first grade it just goes back. Its done
+ *   screen offers the rest in one go while more than three bites are left.
  * - Return (M9-15). With `returnTo` (or `?return=<path>` in the URL, which
  *   GET /study/new adds), the done screen's back button, Escape and Stop go
  *   there instead of the exam page, and there is no "One more bite". A
@@ -85,6 +91,7 @@ import { DoodleDefs } from "@/components/doodle";
 import { Button } from "@/components/ui/button";
 import { useInertOthers } from "@/lib/a11y/inert";
 import { biteMinutes, type CardType, type SectionKind } from "@/lib/study/bite";
+import { leftLine } from "@/lib/study/plan";
 import type { McqOption, MatchPair, RubricPoint } from "@/lib/study/card-schema";
 import { aimedDue } from "@/lib/study/exam-aim";
 import { optionSeed } from "@/lib/study/option-order";
@@ -178,6 +185,8 @@ export type SessionPlayerProps = {
   startedAt: number;
   /** The session has ended already: go straight to the done screen. */
   ended?: boolean;
+  /** A one-go session (today's remaining plan): Stop ends it and shows what is left. */
+  long?: boolean;
   /** The session's cards in their order. */
   cards: PlayerCard[];
   /** Concept names and mastery before the session, by id. */
@@ -529,10 +538,15 @@ export function SessionPlayer(props: SessionPlayerProps) {
 
   const stop = useCallback(async () => {
     send({ type: "stop", at: now() });
+    // A one-go session she stops part-way is done as far as she got: the done screen says what is left.
+    if (props.long && sRef.current.reviews.length > 0) {
+      await finish();
+      return;
+    }
     await saver.flush();
     router.push(backHref(props.forecastBefore));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [send, saver, router, props.forecastBefore, returnTo]);
+  }, [send, saver, router, props.forecastBefore, returnTo, props.long, finish]);
 
   const onDrop = useCallback((cardId: string) => {
     const prev = sRef.current;
@@ -575,7 +589,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
         data={view.data}
         props={props}
         returnTo={returnTo}
-        onMore={() => router.push(`/study/new?exam=${examId}&kind=bite`)}
+        onMore={() => router.push(`/study/new?exam=${examId}&kind=${view.data.long && view.data.leftLong ? "long" : "bite"}`)}
         onBack={() => router.push(backHref(view.data.forecastBeforeShown))}
       />
     );
@@ -907,7 +921,10 @@ function DoneLayer({
           freeSkipsLeft={data.week.freeSkipsLeft}
           dayNew={dayNew}
           goalNew={goalNew}
-          nextBiteMinutes={data.anotherBite && !returnTo ? biteMinutes(props.cards.length) : null}
+          nextBiteMinutes={data.anotherBite && !returnTo ? (data.nextMinutes ?? biteMinutes(props.cards.length)) : null}
+          long={data.long}
+          moreInOneGo={data.long && data.leftLong}
+          todayLeft={data.left && (data.long || data.leftLong) ? leftLine(data.left.minutes) : null}
           backLabel={returnTo ? returnLabel(returnTo) : BACK_LABEL}
           onMore={onMore}
           onBack={onBack}

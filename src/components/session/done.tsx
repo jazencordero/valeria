@@ -65,6 +65,12 @@ export type SessionDoneProps = {
   goalNew: boolean;
   /** Minutes of the next bite, or null when today's bites are done. */
   nextBiteMinutes: number | null;
+  /** A one-go session: the title says "Session done." instead of "Bite done.". */
+  long?: boolean;
+  /** The rest of today's plan is offered in one go: the more button reads "Do them in one go". */
+  moreInOneGo?: boolean;
+  /** What is left of today's plan, one line: "About 12 minutes of today's plan left". */
+  todayLeft?: string | null;
   /** Label of the way back, for example "Back to the exam". */
   backLabel: string;
   onMore?: () => void;
@@ -141,6 +147,9 @@ export function SessionDone({
   dayNew,
   goalNew,
   nextBiteMinutes,
+  long = false,
+  moreInOneGo = false,
+  todayLeft = null,
   backLabel,
   onMore,
   onBack,
@@ -152,7 +161,15 @@ export function SessionDone({
   const isBite = sessionMode === "bite";
   const more = isBite && nextBiteMinutes !== null;
 
-  const title = result.perfect ? "Perfect bite." : isBite ? "Bite done." : "Nice practice.";
+  const title = long
+    ? result.perfect
+      ? "Perfect session."
+      : "Session done."
+    : result.perfect
+      ? "Perfect bite."
+      : isBite
+        ? "Bite done."
+        : "Nice practice.";
   const delta = forecastAfter - forecastBefore;
   const before = clampPct(forecastBefore);
   const after = clampPct(forecastAfter);
@@ -432,9 +449,14 @@ export function SessionDone({
           className="sticky bottom-0 z-[1] -mx-[var(--pad)] mt-5 grid gap-2 bg-paper px-[var(--pad)] pt-3 pb-[max(12px,env(safe-area-inset-bottom,0px))] shadow-[0_-12px_12px_-8px_var(--paper)] min-[700px]:grid-cols-2"
           {...enter(motionMode, { opacity: 0, y: 10 }, { opacity: 1, y: 0 }, out(0.26, 1.1))}
         >
+          {more && todayLeft ? (
+            <p className="m-0 text-center text-[13px] text-ink-2 min-[700px]:col-span-2" data-testid="today-left">
+              {todayLeft}
+            </p>
+          ) : null}
           {more ? (
             <Button variant="secondary" size="lg" onClick={onMore}>
-              One more bite · {nextBiteMinutes} min
+              {moreInOneGo ? "Do them in one go" : `One more bite · ${nextBiteMinutes} min`}
             </Button>
           ) : (
             <p className="m-0 flex items-center justify-center gap-3 text-[13px] text-ink-2">

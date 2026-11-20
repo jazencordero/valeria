@@ -49,6 +49,23 @@ describe("SessionDone forecast", () => {
     expect(text).toContain("Keep a bite a day and you land around 43% on Mon 23 Nov.");
   });
 
+  it("says what is left of today, and offers it in one go, only when told", () => {
+    const { rerender } = render(<SessionDone {...props} />);
+    expect(screen.queryByTestId("today-left")).toBeNull();
+    expect(document.body.textContent).toContain("Bite done.");
+    expect(screen.getByRole("button", { name: "One more bite · 4 min" })).toBeDefined();
+    rerender(<SessionDone {...props} long moreInOneGo todayLeft="About 12 minutes of today’s plan left" />);
+    expect(screen.getByTestId("today-left").textContent).toBe("About 12 minutes of today’s plan left");
+    expect(document.body.textContent).toContain("Session done.");
+    expect(screen.getByRole("button", { name: "Do them in one go" })).toBeDefined();
+    rerender(<SessionDone {...props} long result={{ ...props.result, perfect: true }} />);
+    expect(document.body.textContent).toContain("Perfect session.");
+    // Today's plan done: no line about what is left, whatever was passed.
+    rerender(<SessionDone {...props} long nextBiteMinutes={null} todayLeft="About 12 minutes of today’s plan left" />);
+    expect(screen.queryByTestId("today-left")).toBeNull();
+    expect(document.body.textContent).toContain("That is today's plan done. Rest counts too.");
+  });
+
   it("says Target when the exam has no grade target", () => {
     render(<SessionDone {...props} targetGrade={null} />);
     expect(screen.getByText("Target")).toBeDefined();

@@ -12,7 +12,9 @@
  *    left out under half a point), "Start bite",
  *    and a mono "Then: bite 2 of 2, 4 min" line when another bite follows.
  *    A paced exam says its pace there instead: "3 bites today keeps you on
- *    track for Monday."
+ *    track for Monday." With more than three bites left it says the time,
+ *    "About 25 minutes today keeps you on track for Mon 23 Nov (7 bites).",
+ *    and `onLong` adds "Do them in one go" beside "Start bite".
  *  - "done": "TODAY'S BITES", the cup doodle, "Today's plan is done", the next
  *    reviews sentence plus "Rest counts too.", and "Practise anyway".
  * Takes plain data: the page using it decides minutes and gain (the gain
@@ -50,6 +52,8 @@ export type BiteCardProps =
       /** A paced exam: today's pace as one sentence, shown instead of `next`. */
       pace?: string;
       onStart?: () => void;
+      /** Today's remaining plan as one longer session: shows "Do them in one go". */
+      onLong?: () => void;
       className?: string;
     }
   | {
@@ -94,7 +98,7 @@ export function BiteCard(props: BiteCardProps) {
     );
   }
 
-  const { more = false, minutes, cards, gain, focus, next, pace, onStart } = props;
+  const { more = false, minutes, cards, gain, focus, next, pace, onStart, onLong } = props;
   const gainText = gainLabel(gain);
   return (
     <section className={cls} aria-labelledby={labelId}>
@@ -116,9 +120,20 @@ export function BiteCard(props: BiteCardProps) {
           </span>
         ) : null}
       </div>
-      <Button size="lg" block className="mt-[18px]" onClick={onStart}>
-        Start bite
-      </Button>
+      {onLong ? (
+        <div className="mt-[18px] grid gap-2 min-[480px]:grid-cols-2">
+          <Button size="lg" block onClick={onStart}>
+            Start bite
+          </Button>
+          <Button size="lg" variant="secondary" block onClick={onLong}>
+            Do them in one go
+          </Button>
+        </div>
+      ) : (
+        <Button size="lg" block className="mt-[18px]" onClick={onStart}>
+          Start bite
+        </Button>
+      )}
       {pace ? (
         <p className="mt-3 text-center text-[13px] text-ink-2" data-testid="bite-pace">
           {pace}

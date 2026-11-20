@@ -35,7 +35,11 @@
  *   marks, `ExamView.pace`) says its pace there instead: "3 bites today keeps
  *   you on track for Monday.", or once, when the days left cannot hold the
  *   core cards, "There are more cards than days: core cards first, about 60 a
- *   day." Neither is said before the study start.
+ *   day." Neither is said before the study start. With more than three bites
+ *   left today (`pace.long`) the line says the time instead, "About 25 minutes
+ *   today keeps you on track for Mon 23 Nov (7 bites).", on a reviews-only day
+ *   "About 25 minutes of reviews today ...", and the block offers "Do them in
+ *   one go".
  * - One pace, one number (`ExamView.plan`, src/lib/study/plan.ts): the header's verdict, the
  *   Today line above, the Progress sentence and the chart's plan line all come from it.
  * - Before the study start the Progress tab is that one "Starts ..." line and nothing else.
@@ -265,7 +269,11 @@ async function todayOf(
     const planned = view.plan.pace.kind === "bites" ? Math.min(view.plan.pace.perDay, view.bitesPerDay) : null;
     const pace =
       view.pace && !quiet
-        ? todayLine(view.pace, view.plan, byDay(view.exam.at, now), { more: view.bitesDoneToday > 0, sayImpossible: true })
+        ? todayLine(view.pace, view.plan, byDay(view.exam.at, now), {
+            more: view.bitesDoneToday > 0,
+            sayImpossible: true,
+            minutes: view.pace.minutes,
+          })
         : null;
     return {
       state: "bite",
@@ -274,6 +282,7 @@ async function todayOf(
       cards: view.bite.cards,
       gain: view.bite.gain,
       focus: biteFocus(view, deck),
+      ...(view.pace?.long && !quiet ? { long: true } : {}),
       ...(pace
         ? { pace: `${pace}.` }
         : planned !== null && following <= planned

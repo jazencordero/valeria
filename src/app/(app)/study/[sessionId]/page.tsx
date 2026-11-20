@@ -24,6 +24,9 @@
  *   most 4) of non-boss cards she had graded before the session started is
  *   the warm-up, the rest learn. Only boss matters to the rules (the requeue
  *   keeps the boss last); warm and learn only colour the head and progress.
+ *   A one-go session (`summary.long`, stored as a bite) is several bites in a
+ *   row: there every non-boss card she had graded before is a review (warm),
+ *   every other one learn.
  * - Whether her account has the tutor switched on (`tutorEnabled`, as the
  *   app layout decides it for the notes panel): the player then offers "Ask
  *   about this card" once a card is answered (M2-28 follow-up).
@@ -69,6 +72,7 @@ function sectionsOf(
   mode: string,
   list: readonly DeckCard[],
   gradedBefore: ReadonlySet<string>,
+  long = false,
 ): Map<string, SectionKind> {
   const out = new Map<string, SectionKind>();
   let warmRun = mode === "bite";
@@ -77,6 +81,7 @@ function sectionsOf(
     let s: SectionKind;
     if (c.boss && mode !== "tile" && mode !== "extra") s = "boss";
     else if (mode === "extra") s = "warm";
+    else if (long) s = gradedBefore.has(c.id) ? "warm" : "learn";
     else if (mode === "bite" && warmRun && warm < WARM_MAX && gradedBefore.has(c.id)) {
       s = "warm";
       warm++;
@@ -151,7 +156,8 @@ async function Session({ params }: { params: Params }) {
       .limit(1),
   ]);
 
-  const sections = sectionsOf(session.mode, list, new Set(before.map((r) => r.cardId)));
+  const long = summary.long === true;
+  const sections = sectionsOf(session.mode, list, new Set(before.map((r) => r.cardId)), long);
   const cards: PlayerCard[] = list.map((c) => ({
     id: c.id,
     type: c.type,
@@ -187,6 +193,7 @@ async function Session({ params }: { params: Params }) {
       targetGrade={targetGradeOf(exam.gradeTarget)}
       startedAt={session.startedAt.getTime()}
       ended={session.endedAt !== null}
+      long={long}
       cards={cards}
       concepts={concepts}
       reviews={stored.map(

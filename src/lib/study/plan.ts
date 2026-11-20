@@ -40,6 +40,17 @@
  *   point you won’t reach 85% by Mon 23 Nov. Two bites a day gets you to
  *   about 23%." (a paced exam adds "Core cards first.")
  *
+ * Today as time (`todayLine`, `todayPlan`): when a paced exam's plan still
+ * asks for more than three bites today (`TIME_FROM_BITES`), the line says the
+ * minutes instead, "About 25 minutes today keeps you on track for Mon 23 Nov
+ * (7 bites)", and the screens offer the rest in one go (`buildLong` in
+ * `./bite`). The minutes are for every card of today's remaining plan
+ * (`todayPlan`: the day's bites played forward like the projection, so a card
+ * that comes back the same day is counted again), at her own pace when it is
+ * known (`minutesFor`). Three bites or fewer keep the bite wording. One-go
+ * sessions count toward the pace card by card, like bites: `simulate` with
+ * `"long"` plays the plan that way and lands where the bites do.
+ *
  * Choices:
  * - A day of the simulation is played at the clock time of `deck.now`, 20
  *   seconds a card. Today counts from what is already done: the bites done
@@ -51,7 +62,7 @@
  *   0.1 s once warm. `dueNow` (one recall prediction a card) keeps it there.
  */
 import { daysBetween } from "../dates";
-import { BITES_PER_DAY, biteSections, type Deck } from "./bite";
+import { BITES_PER_DAY, biteSections, longSections, type BiteInput, type Deck, type Section } from "./bite";
 import { deckForecast, VERDICTS, type Verdict } from "./forecast";
 import { grade, newCard, type MemoryState } from "./memory";
 import { impossibleLine, isPaced, NEW_PER_BITE, onTrackLine, paceOf, type Pace } from "./pace";
@@ -88,19 +99,64 @@ const ms = (t: number | Date) => (typeof t === "number" ? t : t.getTime());
 
 type States = Record<string, MemoryState>;
 
-/** Plays one bite at `t`, every card recalled; returns the time after it, or null when there is no bite. */
-function playBite(deck: Deck, states: States, newToday: string[], t: number): number | null {
-  const sections = biteSections({ ...deck, states, now: t, newToday, kind: deck.kind ?? "exam", bitesDoneToday: 0 });
+/** More bites than this left today: the line says minutes, and the rest is offered in one go. */
+export const TIME_FROM_BITES = 3;
+
+type Played = { t: number; cards: number };
+
+/**
+ * Plays one session at `t` (a bite, or with `longSections` a one-go session), every card
+ * recalled; returns the time after it and its cards, or null when there is none.
+ */
+function play(
+  deck: Deck,
+  states: States,
+  newToday: string[],
+  t: number,
+  build: (input: BiteInput) => Section[] | null = biteSections,
+): Played | null {
+  const sections = build({ ...deck, states, now: t, newToday, kind: deck.kind ?? "exam", bitesDoneToday: 0 });
   if (!sections) return null;
+  let cards = 0;
   for (const [, ids] of sections) {
     for (const id of ids) {
       t += CARD_MS;
+      cards++;
       const at = new Date(t);
       if ((states[id]?.lastReviewAt ?? null) === null) newToday.push(id);
       states[id] = grade(states[id] ?? newCard(at), 3, at);
     }
   }
-  return t;
+  return { t, cards };
+}
+
+/** Plays one bite at `t`, every card recalled; returns the time after it, or null when there is no bite. */
+function playBite(deck: Deck, states: States, newToday: string[], t: number): number | null {
+  return play(deck, states, newToday, t)?.t ?? null;
+}
+
+/**
+ * What a paced exam's plan still asks of today, played forward: its bites and
+ * the cards in them (0 and 0 for a deck that is not paced, or when today's
+ * plan is done).
+ */
+export function todayPlan(deck: Deck): { bites: number; cards: number } {
+  const pace = paceOf(deck);
+  if (!pace) return { bites: 0, cards: 0 };
+  const most = pace.open ? pace.bites : MAX_BITES_A_DAY;
+  const states: States = { ...deck.states };
+  const newToday = [...(deck.newToday ?? [])];
+  let t = ms(deck.now);
+  let bites = 0;
+  let cards = 0;
+  while (bites < most) {
+    const next = play(deck, states, newToday, t);
+    if (!next) break;
+    t = next.t;
+    cards += next.cards;
+    bites++;
+  }
+  return { bites, cards };
 }
 
 /**
@@ -128,9 +184,10 @@ export function askedToday(deck: Deck): number {
  * The forecast day by day when she does `perDay` bites a day (or, with
  * `"core"`, what a paced deck's plan asks each day: `askedToday`), each card
  * recalled. One value per day from today (the forecast now) to exam day.
- * `doneToday` bites are already behind her today.
+ * `doneToday` bites are already behind her today. With `"long"` the same
+ * paced plan is done in one-go sessions instead of bites.
  */
-export function simulate(deck: Deck, perDay: number | "core", doneToday = 0): number[] {
+export function simulate(deck: Deck, perDay: number | "core" | "long", doneToday = 0): number[] {
   const start = ms(deck.now);
   const exam = ms(deck.examAt);
   const days = Math.max(0, daysBetween(new Date(start), new Date(exam)));
@@ -139,12 +196,22 @@ export function simulate(deck: Deck, perDay: number | "core", doneToday = 0): nu
   for (let d = 0; d < days; d++) {
     let t = start + d * DAY_MS;
     const newToday = d === 0 ? [...(deck.newToday ?? [])] : [];
-    const bites =
-      perDay === "core" ? askedToday({ ...deck, states, now: t, newToday }) : perDay - (d === 0 ? doneToday : 0);
-    for (let b = 0; b < bites && t < exam; b++) {
-      const next = playBite(deck, states, newToday, t);
-      if (next === null) break;
-      t = next;
+    if (perDay === "long") {
+      // The same plan done in one-go sessions: one after the other while today still asks for a bite.
+      for (let s = 0; s < MAX_BITES_A_DAY && t < exam; s++) {
+        if (askedToday({ ...deck, states, now: t, newToday }) === 0) break;
+        const next = play(deck, states, newToday, t, longSections);
+        if (!next) break;
+        t = next.t;
+      }
+    } else {
+      const bites =
+        perDay === "core" ? askedToday({ ...deck, states, now: t, newToday }) : perDay - (d === 0 ? doneToday : 0);
+      for (let b = 0; b < bites && t < exam; b++) {
+        const next = playBite(deck, states, newToday, t);
+        if (next === null) break;
+        t = next;
+      }
     }
     curve.push(deckForecast(deck, states));
   }
@@ -249,6 +316,13 @@ export function keepWords(pace: PlanPace): string {
   return pace.kind === "core" && !pace.open ? "Keep up your reviews" : `Keep ${paceWords(pace)}`;
 }
 
+/** More than three bites are left today: the plan is said as time and offered in one go. */
+export function saidAsTime(bites: number): boolean {
+  return bites > TIME_FROM_BITES;
+}
+
+const minutesWord = (n: number) => `${n} minute${n === 1 ? "" : "s"}`;
+
 /**
  * A paced exam's line for today, without its full stop, or null when today
  * has no new cards left:
@@ -257,15 +331,37 @@ export function keepWords(pace: PlanPace): string {
  * - the days cannot hold the core cards: with `sayImpossible` (the exam page,
  *   the one place that says it) "There are more cards than days: core cards
  *   first, about 60 a day"; elsewhere the second form.
+ *
+ * With `minutes` (what today's remaining plan takes) and more than three bites
+ * left, the same two lines say the time and keep the count in brackets:
+ * "About 25 minutes today keeps you on track for Mon 23 Nov (7 bites)" and
+ * "About 25 minutes today (7 bites). The plan gets you to about 62% by
+ * Monday". That form is also said on a reviews-only day, as "About 25 minutes
+ * of reviews today ..." (`pace.bites` is then the review bites the day asks
+ * for); with three bites or fewer such a day has no line, as before.
  */
 export function todayLine(
   pace: Pick<Pace, "open" | "bites" | "budget" | "impossible">,
   plan: Plan,
   day: string,
-  options: { more?: boolean; sayImpossible?: boolean } = {},
+  options: { more?: boolean; sayImpossible?: boolean; minutes?: number | null } = {},
 ): string | null {
-  if (!pace.open || pace.bites === 0) return null;
-  if (pace.impossible && options.sayImpossible) return impossibleLine(pace);
-  if (plan.reaches && !pace.impossible) return onTrackLine(pace, day, options.more);
-  return `${bitesWord(pace.bites)} today. The plan gets you to about ${plan.endShown}% by ${day}`;
+  if (pace.bites === 0) return null;
+  const time = options.minutes != null && saidAsTime(pace.bites) ? options.minutes : null;
+  if (!pace.open && time === null) return null;
+  if (pace.open && pace.impossible && options.sayImpossible) return impossibleLine(pace);
+  const reaches = plan.reaches && !(pace.open && pace.impossible);
+  if (time === null) {
+    if (reaches) return onTrackLine(pace, day, options.more);
+    return `${bitesWord(pace.bites)} today. The plan gets you to about ${plan.endShown}% by ${day}`;
+  }
+  const what = pace.open ? "" : " of reviews";
+  const about = `About ${options.more ? `${time} more minute${time === 1 ? "" : "s"}` : minutesWord(time)}${what} today`;
+  if (reaches) return `${about} keeps you on track for ${day} (${bitesWord(pace.bites)})`;
+  return `${about} (${bitesWord(pace.bites)}). The plan gets you to about ${plan.endShown}% by ${day}`;
+}
+
+/** The done screen's line after a session when today's plan is not finished: "About 12 minutes of today's plan left". */
+export function leftLine(minutes: number): string | null {
+  return minutes > 0 ? `About ${minutesWord(minutes)} of today\u2019s plan left` : null;
 }

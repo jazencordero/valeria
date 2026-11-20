@@ -22,6 +22,12 @@
  *   her on plan today are the new cards left today divided by 5, rounded up.
  * - Boss cards count like any other card: a core boss card is a core card,
  *   it has its place in the queue and it spends the budget.
+ * - Her own pace (`secondsPerCard`): the median time she takes for a card,
+ *   from the newest 200 grades in her review log for this exam (`PACE_LOG`),
+ *   each timed from the card appearing to its grade. The median, not the
+ *   mean: one card left open while she fetched a coffee does not move it. It
+ *   is used once she has graded 20 different cards (`PACE_MIN_CARDS`); until
+ *   then the app's estimate stands (`biteMinutes`, 36 seconds a card).
  */
 import { daysBetween } from "../dates";
 import type { BiteCard, Deck } from "./bite";
@@ -35,7 +41,25 @@ export const MAX_NEW_PER_DAY = 60;
 /** New cards one bite brings. */
 export const NEW_PER_BITE = 5;
 
+/** Her own pace is used once she has graded this many different cards. */
+export const PACE_MIN_CARDS = 20;
+/** Her own pace is read from this many of her newest grades. */
+export const PACE_LOG = 200;
+
 const ms = (t: number | Date) => (typeof t === "number" ? t : t.getTime());
+
+/**
+ * Seconds she takes for a card: the median over the grades given (see the
+ * header), or null while fewer than 20 different cards have a timed grade.
+ */
+export function secondsPerCard(log: readonly { cardId: string; ms: number | null }[]): number | null {
+  const timed = log.filter((r) => typeof r.ms === "number" && r.ms > 0);
+  if (new Set(timed.map((r) => r.cardId)).size < PACE_MIN_CARDS) return null;
+  const sorted = timed.map((r) => r.ms as number).sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  const median = sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return median / 1000;
+}
 
 export type Pace = {
   /** Helsinki calendar days to the exam; 0 is exam day. */

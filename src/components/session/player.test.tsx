@@ -145,6 +145,10 @@ function doneScreen(over: Partial<DoneScreen> = {}): DoneScreen {
     bitesDoneToday: 1,
     bitesPerDay: 2,
     anotherBite: true,
+    long: false,
+    nextMinutes: null,
+    left: null,
+    leftLong: false,
     ...over,
   };
 }
@@ -527,6 +531,59 @@ describe("SessionPlayer: the end", () => {
   });
 });
 
+describe("SessionPlayer: one go", () => {
+  const left = { long: true, nextMinutes: 3, left: { minutes: 12, bites: 5 }, leftLong: true };
+
+  it("Stop ends the session with what she did and the done screen says what is left", async () => {
+    const endSession = vi.fn<SessionPlayerProps["endSession"]>().mockResolvedValue(doneScreen(left));
+    const { user, saveProgress } = setup({ long: true, endSession });
+    await answer(user, "2");
+    await user.click(screen.getByRole("button", { name: "Stop session" }));
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Stop" }));
+    });
+    await screen.findByTestId("session-done");
+    expect(saveProgress).toHaveBeenCalledTimes(1);
+    expect(endSession).toHaveBeenCalledWith(SID);
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.getByTestId("today-left").textContent).toBe("About 12 minutes of today\u2019s plan left");
+    expect(screen.getByText("Session done.")).toBeTruthy();
+    // The rest is offered in one go again.
+    await user.click(screen.getByRole("button", { name: "Do them in one go" }));
+    expect(push).toHaveBeenLastCalledWith("/study/new?exam=exam-1&kind=long");
+  });
+
+  it("stopped before the first grade it just goes back", async () => {
+    const { user, endSession } = setup({ long: true });
+    await user.click(screen.getByRole("button", { name: "Stop session" }));
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Stop" }));
+    });
+    await waitFor(() => expect(push).toHaveBeenLastCalledWith("/exams/exam-1?from=58"));
+    expect(endSession).not.toHaveBeenCalled();
+  });
+
+  it("with three bites or fewer left it offers one more bite, with the next bite's own minutes", async () => {
+    const endSession = vi
+      .fn<SessionPlayerProps["endSession"]>()
+      .mockResolvedValue(doneScreen({ ...left, left: { minutes: 6, bites: 2 }, leftLong: false }));
+    const { user } = setup({ long: true, cards: [A], endSession });
+    await answer(user, "2");
+    await screen.findByTestId("session-done");
+    expect(screen.getByTestId("today-left").textContent).toBe("About 6 minutes of today\u2019s plan left");
+    await user.click(screen.getByRole("button", { name: /One more bite · 3 min/ }));
+    expect(push).toHaveBeenLastCalledWith("/study/new?exam=exam-1&kind=bite");
+  });
+
+  it("an ordinary bite's done screen is as it was", async () => {
+    const { user } = setup({ cards: [A] });
+    await answer(user, "2");
+    await screen.findByTestId("session-done");
+    expect(screen.queryByTestId("today-left")).toBeNull();
+    expect(screen.getByText("Bite done.")).toBeTruthy();
+  });
+});
+
 describe("SessionPlayer: back to the lecture", () => {
   const LECTURE = "/courses/7c0e1a52-0000-4000-8000-0000000000cc/lectures/5";
 
@@ -612,6 +669,7 @@ describe("GET /study/new", () => {
     ["kind=tile&arg=basic", "tile", "basic"],
     ["kind=concept&arg=c1", "concept", "c1"],
     ["kind=extra", "extra", undefined],
+    ["kind=long", "long", undefined],
   ])("starts %s with beginSession and redirects to the session", async (q, kind, arg) => {
     expect(await go(`exam=${EXAM}&${q}`)).toBe(`/study/${SID}`);
     expect(beginSession).toHaveBeenCalledWith(EXAM, kind, arg);

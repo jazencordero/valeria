@@ -62,6 +62,35 @@ describe("the pace line", () => {
     expect(document.body.textContent).not.toContain("Then: bite");
   });
 
+  it("offers the plan in one go beside Start only when asked", async () => {
+    const onStart = vi.fn();
+    const onLong = vi.fn();
+    const line = "About 25 minutes today keeps you on track for Mon 23 Nov (7 bites).";
+    const { rerender } = render(<BiteCard state="bite" minutes={3} cards={9} gain={0.7} focus="Sample concept" pace={line} onStart={onStart} onLong={onLong} />);
+    expect(screen.getByTestId("bite-pace").textContent).toBe(line);
+    screen.getByRole("button", { name: "Do them in one go" }).click();
+    screen.getByRole("button", { name: "Start bite" }).click();
+    expect(onLong).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledTimes(1);
+    rerender(<BiteCard state="bite" minutes={3} cards={9} gain={0.7} focus="Sample concept" pace="3 bites today keeps you on track for Monday." onStart={onStart} />);
+    expect(screen.queryByRole("button", { name: "Do them in one go" })).toBeNull();
+  });
+
+  it("Home's row has a second link for one go, never nested in the first", () => {
+    const row = { state: "bite" as const, minutes: 3, cards: 9, gain: 0.7, forWhat: "Monday’s exam", href: "/study/new?exam=e&kind=bite" };
+    const { rerender } = render(<BiteRow {...row} pace="About 25 minutes today keeps you on track for Mon 23 Nov (7 bites)" longHref="/study/new?exam=e&kind=long" />);
+    const links = screen.getAllByRole("link");
+    expect(links.map((a) => a.getAttribute("href"))).toEqual(["/study/new?exam=e&kind=bite", "/study/new?exam=e&kind=long"]);
+    expect(links[1].textContent).toBe("Do them in one go");
+    expect(links[0].textContent).toBe("Or a 3-minute bite for Monday’s exam");
+    expect(links[0].contains(links[1])).toBe(false);
+    expect(document.body.textContent).toContain("About 25 minutes today keeps you on track for Mon 23 Nov (7 bites)");
+    expect(document.body.textContent).toContain("9 CARDS · +0.7% FORECAST");
+    rerender(<BiteRow {...row} pace="3 bites today keeps you on track for Monday" />);
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(document.body.textContent).not.toContain("Do them in one go");
+  });
+
   it("is shown under Home's row", () => {
     render(<BiteRow state="bite" minutes={5} cards={8} gain={0.7} forWhat="Monday’s exam" href="/study/new" pace="3 bites today keeps you on track for Monday" />);
     expect(document.body.textContent).toContain("3 bites today keeps you on track for Monday");

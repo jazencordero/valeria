@@ -8,6 +8,7 @@ import {
   askedToday,
   flatPlan,
   keepWords,
+  leftLine,
   paceWords,
   planOf,
   planSentence,
@@ -482,5 +483,37 @@ describe("a paced exam's line for today", () => {
   it("is nothing when today has no new cards left", () => {
     expect(todayLine({ ...pace, bites: 0 }, plan(88), "Monday")).toBeNull();
     expect(todayLine({ ...pace, open: false }, plan(88), "Monday")).toBeNull();
+  });
+
+  it("three bites or fewer keep the bite wording; more than three say the time and keep the count", () => {
+    const day = "Mon 23 Nov";
+    expect(todayLine({ ...pace, bites: 3 }, plan(88), day, { minutes: 11 })).toBe("3 bites today keeps you on track for Mon 23 Nov");
+    expect(todayLine({ ...pace, bites: 4 }, plan(88), day, { minutes: 14 })).toBe("About 14 minutes today keeps you on track for Mon 23 Nov (4 bites)");
+    expect(todayLine({ ...pace, bites: 7 }, plan(88), day, { minutes: 25 })).toBe("About 25 minutes today keeps you on track for Mon 23 Nov (7 bites)");
+    expect(todayLine({ ...pace, bites: 8 }, plan(88), day, { minutes: 29 })).toBe("About 29 minutes today keeps you on track for Mon 23 Nov (8 bites)");
+    expect(todayLine({ ...pace, bites: 8 }, plan(88), day, { minutes: 1 })).toBe("About 1 minute today keeps you on track for Mon 23 Nov (8 bites)");
+    // Once something is done today, and when the plan ends below the target.
+    expect(todayLine({ ...pace, bites: 5 }, plan(88), day, { minutes: 18, more: true })).toBe("About 18 more minutes today keeps you on track for Mon 23 Nov (5 bites)");
+    expect(todayLine({ ...pace, bites: 8 }, plan(62), day, { minutes: 29 })).toBe("About 29 minutes today (8 bites). The plan gets you to about 62% by Mon 23 Nov");
+    // Without the minutes the bite wording stays, whatever the count; the impossible sentence is as it was.
+    expect(todayLine({ ...pace, bites: 8 }, plan(88), day)).toBe("8 bites today keeps you on track for Mon 23 Nov");
+    const hard = { open: true, bites: 12, budget: 60, impossible: true };
+    expect(todayLine(hard, plan(88), day, { sayImpossible: true, minutes: 40 })).toBe("There are more cards than days: core cards first, about 60 a day");
+    expect(todayLine(hard, plan(88), day, { minutes: 40 })).toBe("About 40 minutes today (12 bites). The plan gets you to about 88% by Mon 23 Nov");
+  });
+
+  it("a reviews-only day says its time too when it asks for more than three bites", () => {
+    const closed = { open: false, bites: 14, budget: 0, impossible: false };
+    expect(todayLine(closed, plan(95), "Mon 23 Nov", { minutes: 41 })).toBe("About 41 minutes of reviews today keeps you on track for Mon 23 Nov (14 bites)");
+    expect(todayLine(closed, plan(95), "Mon 23 Nov", { minutes: 17, more: true })).toBe("About 17 more minutes of reviews today keeps you on track for Mon 23 Nov (14 bites)");
+    expect(todayLine(closed, plan(62), "Mon 23 Nov", { minutes: 41 })).toBe("About 41 minutes of reviews today (14 bites). The plan gets you to about 62% by Mon 23 Nov");
+    // Three bites or fewer: no line, as before.
+    expect(todayLine({ ...closed, bites: 3 }, plan(95), "Mon 23 Nov", { minutes: 9 })).toBeNull();
+  });
+
+  it("the done screen's line says what is left of today, or nothing", () => {
+    expect(leftLine(12)).toBe("About 12 minutes of today\u2019s plan left");
+    expect(leftLine(1)).toBe("About 1 minute of today\u2019s plan left");
+    expect(leftLine(0)).toBeNull();
   });
 });

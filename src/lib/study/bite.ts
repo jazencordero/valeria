@@ -71,7 +71,19 @@
  * extra are built from the cards she has graded. Before the cut-off an extra
  * session is the next 5 new cards of the plan, whatever the budget.
  *
- * `minutes = max(2, round(n * 0.6))`. `gain` is measured, not estimated: the
+ * One go (`buildLong`), only for a paced deck: today's remaining plan as one
+ * longer session. It is the bites the plan still asks of today, one after the
+ * other, each built by the paced builder above as if the one before it had
+ * just been done (its cards recalled, the clock not moved): so the same
+ * cards, in the same order, as the separate bites. Whole bites are added
+ * while the session stays within 40 cards (`LONG_MAX`); what does not fit is
+ * the next session. A card is never in it twice. While new cards are open it
+ * ends when today's budget of new cards is used; on a reviews-only day when
+ * today's reviews are. Any other deck gets its ordinary bite.
+ *
+ * `minutes = max(2, round(n * 0.6))`, the app's estimate (`biteMinutes`);
+ * `minutesFor` uses her own measured seconds a card instead once there is one
+ * (`secondsPerCard` in `./pace`). `gain` is measured, not estimated: the
  * deck's forecast if each card of the session is recalled, minus the forecast
  * now (`gainOf` in `./forecast`), in forecast points, not rounded.
  */
@@ -80,7 +92,7 @@ import { startOfDay } from "../dates";
 import { dueNow, reviewShare, type Time } from "./exam-aim";
 import { gainOf } from "./forecast";
 import { conceptMastery, focusConcept, rungOf } from "./ladder";
-import { newCard, type MemoryState } from "./memory";
+import { grade, newCard, type MemoryState } from "./memory";
 import { isPaced, newQueue, paceOf, planPlace, reviewsOnly, type Pace } from "./pace";
 
 /** Card types, as in the prototype's TYPE_NAMES. */
@@ -168,7 +180,21 @@ export const LEARN_MAX = 5;
 export const BITE_MIN = 8;
 export const BITE_MAX = 12;
 
+/** A one-go session holds at most this many cards. */
+export const LONG_MAX = 40;
+
 export const biteMinutes = (n: number) => Math.max(2, Math.round(n * 0.6));
+
+/**
+ * Minutes `n` cards take: at her own measured pace (`secondsPerCard`, seconds
+ * a card) when there is one, never under a minute; else the app's estimate
+ * (`biteMinutes`). 0 for no cards.
+ */
+export function minutesFor(n: number, secondsPerCard?: number | null): number {
+  if (n <= 0) return 0;
+  if (secondsPerCard == null || !(secondsPerCard > 0)) return biteMinutes(n);
+  return Math.max(1, Math.round((n * secondsPerCard) / 60));
+}
 
 const ms = (t: Time) => (typeof t === "number" ? t : t.getTime());
 const conceptsOf = (c: BiteCard) => c.conceptIds ?? [c.conceptId];
@@ -429,6 +455,45 @@ export function biteSections(input: BiteInput): Section[] | null {
     ["learn", learn.slice(0, learnN).map((c) => c.id)],
     ["boss", boss ? [boss.id] : []],
   ]);
+}
+
+/**
+ * Today's remaining plan of a paced deck as one session (see the header): the
+ * bites the plan still asks of today in a row, whole bites while the total
+ * stays within `max` cards. The sections repeat (warm, learn, boss, warm, ...)
+ * in the order she meets them. Any other deck: its ordinary bite.
+ */
+export function longSections(input: BiteInput, max = LONG_MAX): Section[] | null {
+  if (!isPaced(input)) return biteSections(input);
+  const at = new Date(ms(input.now));
+  const states: Record<string, MemoryState> = { ...input.states };
+  const newToday = [...(input.newToday ?? [])];
+  const picked = new Set<string>();
+  const out: Section[] = [];
+  const first = paceOf(input)!;
+  // While new cards are open the plan asks for the bites that use up today's budget, no more.
+  let bitesLeft = first.open ? Math.max(1, first.bites) : Infinity;
+  let total = 0;
+  while (bitesLeft-- > 0) {
+    const built = pacedSections({ ...input, states, newToday });
+    const sections = kept((built ?? []).map(([kind, list]): Section => [kind, list.filter((id) => !picked.has(id))]));
+    if (!sections) break;
+    const ids = sections.flatMap(([, list]) => list);
+    if (total > 0 && total + ids.length > max) break;
+    out.push(...sections);
+    total += ids.length;
+    for (const id of ids) {
+      picked.add(id);
+      if ((states[id]?.lastReviewAt ?? null) === null) newToday.push(id);
+      states[id] = grade(states[id] ?? newCard(at), 3, at);
+    }
+  }
+  return out.length > 0 ? out : null;
+}
+
+/** The one-go session (`longSections`) with its minutes and gain. */
+export function buildLong(input: BiteInput): Bite | null {
+  return session(input, longSections(input));
 }
 
 /**

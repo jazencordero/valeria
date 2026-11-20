@@ -387,7 +387,7 @@ describe("a paced exam (core marks)", () => {
     const paced = await seedPaced();
     const start = await examView(paced.examId);
     // 60 core cards over 5 days: 12 a day, in 3 bites of up to 5 new cards.
-    expect(start.pace).toMatchObject({ open: true, budget: 12, left: 12, bites: 3, impossible: false, done: false });
+    expect(start.pace).toMatchObject({ open: true, budget: 12, left: 12, bites: 3, impossible: false, done: false, long: false });
     // An exam within 14 days: the week's goal is every day until it (Saturday and Sunday are left this week).
     expect(start.week.goal).toBe(2);
     expect((await examView(examId)).week.goal).toBe(4); // her other exam is 20 days out
@@ -459,6 +459,77 @@ describe("a paced exam (core marks)", () => {
         expect(s!.cards.every((c) => met.has(c.id))).toBe(true);
       }
     }
+  }, DB_TIMEOUT);
+});
+
+describe("a paced exam: minutes and one go", () => {
+  /** 300 core cards in one concept, the exam 7 days out: 60 new cards a day, 12 bites. */
+  async function seedBig(): Promise<{ examId: string; order: string[] }> {
+    const [course] = await t.db.insert(courses).values({ userId: her, moodleId: 13, name: "Big" }).returning();
+    const [exam] = await t.db
+      .insert(exams)
+      .values({ userId: her, courseId: course.id, title: "Big final", kind: "exam", at: new Date(NOW.getTime() + 7 * D) })
+      .returning();
+    const [concept] = await t.db.insert(concepts).values({ userId: her, examId: exam.id, name: "Big concept", position: 1, weight: 1 }).returning();
+    const made = await t.db
+      .insert(cards)
+      .values(
+        Array.from({ length: 300 }, (_, k) => ({
+          userId: her,
+          examId: exam.id,
+          type: "basic" as const,
+          rung: 1,
+          body: { q: `Big ${k}?`, a: "A", core: true },
+          origin: "manual" as const,
+          contentHash: `big-${k}`,
+          createdAt: new Date(NOW.getTime() - D + k * 1000),
+        })),
+      )
+      .returning();
+    await t.db.insert(cardConcepts).values(made.map((c) => ({ cardId: c.id, conceptId: concept.id })));
+    return { examId: exam.id, order: made.map((c) => c.id) };
+  }
+
+  it("says today's plan in minutes, starts it in one go, and counts a stopped session", async () => {
+    const big = await seedBig();
+    const start = await examView(big.examId);
+    // 60 new cards in 12 bites: more than three, so time and one go. No pace measured yet: the app's estimate.
+    expect(start.pace).toMatchObject({ open: true, budget: 60, left: 60, bites: 12, long: true });
+    expect(start.pace!.cards).toBeGreaterThanOrEqual(60);
+    expect(start.pace!.minutes).toBe(Math.max(2, Math.round(start.pace!.cards * 0.6)));
+    expect(start.bite!.minutes).toBe(3);
+
+    // One go: today's remaining plan in order, whole bites up to 40 cards, stored as a bite.
+    const long = await beginSession(big.examId, "long");
+    expect(long).toMatchObject({ mode: "bite", long: true });
+    expect(long!.cards.map((c) => c.id)).toEqual(big.order.slice(0, 40));
+    expect(long!.minutes).toBe(24);
+
+    // She stops after 22 cards (20 seconds each): the session ends there and what she did counts.
+    const done = await play(long!.cards.slice(0, 22), long!.sessionId);
+    expect(done).toMatchObject({ mode: "bite", long: true, anotherBite: true, leftLong: true });
+    expect(done.stats.cards).toBe(22);
+    const after = await examView(big.examId);
+    expect(after.pace).toMatchObject({ budget: 60, left: 38, bites: 8, long: true });
+    // 22 cards are graded now: the minutes are at her own pace, 20 seconds a card.
+    expect(after.pace!.minutes).toBe(Math.round((after.pace!.cards * 20) / 60));
+    expect(done.left).toEqual({ minutes: after.pace!.minutes, bites: 8 });
+    expect(after.bite!.minutes).toBe(Math.round((after.bite!.cards * 20) / 60));
+    expect(done.nextMinutes).toBe(after.bite!.minutes);
+
+    // The next one-go session goes on with the cards that were left.
+    const next = await beginSession(big.examId, "long");
+    expect(next!.cards.filter((c) => big.order.includes(c.id)).map((c) => c.id).filter((id) => big.order.indexOf(id) >= 22).slice(0, 5)).toEqual(big.order.slice(22, 27));
+    expect(next!.cards.length).toBeLessThanOrEqual(40);
+  }, DB_TIMEOUT);
+
+  it("three bites or fewer are not said as time; an exam that is not paced gets its ordinary bite", async () => {
+    // Her unpaced exam: "long" is the ordinary bite and nothing is marked.
+    const plain = await beginSession(examId, "long");
+    expect(plain).toMatchObject({ mode: "bite", long: false });
+    const bite = await examView(examId);
+    expect(bite.pace).toBeUndefined();
+    await expect(beginSession(examId, "longer" as never)).rejects.toThrow(/unknown kind/);
   }, DB_TIMEOUT);
 });
 

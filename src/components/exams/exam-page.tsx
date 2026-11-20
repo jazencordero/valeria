@@ -104,6 +104,8 @@ export type ExamPageToday =
       next?: BiteCardNext;
       /** A paced exam: today's pace as one sentence, shown instead of `next`. */
       pace?: string;
+      /** More than three bites are left today: "Do them in one go" beside "Start bite". */
+      long?: boolean;
     }
   | { state: "done"; /** "Next reviews tomorrow." */ nextReviews: string }
   /** The cards are being made from this many lectures. */
@@ -366,7 +368,7 @@ export function ExamPage({
   const pathname = usePathname();
 
   /** `/study/new?exam=<id>&kind=<kind>`; a tile or a concept session also names its `arg`. */
-  const start = (kind: "bite" | "extra" | "tile" | "concept", arg?: string) => {
+  const start = (kind: "bite" | "extra" | "tile" | "concept" | "long", arg?: string) => {
     const query = new URLSearchParams({ exam: examId, kind });
     if (arg) query.set("arg", arg);
     router.push(`/study/new?${query.toString()}`);
@@ -492,6 +494,7 @@ export function ExamPage({
         next={today.next}
         pace={today.pace}
         onStart={() => start("bite")}
+        onLong={today.long ? () => start("long") : undefined}
       />
     ) : today.state === "done" ? (
       <BiteCard state="done" nextReviews={today.nextReviews} onPractise={() => start("extra")} />

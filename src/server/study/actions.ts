@@ -79,6 +79,24 @@
  *   reviews today still asks for, and in `nextReviews` today holds that number
  *   and the due cards that wait are added to tomorrow (`reviewDay` in
  *   `bite.ts`). No stored due date is changed for it.
+ * - Today as time, and one go. For a paced exam `ExamView.pace` also carries
+ *   the cards and the minutes of what today's plan still asks (`todayPlan`,
+ *   `minutesFor`), and `long` when that is more than three bites: the screens
+ *   then say the minutes and offer "Do them in one go". Minutes are at her
+ *   own pace once it is known: the median time of her newest 200 timed grades
+ *   on this exam's cards, from 20 different cards on (`secondsPerCard` in
+ *   `pace.ts`); before that the app's estimate. Today's bite says its minutes
+ *   the same way.
+ *   `beginSession(exam, "long")` starts the one-go session (`buildLong`:
+ *   today's remaining plan, whole bites up to 40 cards). There is no session
+ *   mode for it in the database, so it is stored as a `bite` session whose
+ *   `summary.long` is true; every review in it counts toward today's plan
+ *   card by card, like the same cards in separate bites. On an exam that is
+ *   not paced it starts the ordinary bite.
+ *   `endSession` then says what is left of today (`DoneScreen.left`: minutes
+ *   and bites; null when today's plan is done or the exam is not paced),
+ *   the next bite's minutes, and whether more than three bites are still
+ *   left (`leftLong`).
  * - Due dates. `recordReviews` grades with FSRS and writes the FSRS due date.
  *   `saveProgress` then aims it at the exam: `due_at = aimedDue(fsrs,
  *   examAt, lastReviewAt)`, which only ever moves it earlier; when aiming
@@ -116,7 +134,7 @@
  *   reviews it already has), so the screen retries a failed save three times
  *   with the same batch, then tells her.
  */
-import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { currentUser } from "@/server/auth/session";
 import { setFlash } from "@/server/data/flash";
 import { db, type Db } from "@/server/db/client";
@@ -126,8 +144,10 @@ import { byDay, dayMonth, daysBetween, startOfDay, startOfWeek } from "@/lib/dat
 import {
   BITES_PER_DAY,
   buildBite,
+  buildLong,
   conceptSession,
   extraSession,
+  minutesFor,
   reviewDay,
   tileSession,
   type Bite,
@@ -154,10 +174,10 @@ import {
   type Phase,
   type RungLevel,
 } from "@/lib/study/ladder";
-import { isPaced, paceOf } from "@/lib/study/pace";
-import { flatPlan, keepWords, planOf, verdictOf, type Plan } from "@/lib/study/plan";
+import { isPaced, PACE_LOG, paceOf, secondsPerCard } from "@/lib/study/pace";
+import { flatPlan, keepWords, planOf, saidAsTime, todayPlan, verdictOf, type Plan } from "@/lib/study/plan";
 import { GRADES, grade as gradeMemory, intervalLabel, newCard, type Grade, type MemoryState } from "@/lib/study/memory";
-import type { SessionMode } from "@/lib/study/session";
+import type { SessionKind, SessionMode } from "@/lib/study/session";
 import { DEFAULT_GOAL, freeSkipsLeft, goalFor, streakLine, weekOf, weeksInARow, type Week } from "@/lib/study/week";
 import { ExamOver, examOver, newCardsAllowed } from "./start-date";
 import {
@@ -215,6 +235,12 @@ export type PaceView = {
   impossible: boolean;
   /** Today's plan is done: no bite is left (the budget is used and nothing is due). */
   done: boolean;
+  /** Cards in the bites today's plan still asks for. */
+  cards: number;
+  /** Minutes those cards take, at her own pace when it is known. */
+  minutes: number;
+  /** More than three bites are left today: the plan is said as time and offered in one go. */
+  long: boolean;
 };
 
 export type ExamView = {
@@ -271,6 +297,8 @@ export type SessionCardView = {
 export type BegunSession = {
   sessionId: string;
   mode: SessionMode;
+  /** A one-go session: today's remaining plan (stored as a bite). */
+  long: boolean;
   minutes: number;
   /** Forecast points the session is worth if every card is recalled, not rounded. */
   gain: number;
@@ -324,6 +352,14 @@ export type DoneScreen = {
   bitesPerDay: number;
   /** True when another bite is left today (see the header). */
   anotherBite: boolean;
+  /** This was a one-go session. */
+  long: boolean;
+  /** Minutes of the next bite, at her own pace when it is known; null when none is left. */
+  nextMinutes: number | null;
+  /** A paced exam whose plan for today is not finished: what is left of it. Null otherwise. */
+  left: { minutes: number; bites: number } | null;
+  /** More than three bites are still left today: the rest is offered in one go. */
+  leftLong: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -337,12 +373,13 @@ export async function examView(examId: string): Promise<ExamView> {
 
 /**
  * Starts a session: `kind` is `bite` (today's bite; `arg` unused), `tile`
- * (`arg` is a card type), `concept` (`arg` is a concept id) or `extra`.
+ * (`arg` is a card type), `concept` (`arg` is a concept id), `extra`, or
+ * `long` (today's remaining plan in one go; see the header).
  * Returns null when there is nothing to study (today's bites are done, or no
  * card fits); no session row is written then. An exam whose day is over
  * starts nothing either: it throws `ExamOver` (from `./start-date`).
  */
-export async function beginSession(examId: string, kind: SessionMode, arg?: string): Promise<BegunSession | null> {
+export async function beginSession(examId: string, kind: SessionKind, arg?: string): Promise<BegunSession | null> {
   const user = await currentUser();
   return begin(user.id, String(examId), kind, arg, new Date(), db);
 }
@@ -420,6 +457,8 @@ type ExamState = {
   studyDeck: BiteDeck;
   concepts: ConceptView[];
   forecast: number;
+  /** Seconds she takes for a card on this exam, or null while too few are timed (`secondsPerCard`). */
+  perCard: number | null;
 };
 
 const clampRung = (r: number) => Math.min(5, Math.max(1, Math.round(r))) as BiteCard["rung"];
@@ -479,6 +518,17 @@ function studyDeckOf(exam: Exam, deck: Deck, biteDeck: BiteDeck, now: Date): Bit
   return { ...biteDeck, cards: biteDeck.cards.filter((c) => fromNote.has(c.id) || graded(c.id)) };
 }
 
+/** Her newest timed grades on this exam's cards, for her own pace. */
+async function paceLog(userId: string, examId: string, database: Db): Promise<{ cardId: string; ms: number | null }[]> {
+  return database
+    .select({ cardId: reviews.cardId, ms: reviews.ms })
+    .from(reviews)
+    .innerJoin(cards, eq(cards.id, reviews.cardId))
+    .where(and(eq(reviews.userId, userId), eq(cards.userId, userId), eq(cards.examId, examId), gt(reviews.ms, 0)))
+    .orderBy(desc(reviews.at), desc(reviews.id))
+    .limit(PACE_LOG);
+}
+
 async function examState(userId: string, examId: string, now: Date, database: Db): Promise<ExamState> {
   const exam = await loadExam(userId, examId, database);
   const deck = await loadDeck(userId, examId, database);
@@ -494,7 +544,8 @@ async function examState(userId: string, examId: string, now: Date, database: Db
     const rung = rungOf(m);
     return { id: c.id, name: c.name, lecture: c.lecture, icon: c.icon, weight: c.weight, mastery: m, rung, rungName: rungName(rung) };
   });
-  return { exam, deck, biteDeck, studyDeck: studyDeckOf(exam, deck, biteDeck, now), concepts, forecast: deckForecast(biteDeck) };
+  const perCard = secondsPerCard(await paceLog(userId, examId, database));
+  return { exam, deck, biteDeck, studyDeck: studyDeckOf(exam, deck, biteDeck, now), concepts, forecast: deckForecast(biteDeck), perCard };
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -543,9 +594,14 @@ async function studyWeek(userId: string, now: Date, database: Db, examAt: Date |
   return { ...week, weeksInARow: weeks, freeSkipsLeft: skips, streakLine: streakLine(weeks, skips) };
 }
 
-/** The session's gain measured on the whole deck (the study-start cut may have hidden part of it). */
+/**
+ * The session's gain measured on the whole deck (the study-start cut may have hidden part of
+ * it), and its minutes at her own pace when it is known.
+ */
 function measured(state: ExamState, bite: Bite | null): Bite | null {
-  return bite ? { ...bite, gain: gainOf(state.biteDeck, bite.sections.flatMap(([, ids]) => ids)) } : null;
+  if (!bite) return null;
+  const ids = bite.sections.flatMap(([, list]) => list);
+  return { ...bite, minutes: minutesFor(ids.length, state.perCard), gain: gainOf(state.biteDeck, ids) };
 }
 
 function todayBite(state: ExamState, done: number): Bite | null {
@@ -560,6 +616,14 @@ function planFor(state: ExamState, now: Date, done: number): Plan {
 }
 
 const sizeOf = (b: Bite) => b.sections.reduce((n, [, ids]) => n + ids.length, 0);
+
+/** What a paced exam's plan still asks of today: its bites, their cards and the minutes they take. */
+function todayAsk(state: ExamState, now: Date): { bites: number; cards: number; minutes: number } {
+  const { exam } = state;
+  if (examOver(exam, now) || !newCardsAllowed(exam, now)) return { bites: 0, cards: 0, minutes: 0 };
+  const asked = todayPlan(state.studyDeck);
+  return { ...asked, minutes: minutesFor(asked.cards, state.perCard) };
+}
 
 /**
  * On a paced exam's reviews-only day: the counts as the day asks them (see the
@@ -611,6 +675,7 @@ async function buildExamView(userId: string, examId: string, now: Date, database
   // Past its day (whole-day or not): the exam is over, so no bite is offered.
   const bite = daysLeft < 0 ? null : todayBite(state, done);
   const pace = paceOf(state.studyDeck);
+  const ask = pace && bite ? todayAsk(state, now) : { bites: 0, cards: 0, minutes: 0 };
   return {
     exam: { id: exam.id, title: exam.title, kind: exam.kind, at: exam.at, targetPct: exam.targetPct, courseId: exam.courseId },
     daysLeft,
@@ -643,6 +708,9 @@ async function buildExamView(userId: string, examId: string, now: Date, database
             bites: plan.pace.kind === "core" ? plan.pace.bitesToday : pace.bites,
             impossible: pace.impossible,
             done: bite === null && daysLeft >= 0 && newCardsAllowed(exam, now) && state.biteDeck.cards.length > 0,
+            cards: ask.cards,
+            minutes: ask.minutes,
+            long: saidAsTime(ask.bites),
           },
         }
       : {}),
@@ -673,19 +741,24 @@ function intervalsFor(state: MemoryState, examAt: Date, now: Date): IntervalPrev
 async function begin(
   userId: string,
   examId: string,
-  kind: SessionMode,
+  asked: SessionKind,
   arg: string | undefined,
   now: Date,
   database: Db,
 ): Promise<BegunSession | null> {
-  if (!(SESSION_MODES as readonly string[]).includes(kind)) throw new Error(`beginSession: unknown kind ${String(kind)}`);
+  if (asked !== "long" && !(SESSION_MODES as readonly string[]).includes(asked)) throw new Error(`beginSession: unknown kind ${String(asked)}`);
   const state = await examState(userId, examId, now, database);
   // A past exam has no sessions of any kind: its page says "This exam is over."
   if (examOver(state.exam, now)) throw new ExamOver(state.exam.id);
   const biteDeck = state.studyDeck;
+  // One go is for a paced exam; anywhere else it is the ordinary bite. It is stored as a bite.
+  const long = asked === "long" && isPaced(biteDeck);
+  const kind: SessionMode = asked === "long" ? "bite" : asked;
 
   let bite: Bite | null;
-  if (kind === "bite") {
+  if (long) {
+    bite = buildLong({ ...biteDeck, kind: state.exam.kind, bitesDoneToday: 0 });
+  } else if (kind === "bite") {
     bite = todayBite(state, await bitesDoneToday(userId, examId, now, database));
   } else if (kind === "tile") {
     if (!(CARD_TYPES as readonly string[]).includes(String(arg))) throw new Error(`beginSession: unknown card type ${String(arg)}`);
@@ -704,7 +777,14 @@ async function begin(
   const masteryBefore = Object.fromEntries(state.concepts.map((c) => [c.id, c.mastery]));
   await database
     .update(studySessions)
-    .set({ summary: { ...(session.summary as Record<string, unknown>), forecastBefore: state.forecast, masteryBefore } })
+    .set({
+      summary: {
+        ...(session.summary as Record<string, unknown>),
+        forecastBefore: state.forecast,
+        masteryBefore,
+        ...(long ? { long: true } : {}),
+      },
+    })
     .where(eq(studySessions.id, session.id));
 
   const byId = new Map(state.deck.cards.map((c) => [c.id, c]));
@@ -730,6 +810,7 @@ async function begin(
   return {
     sessionId: session.id,
     mode: kind,
+    long,
     minutes: bite.minutes,
     gain: bite.gain,
     cards: cardsOut,
@@ -847,6 +928,8 @@ async function end(userId: string, sessionId: string, now: Date, database: Db): 
   ]);
 
   const plan = planFor(state, now, done);
+  const next = todayBite(state, done);
+  const ask = next && isPaced(state.studyDeck) ? todayAsk(state, now) : null;
   return {
     sessionId,
     examId: session.examId,
@@ -862,6 +945,10 @@ async function end(userId: string, sessionId: string, now: Date, database: Db): 
     week,
     bitesDoneToday: done,
     bitesPerDay: BITES_PER_DAY[state.exam.kind],
-    anotherBite: todayBite(state, done) !== null,
+    anotherBite: next !== null,
+    long: summary.long === true,
+    nextMinutes: next ? next.minutes : null,
+    left: ask && ask.bites > 0 ? { minutes: ask.minutes, bites: ask.bites } : null,
+    leftLong: ask !== null && saidAsTime(ask.bites),
   };
 }
