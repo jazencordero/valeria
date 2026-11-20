@@ -109,7 +109,14 @@ export function BiteRow(props: BiteRowProps) {
           <span className="mono text-[11px] text-ink-3">{meta}</span>
           {props.pace ? <span className="text-[12px] text-ink-2">{props.pace}</span> : null}
         </span>
-        <span className="grid justify-items-end gap-1.5">
+        {/* On a phone the two actions take their own line under the text, so the title keeps its width. */}
+        <span
+          data-testid="bite-row-actions"
+          className={
+            "col-span-2 col-start-2 mt-2 flex items-center justify-between gap-3 " +
+            "min-[480px]:col-span-1 min-[480px]:col-start-auto min-[480px]:mt-0 min-[480px]:grid min-[480px]:justify-items-end min-[480px]:gap-1.5"
+          }
+        >
           <span className="inline-flex items-center gap-0.5 text-[13px] font-semibold" aria-hidden="true">
             Start
             <Chevron />
@@ -117,7 +124,12 @@ export function BiteRow(props: BiteRowProps) {
           <Link
             href={props.longHref}
             prefetch={false}
-            className="relative z-[1] rounded-full border border-solid border-line bg-paper px-2.5 py-1 text-[12px] font-semibold text-ink no-underline"
+            data-testid="bite-row-long"
+            // The pill stays small; its tap area reaches 44 px tall through ::before.
+            className={
+              "relative z-[1] whitespace-nowrap rounded-full border border-solid border-line bg-paper px-2.5 py-1 text-[12px] font-semibold text-ink no-underline " +
+              "before:absolute before:-inset-x-1 before:-inset-y-[9px] before:content-['']"
+            }
           >
             Do them in one go
           </Link>
