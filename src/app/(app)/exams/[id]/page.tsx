@@ -39,7 +39,14 @@
  *   left today (`pace.long`) the line says the time instead, "About 25 minutes
  *   today keeps you on track for Mon 23 Nov (7 bites).", on a reviews-only day
  *   "About 25 minutes of reviews today ...", and the block offers "Do them in
- *   one go".
+ *   one go". On a reviews-only day whose important reviews are done
+ *   (`pace.enough`) the line is "The important ones are done. 43 more are
+ *   optional (about +0.6%)."; the bite and one go still serve them.
+ * - Progress: the sentence under the big percent names the grade only as her
+ *   bundle does, "A 4 needs 85%." (`exams.grade_target`, as on the cards).
+ *   The forecast is not turned into a grade: only the one point of this
+ *   exam's scale that the bundle gives is known. With no grade target the
+ *   grade sentence is left out.
  * - One pace, one number (`ExamView.plan`, src/lib/study/plan.ts): the header's verdict, the
  *   Today line above, the Progress sentence and the chart's plan line all come from it.
  * - Before the study start the Progress tab is that one "Starts ..." line and nothing else.
@@ -68,8 +75,7 @@ import type { PracticeType } from "@/components/study/practice-tiles";
 import type { ProgressConcept } from "@/components/study/progress-sheet";
 import { byDay, startsLine, TIME_ZONE } from "@/lib/dates";
 import { biteMinutes } from "@/lib/study/bite";
-import { paceWords, planSentence, todayLine } from "@/lib/study/plan";
-import { gradeFor } from "@/lib/study/forecast";
+import { optionalLine, paceWords, planSentence, todayLine } from "@/lib/study/plan";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { shortNameOf } from "@/server/data/courses";
 import { getExamTabs } from "@/server/data/exam-tabs";
@@ -269,7 +275,9 @@ async function todayOf(
     const planned = view.plan.pace.kind === "bites" ? Math.min(view.plan.pace.perDay, view.bitesPerDay) : null;
     const pace =
       view.pace && !quiet
-        ? todayLine(view.pace, view.plan, byDay(view.exam.at, now), {
+        ? view.pace.enough && view.pace.optional
+          ? optionalLine(view.pace.optional.cards, view.pace.optional.gain)
+          : todayLine(view.pace, view.plan, byDay(view.exam.at, now), {
             more: view.bitesDoneToday > 0,
             sayImpossible: true,
             minutes: view.pace.minutes,
@@ -354,7 +362,8 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
       lectures={tabs.lectures}
       notes={tabs.notes}
       progress={{
-        grade: gradeFor(view.forecastShown),
+        target: exam.targetPct,
+        targetGrade: targetGradeOf(stored?.gradeTarget),
         planEnd: view.plan.endShown,
         dayName: byDay(exam.at, now),
         planLine: planSentence(view.plan, byDay(exam.at, now)),

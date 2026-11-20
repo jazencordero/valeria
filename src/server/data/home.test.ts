@@ -46,7 +46,7 @@ const { dismissNeverMissFor, turnOffNeverMissFor, turnOnNeverMissFor } = await i
 );
 const { itemsForUser } = await import("@/server/calendar/feed");
 const { encodeFlash, FLASH_MAX_AGE_S, parseFlash } = await import("./flash");
-const { beginSession, endSession, saveProgress } = await import("@/server/study/actions");
+const { beginSession, examView, endSession, saveProgress } = await import("@/server/study/actions");
 
 const DB_TIMEOUT = 90_000;
 
@@ -521,6 +521,45 @@ describe("getHomeView: bite row and exam cards", () => {
       expect(await titles("2027-03-28T00:00:00+02:00")).toEqual([["Spring", "SUN 28 MAR · today"]]);
       expect(await titles("2027-03-28T23:59:00+03:00")).toEqual([["Spring", "SUN 28 MAR · today"]]);
       expect(await titles("2027-03-29T00:00:00+03:00")).toEqual([]);
+    },
+    DB_TIMEOUT,
+  );
+});
+
+describe("getHomeView: a reviews-only day whose important reviews are done", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+
+  it(
+    "stops asking: the row reads as done and the card opens the exam, although a bite is still there",
+    async () => {
+      const u = await user();
+      signedIn.userId = u.id;
+      const fm = await course(u.id, "Forecasting Methods");
+      const soon = await exam(u.id, fm.id, "Forecasting exam", FRIDAY);
+      const pace = { open: false, budget: 0, left: 0, bites: 0, impossible: false, done: false, cards: 0, minutes: 0, long: true };
+      // The exam's own view, with the pace a paced exam has once the important reviews are done.
+      const enough = async (id: string) => ({ ...(await examView(id)), pace: { ...pace, enough: true, optional: { cards: 43, gain: 0.6 } } });
+      const view = await getHomeView(u.id, { now: NOW, view: enough }, t.db);
+      expect((await examView(soon.id)).bite).not.toBeNull();
+      expect(view.bite).toMatchObject({ state: "done", examId: soon.id, href: `/exams/${soon.id}` });
+      expect(view.exams[0].biteMinutes).toBeNull();
+      expect(view.biteFirst).toBe(false);
+
+      // While reviews are still asked for, the row asks, in minutes, with one go.
+      const asking = async (id: string) => ({
+        ...(await examView(id)),
+        pace: { ...pace, bites: 8, cards: 72, minutes: 24, enough: false, optional: null },
+        plan: { pace: { kind: "core" as const, open: false, perDay: 8, bitesToday: 8 }, curve: [90, 95], end: 95, endShown: 95, reaches: true },
+      });
+      const still = await getHomeView(u.id, { now: NOW, view: asking }, t.db);
+      expect(still.bite).toMatchObject({
+        state: "bite",
+        pace: "About 24 minutes of reviews today keeps you on track for Friday (8 bites)",
+        longHref: `/study/new?exam=${soon.id}&kind=long`,
+      });
     },
     DB_TIMEOUT,
   );

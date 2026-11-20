@@ -49,7 +49,9 @@
  *   heaviest day is then `2 * daysLeft / (daysLeft + 1)` times the daily
  *   average, so always under twice, and the day before the exam carries the
  *   smallest weight. It only says how many; which cards (earliest learned
- *   first) is the caller's order (`bite.ts`, the paced builder). No due date
+ *   first) is the caller's order. NOTHING CALLS IT ANY MORE: a reviews-only
+ *   day now asks by what each review is worth (`reviewWorth` in
+ *   `./forecast`, applied in `bite.ts`), not for a share by count. No due date
  *   is moved: a card she is not asked for today stays due and is tomorrow's.
  *   Before this a reviews-only day asked for every card due by its end: on a
  *   real 400-card deck that was 17 bites on the first day after the cut-off.

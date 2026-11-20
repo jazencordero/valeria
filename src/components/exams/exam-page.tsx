@@ -139,8 +139,10 @@ export type ExamPageProps = {
   /** The Notes tab: her notes for the course and this exam, newest first. */
   notes?: readonly NoteCardData[];
   progress: {
-    /** Today's grade, 0..5. */
-    grade: number;
+    /** The exam's target percent. */
+    target: number;
+    /** The grade her bundle aims for (`exams.grade_target`), or null: then no grade is named. */
+    targetGrade: number | null;
     /** Where the exam's pace ends on exam day, in percent. */
     planEnd: number;
     /** The day the plan ends by: "Friday" within six days, else "Mon 23 Nov". */
@@ -528,7 +530,8 @@ export function ExamPage({
     <>
       <ProgressHead
         forecast={forecast}
-        grade={progress.grade}
+        target={progress.target}
+        targetGrade={progress.targetGrade}
         planEnd={progress.planEnd}
         dayName={progress.dayName}
         planLine={progress.planLine}

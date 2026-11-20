@@ -9,6 +9,7 @@ import {
   flatPlan,
   keepWords,
   leftLine,
+  optionalLine,
   paceWords,
   planOf,
   planSentence,
@@ -509,6 +510,16 @@ describe("a paced exam's line for today", () => {
     expect(todayLine(closed, plan(62), "Mon 23 Nov", { minutes: 41 })).toBe("About 41 minutes of reviews today (14 bites). The plan gets you to about 62% by Mon 23 Nov");
     // Three bites or fewer: no line, as before.
     expect(todayLine({ ...closed, bites: 3 }, plan(95), "Mon 23 Nov", { minutes: 9 })).toBeNull();
+  });
+
+  it("once the important reviews are done it says so, with what the rest is worth, and never 'on track'", () => {
+    expect(optionalLine(43, 0.62)).toBe("The important ones are done. 43 more are optional (about +0.6%)");
+    expect(optionalLine(1, 0.26)).toBe("The important ones are done. 1 more is optional (about +0.3%)");
+    expect(optionalLine(12, 0.96)).toBe("The important ones are done. 12 more are optional (about +1.0%)");
+    // A gain that rounds to nothing is not printed as +0.0%.
+    expect(optionalLine(5, 0.04)).toBe("The important ones are done. 5 more are optional");
+    expect(optionalLine(0, 0.5)).toBeNull();
+    expect(optionalLine(43, 0.62)).not.toMatch(/track/i);
   });
 
   it("the done screen's line says what is left of today, or nothing", () => {

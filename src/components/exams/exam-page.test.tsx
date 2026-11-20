@@ -44,7 +44,8 @@ const base: Props = {
   verdict: "Starts Tue 24 Nov",
   today: { state: "quiet", line: STARTS },
   progress: {
-    grade: 0,
+    target: 80,
+    targetGrade: 4,
     planEnd: 6,
     dayName: "Fri 4 Dec",
     planLine: "A bite a day gets you to about 47% by Fri 4 Dec.",

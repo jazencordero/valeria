@@ -495,8 +495,9 @@ describe("a paced exam: minutes and one go", () => {
     const start = await examView(big.examId);
     // 60 new cards in 12 bites: more than three, so time and one go. No pace measured yet: the app's estimate.
     expect(start.pace).toMatchObject({ open: true, budget: 60, left: 60, bites: 12, long: true });
-    expect(start.pace!.cards).toBeGreaterThanOrEqual(60);
-    expect(start.pace!.minutes).toBe(Math.max(2, Math.round(start.pace!.cards * 0.6)));
+    // The cards left in today's plan: the 60 new ones (nothing was graded before today, so no reviews).
+    expect(start.pace!.cards).toBe(60);
+    expect(start.pace!.minutes).toBe(36);
     expect(start.bite!.minutes).toBe(3);
 
     // One go: today's remaining plan in order, whole bites up to 40 cards, stored as a bite.
@@ -511,16 +512,24 @@ describe("a paced exam: minutes and one go", () => {
     expect(done.stats.cards).toBe(22);
     const after = await examView(big.examId);
     expect(after.pace).toMatchObject({ budget: 60, left: 38, bites: 8, long: true });
-    // 22 cards are graded now: the minutes are at her own pace, 20 seconds a card.
-    expect(after.pace!.minutes).toBe(Math.round((after.pace!.cards * 20) / 60));
-    expect(done.left).toEqual({ minutes: after.pace!.minutes, bites: 8 });
-    expect(after.bite!.minutes).toBe(Math.round((after.bite!.cards * 20) / 60));
+    // The minutes left went down with the cards: 38 left. Her pace does not move during the day
+    // (today's grades are not in it yet), so they are still the app's estimate.
+    expect(after.pace!.cards).toBe(38);
+    expect(after.pace!.minutes).toBe(23);
+    expect(done.left).toEqual({ minutes: 23, bites: 8 });
+    expect(after.bite!.minutes).toBe(Math.max(2, Math.round(after.bite!.cards * 0.6)));
     expect(done.nextMinutes).toBe(after.bite!.minutes);
 
     // The next one-go session goes on with the cards that were left.
     const next = await beginSession(big.examId, "long");
     expect(next!.cards.filter((c) => big.order.includes(c.id)).map((c) => c.id).filter((id) => big.order.indexOf(id) >= 22).slice(0, 5)).toEqual(big.order.slice(22, 27));
     expect(next!.cards.length).toBeLessThanOrEqual(40);
+
+    // Tomorrow her own pace is known (22 different cards timed, 20 seconds each): the minutes use it.
+    setNow(NOW.getTime() + D);
+    const tomorrow = await examView(big.examId);
+    expect(tomorrow.pace!.minutes).toBe(Math.round((tomorrow.pace!.cards * 20) / 60));
+    expect(tomorrow.bite!.minutes).toBe(Math.round((tomorrow.bite!.cards * 20) / 60));
   }, DB_TIMEOUT);
 
   it("three bites or fewer are not said as time; an exam that is not paced gets its ordinary bite", async () => {
@@ -534,63 +543,75 @@ describe("a paced exam: minutes and one go", () => {
 });
 
 describe("a paced exam's reviews after the cut-off", () => {
-  it("asks for two thirds of the due cards two days out, and the counts say what the day asks", async () => {
-    // The same deck as above: 60 core cards, the exam 7 days out.
-    const [course] = await t.db.insert(courses).values({ userId: her, moodleId: 12, name: "Spread" }).returning();
+  it("asks for the important reviews, then says the rest is optional and still serves it", async () => {
+    // 300 core cards in one concept, the exam 7 days out: one review is worth a third of a point at most.
+    const [course] = await t.db.insert(courses).values({ userId: her, moodleId: 12, name: "Worth" }).returning();
     const [exam] = await t.db
       .insert(exams)
-      .values({ userId: her, courseId: course.id, title: "Spread final", kind: "exam", at: new Date(NOW.getTime() + 7 * D) })
+      .values({ userId: her, courseId: course.id, title: "Worth final", kind: "exam", at: new Date(NOW.getTime() + 7 * D) })
       .returning();
-    const [concept] = await t.db.insert(concepts).values({ userId: her, examId: exam.id, name: "Spread concept", position: 1, weight: 1 }).returning();
-    const order: string[] = [];
-    for (let k = 0; k < 60; k++) {
-      const [card] = await t.db
-        .insert(cards)
-        .values({ userId: her, examId: exam.id, type: "basic", rung: 1, body: { q: `Spread ${k}?`, a: "A", core: true }, origin: "manual", contentHash: `spread-${k}`, createdAt: new Date(NOW.getTime() - D + k * 1000) })
-        .returning();
-      await t.db.insert(cardConcepts).values({ cardId: card.id, conceptId: concept.id });
-      order.push(card.id);
+    const [concept] = await t.db.insert(concepts).values({ userId: her, examId: exam.id, name: "Worth concept", position: 1, weight: 1 }).returning();
+    const made = await t.db
+      .insert(cards)
+      .values(
+        Array.from({ length: 300 }, (_, k) => ({
+          userId: her,
+          examId: exam.id,
+          type: "basic" as const,
+          rung: 1,
+          body: { q: `Worth ${k}?`, a: "A", core: true },
+          origin: "manual" as const,
+          contentHash: `worth-${k}`,
+          createdAt: new Date(NOW.getTime() - D + k * 1000),
+        })),
+      )
+      .returning();
+    await t.db.insert(cardConcepts).values(made.map((c) => ({ cardId: c.id, conceptId: concept.id })));
+    // Today she does the plan: 60 new cards.
+    for (let g = 0; g < 4; g++) {
+      const long = await beginSession(exam.id, "long");
+      if (!long) break;
+      await play(long.cards, long.sessionId);
     }
-    // Today she does the plan: 12 new cards in three bites.
-    for (let b = 0; b < 3; b++) {
-      const bite = await beginSession(exam.id, "bite");
-      await play(bite!.cards, bite!.sessionId);
-    }
+    const met = new Set(Object.keys((await t.db.select().from(cardStates)).reduce((m, r) => ({ ...m, [r.cardId]: 1 }), {})));
+    expect((await examView(exam.id)).pace).toMatchObject({ left: 0 });
 
-    // Two days before the exam all 12 are due. The day asks for 8 of them, the 8 she learned first.
+    // Two days before the exam the cards she met are due. The day asks for the important ones only.
     setNow(NOW.getTime() + 5 * D - 3 * 60 * MIN);
     const view = await examView(exam.id);
     expect(view.daysLeft).toBe(2);
-    expect(view.pace).toMatchObject({ open: false, bites: 1, done: false });
-    expect(view.counts.learning + view.counts.due).toBe(8);
+    expect(view.pace).toMatchObject({ open: false, done: false, enough: false, optional: null });
+    const asked = view.counts.learning + view.counts.due;
+    expect(asked).toBeGreaterThan(8);
+    expect(asked).toBeLessThan(60);
+    expect(view.pace!.bites).toBe(Math.ceil(asked / 8));
     const today = new Date(clock).toISOString().slice(0, 10);
-    const tomorrow = new Date(clock + D).toISOString().slice(0, 10);
-    expect(view.nextReviews).toEqual([
-      { day: today, count: 8 },
-      { day: tomorrow, count: 4 },
-    ]);
-    const bite = await beginSession(exam.id, "bite");
-    expect(bite!.cards.map((c) => c.id)).toEqual(order.slice(0, 8));
-    await play(bite!.cards, bite!.sessionId);
+    expect(view.nextReviews[0]).toEqual({ day: today, count: asked });
 
-    // Her share is done: no bite is left today although four cards are still due. They are tomorrow's.
+    // She does what is asked. The last done screen offers no further bite: what is left is optional.
+    let done = null as Awaited<ReturnType<typeof endSession>> | null;
+    for (let b = 0; b < view.pace!.bites; b++) {
+      const bite = await beginSession(exam.id, "bite");
+      expect(bite!.cards.every((c) => met.has(c.id))).toBe(true);
+      done = await play(bite!.cards, bite!.sessionId);
+    }
+    expect(done).toMatchObject({ anotherBite: false, left: null, leftLong: false, nextMinutes: null });
     const after = await examView(exam.id);
-    expect(after.bite).toBeNull();
-    expect(after.pace).toMatchObject({ bites: 0, done: true });
+    expect(after.pace).toMatchObject({ open: false, bites: 0, cards: 0, minutes: 0, enough: true, done: false });
+    expect(after.pace!.optional!.cards).toBeGreaterThan(0);
+    expect(after.pace!.optional!.cards).toBe(60 - asked - (view.pace!.bites * 8 - asked));
+    expect(after.pace!.optional!.gain).toBeGreaterThan(0);
+    expect(after.pace!.optional!.gain).toBeLessThan(1);
     expect(after.counts.learning + after.counts.due).toBe(0);
     expect(after.nextReviews.find((d) => d.day === today)).toBeUndefined();
-    expect(after.nextReviews.find((d) => d.day === tomorrow)!.count).toBeGreaterThanOrEqual(4);
-    expect(await beginSession(exam.id, "bite")).toBeNull();
-
-    // The day before the exam asks for everything that is due, the four that waited among them.
-    setNow(NOW.getTime() + 6 * D - 3 * 60 * MIN);
-    const eve = await examView(exam.id);
-    expect(eve.daysLeft).toBe(1);
-    const asked = eve.counts.learning + eve.counts.due;
-    expect(asked).toBeGreaterThanOrEqual(4);
-    expect(eve.nextReviews[0]).toEqual({ day: tomorrow, count: asked });
-    const last = await beginSession(exam.id, "bite");
-    for (const id of order.slice(8, 12)) expect(last!.cards.map((c) => c.id)).toContain(id);
+    // Nothing is hidden: the bite is still there, and the optional cards are served to whoever goes on.
+    expect(after.bite).not.toBeNull();
+    const more = await beginSession(exam.id, "bite");
+    expect(more).not.toBeNull();
+    expect(more!.cards.every((c) => met.has(c.id))).toBe(true);
+    const rest = await beginSession(exam.id, "long");
+    expect(rest).toMatchObject({ long: true });
+    expect(rest!.cards.length).toBeGreaterThan(0);
   }, DB_TIMEOUT);
 });
 

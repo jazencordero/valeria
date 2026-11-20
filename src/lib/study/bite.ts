@@ -56,15 +56,20 @@
  *   due, the most overdue (more of them when the bite is otherwise short of
  *   8 cards).
  * Past the cut-off (reviews only) "due" means due by the end of today, so the
- * day's reviews come as full bites. Such a day does not ask for the whole
- * pile. The pile is every graded card that still needs a review before the
- * exam (those she has already reviewed today included); the day asks for its
- * share of it (`reviewShare` in `./exam-aim`: two thirds two days before the
- * exam, everything the day before and on exam day), taken from the cards due
- * by the end of today, earliest learned first (the plan's own order of
- * introduction, `planPlace`), in every bite of the day. The cards beyond
- * today's share stay due and are tomorrow's; when the share is done there is
- * no bite left today.
+ * day's reviews come as full bites. Such a day serves its due cards by what
+ * each review is worth: the forecast points it adds if she recalls the card
+ * now (`reviewWorth` in `./forecast`: the rise of its predicted recall on exam
+ * day, weighted as the forecast weights its concept), highest first, in bites
+ * and one-go sessions alike. The day ASKS only for the important ones: from
+ * the top down until the reviews still waiting are together worth less than
+ * one forecast point (`enoughPoints`; two days before the exam half a point,
+ * so that day carries more and the day before the exam is the lighter one). After that the rest is optional: it
+ * is still served, in the same order, to whoever goes on, and `reviewDay`
+ * says how many there are and what they are worth, so the screens can say
+ * "The important ones are done." and stop asking. Nothing is hidden and no
+ * due date is moved. (This replaces the count share of `reviewShare` in
+ * `./exam-aim`, which nothing calls any more: a share by count asked for the
+ * earliest learned cards whatever they were worth.)
  * The number of bites done today does not end the day: the next bite is there
  * as long as today's budget has new cards left or something is due. Past the
  * cut-off every session kind is reviews only: tiles, concept practice and
@@ -79,7 +84,9 @@
  * while the session stays within 40 cards (`LONG_MAX`); what does not fit is
  * the next session. A card is never in it twice. While new cards are open it
  * ends when today's budget of new cards is used; on a reviews-only day when
- * today's reviews are. Any other deck gets its ordinary bite.
+ * the important reviews are (the bite that finishes them is taken whole), or,
+ * once only optional reviews are left, when those are. Any other deck gets
+ * its ordinary bite.
  *
  * `minutes = max(2, round(n * 0.6))`, the app's estimate (`biteMinutes`);
  * `minutesFor` uses her own measured seconds a card instead once there is one
@@ -89,8 +96,8 @@
  */
 
 import { startOfDay } from "../dates";
-import { dueNow, reviewShare, type Time } from "./exam-aim";
-import { gainOf } from "./forecast";
+import { dueNow, type Time } from "./exam-aim";
+import { gainOf, reviewWorth } from "./forecast";
 import { conceptMastery, focusConcept, rungOf } from "./ladder";
 import { grade, newCard, type MemoryState } from "./memory";
 import { isPaced, newQueue, paceOf, planPlace, reviewsOnly, type Pace } from "./pace";
@@ -285,7 +292,7 @@ function conceptsInFocusOrder(deck: Deck, studyOrder: boolean) {
 }
 
 /** The end of the Helsinki day that holds `t` (00:00 of the next day), epoch ms. */
-function endOfDay(t: Time): number {
+export function endOfDay(t: Time): number {
   // 36 hours on from the day's start is inside the next day whatever the clock change.
   return startOfDay(new Date(startOfDay(new Date(ms(t))).getTime() + 36 * 60 * 60 * 1000)).getTime();
 }
@@ -307,58 +314,78 @@ function dueCards(deck: Deck, pace: Pace): BiteCard[] {
     .map((x) => x.c);
 }
 
+/** The reviews still waiting are "optional" once they are together worth less than this many forecast points. */
+export const ENOUGH_POINTS = 1;
 /**
- * A reviews-only day's share of the pile (see the header): the cards the day
- * still asks for, earliest learned first, and how many of today's due cards
- * wait for a later day.
- *
- * The pile is every graded card that still needs a review before the exam
- * (it would be due by the exam: its recall would have fallen to the wanted
- * recall by then), counted as it stood this morning: the cards she has
- * already reviewed today are part of it, so the share stays the same all day.
- * Today's share of it (`reviewShare`) is served from the cards due by the end
- * of today that she has not reviewed today (a card she missed today, due
- * again by its own date, is one of them).
+ * Two or more days before the exam the bar is half of that: the earlier day
+ * asks for a little more, so that the day before the exam is the lighter one.
  */
-function todaysReviews(deck: Deck, pace: Pace, due: readonly BiteCard[]): { today: BiteCard[]; later: number } {
+export const ENOUGH_POINTS_EARLY = 0.5;
+
+/** Where "enough" is with `daysToExam` calendar days to the exam. */
+export function enoughPoints(daysToExam: number): number {
+  return daysToExam >= 2 ? ENOUGH_POINTS_EARLY : ENOUGH_POINTS;
+}
+
+export type ReviewDay = {
+  /** Reviews today still asks for: the important ones. */
+  today: number;
+  /** Due cards beyond those: optional today. */
+  later: number;
+  /** What the optional ones are worth together, in forecast points. */
+  laterGain: number;
+};
+
+/**
+ * A reviews-only day's due cards in the order they are served (see the
+ * header): what each review is worth first (`reviewWorth`: the forecast
+ * points it adds), highest first; ties in the plan's own order. `important`
+ * is how many of them the day asks for: the shortest run from the top after
+ * which the cards still waiting are together worth less than one forecast
+ * point (`enoughPoints`: half a point two days before the exam). A card she has reviewed today is not served again
+ * today (one she missed comes back inside its session).
+ *
+ * The worth is taken as of the start of the day, not of this minute, so it
+ * is the same number all day: the important set only ever loses the cards
+ * she reviews, and what the day still asks for never goes up.
+ */
+function todaysReviews(
+  deck: Deck,
+  pace: Pace,
+  due: readonly BiteCard[],
+): { order: BiteCard[]; important: number; restGain: number } {
+  const enough = enoughPoints(pace.daysToExam);
   const start = startOfDay(new Date(ms(deck.now))).getTime();
-  const now = ms(deck.now);
-  const exam = ms(deck.examAt);
   const reviewedToday = (id: string) => (deck.states[id]?.lastReviewAt ?? -1) >= start;
-  const graded = deck.cards.filter((c) => c.active && isGraded(deck, c.id));
-  const done = graded.filter((c) => reviewedToday(c.id)).length;
-  // Due by the exam: asked a moment before it (from the exam on nothing is due).
-  const horizon = Math.max(now, exam - 1000);
-  const waiting = graded.filter(
-    (c) => !reviewedToday(c.id) && dueNow(stateOf(deck, c.id), deck.examAt, horizon) !== null,
-  ).length;
-  const share = reviewShare(waiting + done, Math.max(1, pace.daysToExam));
+  const open = due.filter((c) => !reviewedToday(c.id));
+  const worth = reviewWorth({ ...deck, now: start }, open.map((c) => c.id));
   const place = planPlace(deck);
-  const open = due
-    .filter((c) => !reviewedToday(c.id) || stateOf(deck, c.id).dueAt <= now)
-    .sort((a, b) => place.get(a.id)! - place.get(b.id)!);
-  const today = open.slice(0, Math.max(0, share - done));
-  return { today, later: open.length - today.length };
+  const order = [...open].sort((a, b) => worth.get(b.id)! - worth.get(a.id)! || place.get(a.id)! - place.get(b.id)!);
+  let rest = order.reduce((sum, c) => sum + worth.get(c.id)!, 0);
+  let important = 0;
+  while (important < order.length && rest >= enough) rest -= worth.get(order[important++].id)!;
+  return { order, important, restGain: Math.max(0, rest) };
 }
 
 /**
  * Past a paced deck's cut-off, before the exam: how many reviews today still
- * asks for and how many of the due cards wait for a later day. Null for any
- * other deck or day (there, what is due is what is asked).
+ * asks for (the important ones), and how many due cards are optional and
+ * what those are worth together. Null for any other deck or day (there, what
+ * is due is what is asked).
  */
-export function reviewDay(deck: Deck): { today: number; later: number } | null {
+export function reviewDay(deck: Deck): ReviewDay | null {
   if (!isPaced(deck)) return null;
   const pace = paceOf(deck)!;
   if (pace.open || ms(deck.now) >= ms(deck.examAt)) return null;
-  const { today, later } = todaysReviews(deck, pace, dueCards(deck, pace));
-  return { today: today.length, later };
+  const { order, important, restGain } = todaysReviews(deck, pace, dueCards(deck, pace));
+  return { today: important, later: order.length - important, laterGain: order.length > important ? restGain : 0 };
 }
 
 /** A bite for a paced deck: due reviews and the plan's next new cards (see the header). */
 function pacedSections(deck: Deck): Section[] | null {
   const pace = paceOf(deck)!;
   const all = dueCards(deck, pace);
-  const due = pace.open ? all : todaysReviews(deck, pace, all).today;
+  const due = pace.open ? all : todaysReviews(deck, pace, all).order;
   const reviews = due.filter((c) => !c.boss);
   const fresh = pace.open ? newQueue(deck).slice(0, Math.min(pace.left, LEARN_MAX)) : [];
   const warm = reviews.slice(0, WARM_MAX);
@@ -473,8 +500,11 @@ export function longSections(input: BiteInput, max = LONG_MAX): Section[] | null
   const first = paceOf(input)!;
   // While new cards are open the plan asks for the bites that use up today's budget, no more.
   let bitesLeft = first.open ? Math.max(1, first.bites) : Infinity;
+  // On a reviews-only day it holds the important reviews; once only optional ones are left, those.
+  const asksReviews = !first.open && (reviewDay(input)?.today ?? 0) > 0;
   let total = 0;
   while (bitesLeft-- > 0) {
+    if (asksReviews && total > 0 && (reviewDay({ ...input, states, newToday })?.today ?? 0) === 0) break;
     const built = pacedSections({ ...input, states, newToday });
     const sections = kept((built ?? []).map(([kind, list]): Section => [kind, list.filter((id) => !picked.has(id))]));
     if (!sections) break;

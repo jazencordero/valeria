@@ -21,7 +21,7 @@
 import { gradeStep } from "../grades/scale";
 import type { Deck } from "./bite";
 import { conceptMastery, type WeightedConcept } from "./ladder";
-import { grade, newCard, type MemoryState } from "./memory";
+import { grade, newCard, recallAt, type MemoryState } from "./memory";
 
 /** Best a bite a day can reach by exam day, in percent. */
 export const PLAN_CAP = 94;
@@ -81,6 +81,22 @@ export function deckMasteries(
 ): Record<string, number> {
   const examAt = new Date(time(deck.examAt));
   const blank = newCard(examAt);
+  const counted = countedCards(deck, states);
+  const out: Record<string, number> = {};
+  for (const concept of deck.concepts) {
+    out[concept.id] = conceptMastery(
+      (counted.get(concept.id) ?? []).map((c) => ({ state: states[c.id] ?? blank, active: true })),
+      examAt,
+    );
+  }
+  return out;
+}
+
+/** Per concept, the cards its mastery is the mean of (the readiness model above). */
+function countedCards(
+  deck: Deck,
+  states: Readonly<Record<string, MemoryState>>,
+): Map<string, Deck["cards"][number][]> {
   const marked = deck.coreMarked ?? deck.cards.some((c) => c.core === true);
   const seen = (id: string) => (states[id]?.lastReviewAt ?? null) !== null;
   const own = new Map<string, Deck["cards"][number][]>();
@@ -90,7 +106,7 @@ export function deckMasteries(
     if (list) list.push(c);
     else own.set(c.conceptId, [c]);
   }
-  const out: Record<string, number> = {};
+  const out = new Map<string, Deck["cards"][number][]>();
   for (const concept of deck.concepts) {
     let cards = own.get(concept.id) ?? [];
     const core = marked ? cards.filter((c) => c.core === true) : [];
@@ -98,10 +114,36 @@ export function deckMasteries(
       const covered = core.every((c) => seen(c.id));
       cards = covered ? cards.filter((c) => c.core === true || seen(c.id)) : core;
     }
-    out[concept.id] = conceptMastery(
-      cards.map((c) => ({ state: states[c.id] ?? blank, active: true })),
-      examAt,
-    );
+    out.set(concept.id, cards);
+  }
+  return out;
+}
+
+/**
+ * What reviewing each of the cards `ids` now is worth, in forecast points: the
+ * forecast if that one card is recalled now (graded Good at `deck.now`), minus
+ * the forecast now. It is `gainOf(deck, [id])` for each card, worked out in
+ * one pass: the rise of the card's predicted recall on exam day, over the
+ * number of cards its concept's mastery is the mean of, times the concept's
+ * share of the weights. A card the model does not count (see the readiness
+ * model) is worth 0. For cards she has graded the worths add up: reviewing
+ * several is worth their sum.
+ */
+export function reviewWorth(deck: Deck, ids: readonly string[]): Map<string, number> {
+  const examAt = new Date(time(deck.examAt));
+  const now = new Date(time(deck.now));
+  const counted = countedCards(deck, deck.states);
+  const total = deck.concepts.reduce((sum, c) => sum + c.weight, 0);
+  const share = new Map<string, number>();
+  for (const concept of deck.concepts) {
+    const cards = counted.get(concept.id) ?? [];
+    for (const c of cards) share.set(c.id, total > 0 ? (100 * concept.weight) / total / cards.length : 0);
+  }
+  const out = new Map<string, number>();
+  for (const id of ids) {
+    const per = share.get(id) ?? 0;
+    const state = deck.states[id] ?? newCard(now);
+    out.set(id, per === 0 ? 0 : per * (recallAt(grade(state, 3, now), examAt) - recallAt(state, examAt)));
   }
   return out;
 }

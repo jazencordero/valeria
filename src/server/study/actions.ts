@@ -72,20 +72,28 @@
  *   `done`, which is "no bite is left and the study start has passed" (the
  *   number of bites done never ends the day for it). `bitesPerDay` is left as
  *   it is for other exams and means nothing here.
- * - Reviews after the cut-off. A paced exam's reviews-only days do not ask
- *   for every due card at once (`reviewShare` in `src/lib/study/exam-aim.ts`,
- *   applied by the bite builder). On such a day the counts follow what the
- *   day asks, not the stored due dates: `counts.learning + counts.due` is the
- *   reviews today still asks for, and in `nextReviews` today holds that number
- *   and the due cards that wait are added to tomorrow (`reviewDay` in
- *   `bite.ts`). No stored due date is changed for it.
+ * - Reviews after the cut-off. A paced exam's reviews-only days serve the due
+ *   cards by what each review is worth and ask only for the important ones
+ *   (`reviewDay` in `bite.ts`: until the rest is together worth less than one
+ *   forecast point). On such a day the counts follow what the day asks, not
+ *   the stored due dates: `counts.learning + counts.due` is the reviews today
+ *   still asks for, and in `nextReviews` today holds that number and the
+ *   optional ones are added to tomorrow. No stored due date is changed for
+ *   it. `pace.bites`, `cards` and `minutes` are for the important reviews;
+ *   when they are done and due cards remain, `pace.enough` is true and
+ *   `pace.optional` says how many are left and what they are worth: the exam
+ *   page then says so and still serves them (a bite, or one go when they are
+ *   more than three bites), Home reads as done for today, and the done screen
+ *   offers no further bite.
  * - Today as time, and one go. For a paced exam `ExamView.pace` also carries
  *   the cards and the minutes of what today's plan still asks (`todayPlan`,
  *   `minutesFor`), and `long` when that is more than three bites: the screens
  *   then say the minutes and offer "Do them in one go". Minutes are at her
  *   own pace once it is known: the median time of her newest 200 timed grades
- *   on this exam's cards, from 20 different cards on (`secondsPerCard` in
- *   `pace.ts`); before that the app's estimate. Today's bite says its minutes
+ *   on this exam's cards from before today, from 20 different cards on
+ *   (`secondsPerCard` in `pace.ts`); before that the app's estimate. The
+ *   cards are `cardsLeftToday` (plan.ts) and the pace does not move during
+ *   the day, so the minutes left never go up as she studies. Today's bite says its minutes
  *   the same way.
  *   `beginSession(exam, "long")` starts the one-go session (`buildLong`:
  *   today's remaining plan, whole bites up to 40 cards). There is no session
@@ -142,6 +150,7 @@ import { cards, cardStates, CARD_TYPES, exams, reviews, SESSION_MODES, studySess
 import { users } from "@/server/db/schema/users";
 import { byDay, dayMonth, daysBetween, startOfDay, startOfWeek } from "@/lib/dates";
 import {
+  BITE_MIN,
   BITES_PER_DAY,
   buildBite,
   buildLong,
@@ -241,6 +250,10 @@ export type PaceView = {
   minutes: number;
   /** More than three bites are left today: the plan is said as time and offered in one go. */
   long: boolean;
+  /** A reviews-only day whose important reviews are done while due cards remain: those are optional. */
+  enough: boolean;
+  /** The optional reviews then: how many, and the forecast points they are worth together. */
+  optional: { cards: number; gain: number } | null;
 };
 
 export type ExamView = {
@@ -518,13 +531,25 @@ function studyDeckOf(exam: Exam, deck: Deck, biteDeck: BiteDeck, now: Date): Bit
   return { ...biteDeck, cards: biteDeck.cards.filter((c) => fromNote.has(c.id) || graded(c.id)) };
 }
 
-/** Her newest timed grades on this exam's cards, for her own pace. */
-async function paceLog(userId: string, examId: string, database: Db): Promise<{ cardId: string; ms: number | null }[]> {
+/**
+ * Her newest timed grades on this exam's cards from before today, for her own pace. Today's
+ * grades are left out so the pace is the same all day: the minutes left for today then only
+ * go down as she studies (a slow card today cannot push them up).
+ */
+async function paceLog(userId: string, examId: string, now: Date, database: Db): Promise<{ cardId: string; ms: number | null }[]> {
   return database
     .select({ cardId: reviews.cardId, ms: reviews.ms })
     .from(reviews)
     .innerJoin(cards, eq(cards.id, reviews.cardId))
-    .where(and(eq(reviews.userId, userId), eq(cards.userId, userId), eq(cards.examId, examId), gt(reviews.ms, 0)))
+    .where(
+      and(
+        eq(reviews.userId, userId),
+        eq(cards.userId, userId),
+        eq(cards.examId, examId),
+        gt(reviews.ms, 0),
+        lt(reviews.at, startOfDay(now)),
+      ),
+    )
     .orderBy(desc(reviews.at), desc(reviews.id))
     .limit(PACE_LOG);
 }
@@ -544,7 +569,7 @@ async function examState(userId: string, examId: string, now: Date, database: Db
     const rung = rungOf(m);
     return { id: c.id, name: c.name, lecture: c.lecture, icon: c.icon, weight: c.weight, mastery: m, rung, rungName: rungName(rung) };
   });
-  const perCard = secondsPerCard(await paceLog(userId, examId, database));
+  const perCard = secondsPerCard(await paceLog(userId, examId, now, database));
   return { exam, deck, biteDeck, studyDeck: studyDeckOf(exam, deck, biteDeck, now), concepts, forecast: deckForecast(biteDeck), perCard };
 }
 
@@ -676,6 +701,8 @@ async function buildExamView(userId: string, examId: string, now: Date, database
   const bite = daysLeft < 0 ? null : todayBite(state, done);
   const pace = paceOf(state.studyDeck);
   const ask = pace && bite ? todayAsk(state, now) : { bites: 0, cards: 0, minutes: 0 };
+  const reviewsNow = pace && bite ? reviewDay(state.studyDeck) : null;
+  const enough = reviewsNow !== null && reviewsNow.today === 0 && reviewsNow.later > 0;
   return {
     exam: { id: exam.id, title: exam.title, kind: exam.kind, at: exam.at, targetPct: exam.targetPct, courseId: exam.courseId },
     daysLeft,
@@ -710,7 +737,10 @@ async function buildExamView(userId: string, examId: string, now: Date, database
             done: bite === null && daysLeft >= 0 && newCardsAllowed(exam, now) && state.biteDeck.cards.length > 0,
             cards: ask.cards,
             minutes: ask.minutes,
-            long: saidAsTime(ask.bites),
+            // The optional rest is offered in one go by the same rule: more than three bites of it.
+            long: saidAsTime(enough ? Math.ceil(reviewsNow.later / BITE_MIN) : ask.bites),
+            enough,
+            optional: enough ? { cards: reviewsNow.later, gain: reviewsNow.laterGain } : null,
           },
         }
       : {}),
@@ -928,7 +958,10 @@ async function end(userId: string, sessionId: string, now: Date, database: Db): 
   ]);
 
   const plan = planFor(state, now, done);
-  const next = todayBite(state, done);
+  const offered = todayBite(state, done);
+  // On a reviews-only day whose important reviews are done, what is left is optional: no further bite is offered.
+  const reviewsNow = offered ? reviewDay(state.studyDeck) : null;
+  const next = reviewsNow && reviewsNow.today === 0 ? null : offered;
   const ask = next && isPaced(state.studyDeck) ? todayAsk(state, now) : null;
   return {
     sessionId,

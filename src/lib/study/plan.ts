@@ -21,9 +21,10 @@
  * - A paced exam (core marks, `./pace`): the core-first plan. What it asks of
  *   a day (`askedToday`): while new cards are open, the bites that use up the
  *   day's budget of new cards (each bite also brings up to four reviews);
- *   past the cut-off, the bites that clear that day's share of the due
- *   reviews (two thirds two days before the exam, all of them the day
- *   before: `reviewShare` in `./exam-aim`).
+ *   past the cut-off, the bites that clear that day's important reviews
+ *   (the due cards by what each is worth, until the rest is together worth
+ *   less than one forecast point: `reviewDay` in `./bite`). The projection
+ *   plays exactly that, so it is what she gets if she stops at "enough".
  * - Any other deck: the fewest bites a day that reach her target, from one up
  *   to what the app serves in a day (`BITES_PER_DAY`: two for an exam, one
  *   for a quiz). When even that falls short, that most is the pace and the
@@ -44,10 +45,11 @@
  * asks for more than three bites today (`TIME_FROM_BITES`), the line says the
  * minutes instead, "About 25 minutes today keeps you on track for Mon 23 Nov
  * (7 bites)", and the screens offer the rest in one go (`buildLong` in
- * `./bite`). The minutes are for every card of today's remaining plan
- * (`todayPlan`: the day's bites played forward like the projection, so a card
- * that comes back the same day is counted again), at her own pace when it is
- * known (`minutesFor`). Three bites or fewer keep the bite wording. One-go
+ * `./bite`). The minutes are the cards left in today's plan
+ * (`cardsLeftToday`) at her own pace when it is known (`minutesFor`): a
+ * number fixed by how the day started, so it only goes down as she answers
+ * cards. The bite count in brackets may be cut differently as she goes; the
+ * minutes never rise. Three bites or fewer keep the bite wording. One-go
  * sessions count toward the pace card by card, like bites: `simulate` with
  * `"long"` plays the plan that way and lands where the bites do.
  *
@@ -61,8 +63,19 @@
  * - Cost, measured on a 400-card deck a week out: about 60 bites, well under
  *   0.1 s once warm. `dueNow` (one recall prediction a card) keeps it there.
  */
-import { daysBetween } from "../dates";
-import { BITES_PER_DAY, biteSections, longSections, type BiteInput, type Deck, type Section } from "./bite";
+import { daysBetween, startOfDay } from "../dates";
+import {
+  BITES_PER_DAY,
+  biteSections,
+  endOfDay,
+  longSections,
+  reviewDay,
+  WARM_MAX,
+  type BiteInput,
+  type Deck,
+  type Section,
+} from "./bite";
+import { dueNow } from "./exam-aim";
 import { deckForecast, VERDICTS, type Verdict } from "./forecast";
 import { grade, newCard, type MemoryState } from "./memory";
 import { impossibleLine, isPaced, NEW_PER_BITE, onTrackLine, paceOf, type Pace } from "./pace";
@@ -136,24 +149,61 @@ function playBite(deck: Deck, states: States, newToday: string[], t: number): nu
 }
 
 /**
- * What a paced exam's plan still asks of today, played forward: its bites and
- * the cards in them (0 and 0 for a deck that is not paced, or when today's
- * plan is done).
+ * The cards left in today's plan of a paced exam: the number the minutes are
+ * made from. It is fixed by how the day started and only goes down as she
+ * answers cards, whatever the clock says and however the bites are cut:
+ * - While new cards are open: the new cards today's budget still holds
+ *   (`pace.left`), plus the reviews still allowed for. The day's allowance of
+ *   reviews is four a bite (`WARM_MAX`) for the bites the day's whole budget
+ *   makes, and never more than the cards she had graded before today that are
+ *   due by tonight; each such card she reviews today uses one. A card she
+ *   first met today coming back the same day is not counted: it is practice
+ *   on top, not part of the plan's cards. Once the budget is used the plan
+ *   asks for nothing more: 0.
+ * - On a reviews-only day: the important reviews still waiting (`reviewDay`);
+ *   the optional ones are not asked for and not counted.
+ */
+export function cardsLeftToday(deck: Deck): number {
+  const pace = paceOf(deck);
+  if (!pace) return 0;
+  if (!pace.open) return reviewDay(deck)?.today ?? 0;
+  if (pace.left === 0) return 0;
+  const start = startOfDay(new Date(ms(deck.now))).getTime();
+  const by = Math.min(endOfDay(deck.now), ms(deck.examAt));
+  const metToday = new Set(deck.newToday ?? []);
+  let reviewed = 0;
+  let waiting = 0;
+  for (const c of deck.cards) {
+    const state = deck.states[c.id];
+    if (!c.active || !state || state.lastReviewAt === null || metToday.has(c.id)) continue;
+    if (state.lastReviewAt >= start) reviewed++;
+    else if (dueNow(state, deck.examAt, by) !== null) waiting++;
+  }
+  const allowance = Math.min(WARM_MAX * Math.ceil(pace.budget / NEW_PER_BITE), waiting + reviewed);
+  return pace.left + Math.max(0, allowance - reviewed);
+}
+
+/**
+ * What a paced exam's plan still asks of today: its bites, and the cards
+ * left in it (`cardsLeftToday`; 0 and 0 for a deck that is not paced, or when
+ * today's plan is done). The bites of a reviews-only day are counted by
+ * playing them forward, like the projection.
  */
 export function todayPlan(deck: Deck): { bites: number; cards: number } {
   const pace = paceOf(deck);
   if (!pace) return { bites: 0, cards: 0 };
-  const most = pace.open ? pace.bites : MAX_BITES_A_DAY;
+  const cards = cardsLeftToday(deck);
+  if (pace.open) return { bites: pace.bites, cards };
   const states: States = { ...deck.states };
   const newToday = [...(deck.newToday ?? [])];
   let t = ms(deck.now);
   let bites = 0;
-  let cards = 0;
-  while (bites < most) {
+  while (bites < MAX_BITES_A_DAY) {
+    // A reviews-only day asks for the important reviews, not for every due card.
+    if ((reviewDay({ ...deck, states, now: t, newToday })?.today ?? 0) === 0) break;
     const next = play(deck, states, newToday, t);
     if (!next) break;
     t = next.t;
-    cards += next.cards;
     bites++;
   }
   return { bites, cards };
@@ -162,22 +212,13 @@ export function todayPlan(deck: Deck): { bites: number; cards: number } {
 /**
  * The bites a paced exam's plan still asks of today (0 for a deck that is not
  * paced): while new cards are open, the bites that use up today's budget;
- * past the cut-off, the bites that clear today's share of what is due.
+ * past the cut-off, the bites that clear today's important reviews.
  */
 export function askedToday(deck: Deck): number {
   const pace = paceOf(deck);
   if (!pace) return 0;
   if (pace.open) return pace.bites;
-  const states: States = { ...deck.states };
-  let t = ms(deck.now);
-  let bites = 0;
-  while (bites < MAX_BITES_A_DAY) {
-    const next = playBite(deck, states, [], t);
-    if (next === null) break;
-    t = next;
-    bites++;
-  }
-  return bites;
+  return todayPlan(deck).bites;
 }
 
 /**
@@ -364,4 +405,17 @@ export function todayLine(
 /** The done screen's line after a session when today's plan is not finished: "About 12 minutes of today's plan left". */
 export function leftLine(minutes: number): string | null {
   return minutes > 0 ? `About ${minutesWord(minutes)} of today\u2019s plan left` : null;
+}
+
+/**
+ * A reviews-only day once the important reviews are done, without its full
+ * stop: "The important ones are done. 43 more are optional (about +0.6%)".
+ * The gain is what the optional reviews are worth together, in forecast
+ * points; it is left out when it rounds to nothing. It says nothing about
+ * being on track: that is the status's sentence.
+ */
+export function optionalLine(cards: number, gain: number): string | null {
+  if (cards <= 0) return null;
+  const worth = gain >= 0.05 ? ` (about +${gain.toFixed(1)}%)` : "";
+  return `The important ones are done. ${cards} more ${cards === 1 ? "is" : "are"} optional${worth}`;
 }

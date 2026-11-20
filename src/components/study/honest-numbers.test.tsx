@@ -114,6 +114,29 @@ describe("the plan sentence and the chart", () => {
     expect(document.body.textContent).not.toMatch(/A bite a day/i);
   });
 
+  it("the Progress head names the grade only as her bundle does, and none when it gives none", () => {
+    const head = { forecast: 64, planEnd: 88, dayName: "Monday", planLine: "A bite a day gets you to about 88% by Monday.", chart, shown: false };
+    const { rerender } = render(<ProgressHead {...head} target={85} targetGrade={5} />);
+    // 64% is a 2 and 85% a 4 on the generic scale; this exam's own target is a 5 at 85%.
+    expect(document.body.textContent).toContain("A 5 needs 85%. A bite a day gets you to about 88% by Monday.");
+    expect(document.body.textContent).not.toMatch(/That is a/);
+    rerender(<ProgressHead {...head} target={85} targetGrade={null} />);
+    expect(document.body.textContent).toContain("64% right if it were today");
+    expect(document.body.textContent).toContain("A bite a day gets you to about 88% by Monday.");
+    expect(document.body.textContent).not.toMatch(/That is a|needs|\bA [0-5]\b/);
+    // The old prop is ignored.
+    rerender(<ProgressHead {...head} grade={2} />);
+    expect(document.body.textContent).not.toMatch(/That is a|a 2 today/i);
+  });
+
+  it("the bite card says the optional line and still offers the rest", () => {
+    const onLong = vi.fn();
+    render(<BiteCard state="bite" more minutes={3} cards={9} gain={0.2} focus="Sample concept" pace="The important ones are done. 43 more are optional (about +0.6%)." onLong={onLong} />);
+    expect(screen.getByTestId("bite-pace").textContent).toBe("The important ones are done. 43 more are optional (about +0.6%).");
+    expect(screen.getByRole("button", { name: "Start bite" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Do them in one go" })).toBeDefined();
+  });
+
   it("the chart draws the plan it is given and names its pace", () => {
     const plan = [11, 30, 48, 62];
     const g = forecastChartLayout({ ...chart, plan, planName: "two bites a day" }, 360);

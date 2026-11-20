@@ -36,7 +36,10 @@
  *   ("3 bites today keeps you on track for Monday"; when the plan ends below
  *   her target, "3 bites today. The plan gets you to about 62% by Monday":
  *   `todayLine`, from the same plan as the verdict), and it is done when
- *   `pace.done` says so (today's new cards are used and nothing is due).
+ *   `pace.done` says so (today's new cards are used and nothing is due), or,
+ *   on a reviews-only day, when `pace.enough` does: the important reviews are
+ *   done and what is left is optional (the exam page says so and still
+ *   serves it).
  * - `biteFirst`: nothing is open, so the bite is the DO FIRST card.
  *
  * M4-10 adds the greeting and the week:
@@ -273,7 +276,8 @@ function homeExam(card: ExamsTabExam, v: ExamView): HomeExam {
     ...card,
     verdict: { text: v.verdict.text, ok: v.verdict.ok },
     concepts: card.concepts.map((c) => ({ ...c, icon: icons.get(c.id) ?? null })),
-    biteMinutes: v.bite?.minutes ?? null,
+    // No bite is asked for once a reviews-only day's important reviews are done: "Open the exam".
+    biteMinutes: v.pace?.enough ? null : (v.bite?.minutes ?? null),
     biteHref: biteHref(card.id),
   };
 }
@@ -281,7 +285,8 @@ function homeExam(card: ExamsTabExam, v: ExamView): HomeExam {
 function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>, now: Date): HomeBite | null {
   for (const card of list) {
     const v = views.get(card.id);
-    if (!v?.bite) continue;
+    // A reviews-only day whose important reviews are done: Home stops asking (the row below reads as done).
+    if (!v?.bite || v.pace?.enough) continue;
     const pace = v.pace
       ? todayLine(v.pace, v.plan, byDay(v.exam.at, now), { more: v.bitesDoneToday > 0, minutes: v.pace.minutes })
       : null;
@@ -300,7 +305,7 @@ function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>, now: Date)
   }
   for (const card of list) {
     const v = views.get(card.id);
-    if (!v || !(v.pace ? v.pace.done : v.bitesDoneToday >= v.bitesPerDay)) continue;
+    if (!v || !(v.pace ? v.pace.done || v.pace.enough : v.bitesDoneToday >= v.bitesPerDay)) continue;
     return { state: "done", examId: card.id, forecast: v.forecastShown, day: biteDay(v.exam.at, v.daysLeft), href: card.href };
   }
   return null;
