@@ -589,6 +589,7 @@ export function SessionPlayer(props: SessionPlayerProps) {
         data={view.data}
         props={props}
         returnTo={returnTo}
+        stopped={s.stopped || s.queue.length > 0}
         onMore={() => router.push(`/study/new?exam=${examId}&kind=${view.data.long && view.data.leftLong ? "long" : "bite"}`)}
         onBack={() => router.push(backHref(view.data.forecastBeforeShown))}
       />
@@ -851,12 +852,15 @@ function DoneLayer({
   data,
   props,
   returnTo,
+  stopped,
   onMore,
   onBack,
 }: {
   data: DoneScreen;
   props: SessionPlayerProps;
   returnTo: string | null;
+  /** Ended before its last card: stopped (live), or cards still queued when an ended session is reloaded. */
+  stopped: boolean;
   onMore: () => void;
   onBack: () => void;
 }) {
@@ -923,6 +927,8 @@ function DoneLayer({
           goalNew={goalNew}
           nextBiteMinutes={data.anotherBite && !returnTo ? (data.nextMinutes ?? biteMinutes(props.cards.length)) : null}
           long={data.long}
+          // Stopped before its last card (live, or cards still queued after a reload): never "Perfect session.".
+          stopped={data.long && stopped}
           moreInOneGo={data.long && data.leftLong}
           todayLeft={data.left && (data.long || data.leftLong) ? leftLine(data.left.minutes) : null}
           backLabel={returnTo ? returnLabel(returnTo) : BACK_LABEL}

@@ -67,6 +67,8 @@ export type SessionDoneProps = {
   nextBiteMinutes: number | null;
   /** A one-go session: the title says "Session done." instead of "Bite done.". */
   long?: boolean;
+  /** A one-go session she stopped before its last card: the title says "Session stopped.", never "Perfect". */
+  stopped?: boolean;
   /** The rest of today's plan is offered in one go: the more button reads "Do them in one go". */
   moreInOneGo?: boolean;
   /** What is left of today's plan, one line: "About 12 minutes of today's plan left". */
@@ -148,6 +150,7 @@ export function SessionDone({
   goalNew,
   nextBiteMinutes,
   long = false,
+  stopped = false,
   moreInOneGo = false,
   todayLeft = null,
   backLabel,
@@ -162,7 +165,9 @@ export function SessionDone({
   const more = isBite && nextBiteMinutes !== null;
 
   const title = long
-    ? result.perfect
+    ? stopped
+      ? "Session stopped."
+      : result.perfect
       ? "Perfect session."
       : "Session done."
     : result.perfect

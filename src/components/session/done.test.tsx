@@ -60,6 +60,10 @@ describe("SessionDone forecast", () => {
     expect(screen.getByRole("button", { name: "Do them in one go" })).toBeDefined();
     rerender(<SessionDone {...props} long result={{ ...props.result, perfect: true }} />);
     expect(document.body.textContent).toContain("Perfect session.");
+    // Stopped part-way, even after only right answers, it says so.
+    rerender(<SessionDone {...props} long stopped result={{ ...props.result, perfect: true }} />);
+    expect(document.body.textContent).toContain("Session stopped.");
+    expect(document.body.textContent).not.toContain("Perfect session.");
     // Today's plan done: no line about what is left, whatever was passed.
     rerender(<SessionDone {...props} long nextBiteMinutes={null} todayLeft="About 12 minutes of today’s plan left" />);
     expect(screen.queryByTestId("today-left")).toBeNull();

@@ -535,7 +535,10 @@ describe("SessionPlayer: one go", () => {
   const left = { long: true, nextMinutes: 3, left: { minutes: 12, bites: 5 }, leftLong: true };
 
   it("Stop ends the session with what she did and the done screen says what is left", async () => {
-    const endSession = vi.fn<SessionPlayerProps["endSession"]>().mockResolvedValue(doneScreen(left));
+    // Every answer so far right (perfect stats): stopped part-way it is still not "Perfect session.".
+    const endSession = vi
+      .fn<SessionPlayerProps["endSession"]>()
+      .mockResolvedValue(doneScreen({ ...left, stats: { ...doneScreen().stats, perfect: true } }));
     const { user, saveProgress } = setup({ long: true, endSession });
     await answer(user, "2");
     await user.click(screen.getByRole("button", { name: "Stop session" }));
@@ -547,7 +550,9 @@ describe("SessionPlayer: one go", () => {
     expect(endSession).toHaveBeenCalledWith(SID);
     expect(push).not.toHaveBeenCalled();
     expect(screen.getByTestId("today-left").textContent).toBe("About 12 minutes of today\u2019s plan left");
-    expect(screen.getByText("Session done.")).toBeTruthy();
+    // Stopped part-way: it says so, never "Perfect session." after a few right answers.
+    expect(screen.getByText("Session stopped.")).toBeTruthy();
+    expect(screen.queryByText("Perfect session.")).toBeNull();
     // The rest is offered in one go again.
     await user.click(screen.getByRole("button", { name: "Do them in one go" }));
     expect(push).toHaveBeenLastCalledWith("/study/new?exam=exam-1&kind=long");
