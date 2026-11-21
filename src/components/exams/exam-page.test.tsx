@@ -10,6 +10,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/server/db/client", () => ({ db: {} }));
 
 const { ExamPage } = await import("./exam-page");
+const { daysBetween } = await import("@/lib/dates");
 type Props = Parameters<typeof ExamPage>[0];
 
 beforeEach(() => {
@@ -87,5 +88,61 @@ describe("the Progress tab", () => {
     expect(text).toContain("0% now");
     expect(text).toContain("12% now");
     expect(text).not.toContain("on exam day");
+  });
+});
+
+describe("the header of an exam that is over", () => {
+  it("from the day after the exam says only \"This exam is over.\", with no \"N% right today\"", () => {
+    // A made-up exam at 09:00 Helsinki on Fri 4 Dec 2026; the clock is pinned to 08:00 the next day.
+    const examAt = new Date("2026-12-04T07:00:00Z");
+    const now = new Date("2026-12-05T06:00:00Z");
+    // As the page decides it: the Helsinki day after the exam, days left are negative.
+    const over = daysBetween(now, examAt) < 0;
+    expect(over).toBe(true);
+    const OVER = "This exam is over.";
+    render(
+      <ExamPage
+        {...base}
+        forecast={64}
+        verdict={OVER}
+        over={over}
+        today={{ state: "quiet", line: OVER }}
+        progress={{ ...base.progress, note: OVER }}
+      />,
+    );
+    const header = screen.getByTestId("exam-header-title").parentElement!;
+    expect(header.textContent).toContain(OVER);
+    expect(header.textContent).not.toContain("right today");
+    expect(header.textContent).not.toContain("64%");
+  });
+
+  it("from the day after the exam, the Progress tab says only \"This exam is over.\", with no percent heading", () => {
+    // Same pinned setup: a made-up exam at 09:00 Helsinki on Fri 4 Dec 2026, read at 08:00 the next day.
+    const over = daysBetween(new Date("2026-12-05T06:00:00Z"), new Date("2026-12-04T07:00:00Z")) < 0;
+    expect(over).toBe(true);
+    const OVER = "This exam is over.";
+    render(
+      <ExamPage
+        {...base}
+        forecast={64}
+        verdict={OVER}
+        over={over}
+        today={{ state: "quiet", line: OVER }}
+        progress={{ ...base.progress, note: OVER }}
+      />,
+    );
+    const panel = progressPanel();
+    expect(panel.textContent).toBe(OVER);
+    expect(panel.textContent).not.toMatch(/%|right if it were today|gets you to|Sample concept/);
+    expect(panel.querySelector("svg")).toBeNull();
+  });
+
+  it("on the exam's own day still shows today's number", () => {
+    const examAt = new Date("2026-12-04T13:00:00Z");
+    const now = new Date("2026-12-04T06:00:00Z");
+    const over = daysBetween(now, examAt) < 0;
+    render(<ExamPage {...base} forecast={64} verdict="On track with a bite a day" over={over} />);
+    const header = screen.getByTestId("exam-header-title").parentElement!;
+    expect(header.textContent).toContain("64% right today. On track with a bite a day.");
   });
 });

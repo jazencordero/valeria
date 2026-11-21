@@ -20,6 +20,7 @@
 import { useEffect, useState } from "react";
 import { ForecastChart, type ForecastChartData } from "@/components/study/forecast-chart";
 import { RollingNumber } from "@/components/ui/rolling-number";
+import { onDay } from "@/lib/dates";
 
 export type ProgressHeadProps = {
   /** Today's forecast, 0..100, already rounded by the page. */
@@ -84,7 +85,7 @@ export function ProgressHead({
         <p className="mt-0.5 text-[13px] text-ink-2">
           {note ??
             `${targetGrade != null && target != null ? `A ${targetGrade} needs ${target}%. ` : ""}${
-              planLine ?? `A bite a day gets you to about ${Math.round(planEnd)}% by ${dayName}.`
+              planLine ?? `A bite a day gets you to about ${Math.round(planEnd)}% ${onDay("by", dayName)}.`
             }`}
         </p>
       </div>

@@ -286,6 +286,7 @@ async function playBite(examId: string) {
 // Friday 20 Nov 09:00 is 6 days after NOW (Saturday 14 Nov); Thursday 3 Dec is 19.
 const FRIDAY = new Date("2026-11-20T09:00:00+02:00");
 const DEC_3 = new Date("2026-12-03T09:00:00+02:00");
+const DAY = 24 * 60 * 60 * 1000;
 
 describe("getHomeView: bite row and exam cards", () => {
   beforeEach(() => {
@@ -373,6 +374,36 @@ describe("getHomeView: bite row and exam cards", () => {
       expect(view.first).toBeNull();
       expect(view.bite?.state).toBe("bite");
       expect(view.biteFirst).toBe(true);
+    },
+    DB_TIMEOUT,
+  );
+
+  it(
+    "on the exam's own day puts its bite first in DO FIRST, with the late assignment after it",
+    async () => {
+      const u = await user();
+      signedIn.userId = u.id;
+      const fm = await course(u.id, "Invented Methods");
+      // Everything from the pinned clock: the exam later today (18:48 Helsinki), a hand-in two days late.
+      const examToday = new Date(NOW.getTime() + 3 * 60 * 60 * 1000);
+      const late = await assignment(u.id, fm.id, "Invented late memo", { dueAt: new Date(NOW.getTime() - 2 * DAY) });
+      const today = await exam(u.id, fm.id, "Invented exam", examToday);
+      await exam(u.id, fm.id, "Second exam", FRIDAY);
+
+      const view = await getHomeView(u.id, { now: NOW }, t.db);
+      expect(view.bite).toMatchObject({ state: "bite", examId: today.id, forWhat: "today\u2019s exam" });
+      expect(view.biteFirst).toBe(true);
+      // The late assignment stays in DO FIRST, under the bite; THEN is unchanged.
+      expect(view.first?.id).toBe(late.id);
+      expect(view.then).toEqual([]);
+
+      // The day before, the same rows keep the usual order: the assignment first, the bite under it.
+      const dayBefore = new Date(NOW.getTime() - DAY);
+      vi.setSystemTime(dayBefore);
+      const before = await getHomeView(u.id, { now: dayBefore }, t.db);
+      expect(before.bite).toMatchObject({ state: "bite", examId: today.id, forWhat: "tomorrow\u2019s exam" });
+      expect(before.first?.id).toBe(late.id);
+      expect(before.biteFirst).toBe(false);
     },
     DB_TIMEOUT,
   );

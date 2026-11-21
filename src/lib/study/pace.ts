@@ -30,7 +30,7 @@
  *   then the app's estimate stands (`biteMinutes`, 36 seconds a card). It is
  *   never taken as faster than 5 seconds a card (`PACE_MIN_SECONDS`).
  */
-import { daysBetween } from "../dates";
+import { daysBetween, TODAY } from "../dates";
 import type { BiteCard, Deck } from "./bite";
 
 /** New cards stop this many days before the exam day; that day is the last with new cards. */
@@ -193,7 +193,7 @@ export function reviewsOnly<D extends Deck>(deck: D): D {
  */
 export function onTrackLine(pace: Pick<Pace, "open" | "bites" | "impossible">, day: string, more = false): string | null {
   if (!pace.open || pace.bites === 0 || pace.impossible) return null;
-  return `${pace.bites} ${more ? "more " : ""}bite${pace.bites === 1 ? "" : "s"} today keeps you on track for ${day}`;
+  return `${pace.bites} ${more ? "more " : ""}bite${pace.bites === 1 ? "" : "s"} today keeps you on track${day === TODAY ? "" : ` for ${day}`}`;
 }
 
 /** Said once, on the exam page, when the days left cannot hold the core cards. */

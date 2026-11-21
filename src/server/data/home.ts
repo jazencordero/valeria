@@ -40,7 +40,11 @@
  *   on a reviews-only day, when `pace.enough` does: the important reviews are
  *   done and what is left is optional (the exam page says so and still
  *   serves it).
- * - `biteFirst`: nothing is open, so the bite is the DO FIRST card.
+ * - `biteFirst`: the bite is the DO FIRST card: nothing is open, or it is the
+ *   day of the bite's exam (`daysLeft === 0`, Helsinki days). On that day the
+ *   bite comes before every open assignment, late ones included; the head of
+ *   the open list (`first`) stays in DO FIRST, under the bite. Other days keep
+ *   the assignments first (`biteGoesFirst`).
  *
  * M4-10 adds the greeting and the week:
  * - `greeting`: M4-06's `greeting()` sentence. Its queue is the open list
@@ -226,7 +230,7 @@ export type HomeView = {
   lastDone: HomeDone | null;
   exams: HomeExam[];
   bite: HomeBite | null;
-  /** True when nothing is open and there is a bite: the bite is the DO FIRST card. */
+  /** The bite is the DO FIRST card: nothing is open, or it is the bite's exam day (`biteGoesFirst`). */
   biteFirst: boolean;
   /** The sentence in Vitonen's bubble. */
   greeting: string;
@@ -311,6 +315,16 @@ function pickBite(list: ExamsTabExam[], views: Map<string, ExamView>, now: Date)
     return { state: "done", examId: card.id, forecast: v.plan.endShown, day: biteDay(v.exam.at, v.daysLeft), href: card.href };
   }
   return null;
+}
+
+/**
+ * Whether the bite row is the DO FIRST card: there is a bite, and nothing is
+ * open or it is the day of the bite's exam. `daysLeft` is `examView`'s, in
+ * Helsinki calendar days, so "the day" is the whole Helsinki day.
+ */
+export function biteGoesFirst(hasOpen: boolean, bite: HomeBite | null, views: ReadonlyMap<string, Pick<ExamView, "daysLeft">>): boolean {
+  if (bite?.state !== "bite") return false;
+  return !hasOpen || views.get(bite.examId)?.daysLeft === 0;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -569,7 +583,7 @@ export async function getHomeView(
     lastDone,
     exams,
     bite,
-    biteFirst: first === null && bite?.state === "bite",
+    biteFirst: biteGoesFirst(first !== null, bite, views),
     greeting: sentence,
     week: weekModel(weekItems, now),
     grades: (await getGradesList(userId, database)).courses,

@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { burst } from "@/components/ui/confetti";
 import { RollingNumber } from "@/components/ui/rolling-number";
 import { Vitonen } from "@/components/vitonen";
+import { onDay } from "@/lib/dates";
 import { calmDuration, ease } from "@/lib/motion/tokens";
 import { useMotionMode, type MotionMode } from "@/lib/motion/use-calm";
 import { rungOf } from "@/lib/study/ladder";
@@ -389,8 +390,8 @@ export function SessionDone({
             </i>
           </div>
           <p className="text-[13px] text-ink-2">
-            {planLead} and you land around <b className="text-ink">{Math.round(planEnd)}%</b> on{" "}
-            {examDay}.
+            {planLead} and you land around <b className="text-ink">{Math.round(planEnd)}%</b>{" "}
+            {onDay("on", examDay)}.
           </p>
         </section>
 

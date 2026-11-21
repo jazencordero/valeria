@@ -131,6 +131,8 @@ export type ExamPageProps = {
   verdict: string;
   /** The old forecast, when coming back from a session (`?from=<pct>`). */
   rollFrom?: number;
+  /** The exam is over: the header says only the verdict, without "N% right today". */
+  over?: boolean;
   today: ExamPageToday;
   /** Her bundle's documents for this exam, in position order. None: no list. */
   documents?: readonly ExamDocumentRow[];
@@ -356,6 +358,7 @@ export function ExamPage({
   forecast,
   verdict,
   rollFrom,
+  over,
   today,
   documents = NO_DOCUMENTS,
   lectures,
@@ -522,9 +525,11 @@ export function ExamPage({
     icon: c.icon,
   }));
 
-  const progressPanel = progress.starts ? (
+  // Before the study start, and once the exam is over (its note, "This exam is over."): one line, no percent.
+  const oneLine = progress.starts ?? (over ? progress.note : undefined);
+  const progressPanel = oneLine ? (
     <p className="py-3 text-[15px] text-ink-2" data-testid="progress-starts">
-      {progress.starts}
+      {oneLine}
     </p>
   ) : (
     <>
@@ -598,6 +603,7 @@ export function ExamPage({
           forecast={forecast}
           verdict={verdict}
           rollFrom={rollFrom}
+          over={over}
           backHref={BACK_HREF}
         />
       </StickyHeader>

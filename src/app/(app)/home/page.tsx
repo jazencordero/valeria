@@ -20,7 +20,8 @@
  * M3-44: under the DO FIRST card, the bite row (prototype main-flow.html HTML
  * 1459, JS 2897-2902): today's bite for the soonest exam that has one, or
  * "Today's bites are done". When nothing is open the bite is the DO FIRST
- * card itself. After THEN, the EXAMS AND QUIZZES section (HTML 1479-1482)
+ * card itself; on its exam's day too, with the open assignments under it
+ * (`biteGoesFirst`). After THEN, the EXAMS AND QUIZZES section (HTML 1479-1482)
  * with M3-22's Home exam card for every upcoming exam, soonest first.
  * `getHomeView` says which exam and what each card shows.
  *
@@ -366,7 +367,15 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
                 done={<DoFirst first={null} lastDone={handed} now={now} />}
               >
                 {view.biteFirst && view.bite ? (
-                  <BiteFor bite={view.bite} first className="mt-3" />
+                  <>
+                    <BiteFor bite={view.bite} first className="mt-3" />
+                    {/* On the exam's day the bite comes first and the open assignments after it. */}
+                    {view.first && (
+                      <div className="mt-3">
+                        <DoFirst first={view.first} lastDone={null} now={now} />
+                      </div>
+                    )}
+                  </>
                 ) : view.first ? (
                   <div className="mt-3">
                     <DoFirst first={view.first} lastDone={null} now={now} />
@@ -389,6 +398,12 @@ async function HomeBody({ searchParams }: { searchParams: Search }) {
             <>
               {view.lastDone && <DoFirst first={null} lastDone={view.lastDone} now={now} />}
               <BiteFor bite={view.bite} first className={view.lastDone ? "mt-3" : undefined} />
+              {/* On the exam's day the bite comes first and the open assignments after it. */}
+              {view.first && (
+                <div className="mt-3">
+                  <DoFirst first={view.first} lastDone={null} now={now} />
+                </div>
+              )}
             </>
           ) : (
             <>

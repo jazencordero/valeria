@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { byDay } from "../dates";
 import { buildBite, type Bite, type BiteCard, type BiteConcept, type Deck, type ExamKind } from "./bite";
 import { deckForecast, deckMasteries, forecastNow, gainLabel, gainOf, GAIN_SHOWN_FROM } from "./forecast";
 import { conceptMastery } from "./ladder";
@@ -358,6 +359,23 @@ describe("the status", () => {
     );
   });
 
+  it("on the exam's own day says today, never a weekday or \"by today\"", () => {
+    // An invented exam at 14:00 Helsinki on Thursday 10 Dec 2026, read at 08:30 that morning (pinned).
+    const examAt = new Date("2026-12-10T12:00:00Z");
+    const now = new Date("2026-12-10T06:30:00Z");
+    const today = { day: byDay(examAt, now) };
+    expect(verdictOf(6, 85, plan({ kind: "bites", perDay: 2 }, 23.4, 85), today).text).toBe(
+      "At this point you won’t reach 85% today. Two bites a day gets you to about 23%.",
+    );
+    expect(verdictOf(60, 85, plan({ kind: "bites", perDay: 2 }, 88, 85), today).text).toBe("Two bites a day gets you to your 85% today");
+    expect(planSentence(plan({ kind: "bites", perDay: 1 }, 47, 85), today.day)).toBe("A bite a day gets you to about 47% today.");
+    // The day before it is still the weekday.
+    const dayBefore = { day: byDay(examAt, new Date(now.getTime() - DAY)) };
+    expect(verdictOf(6, 85, plan({ kind: "bites", perDay: 2 }, 23.4, 85), dayBefore).text).toBe(
+      "At this point you won’t reach 85% by Thursday. Two bites a day gets you to about 23%.",
+    );
+  });
+
   it("never promises the target when the plan ends below it", () => {
     const decks = [
       withSeen(makeDeck(6, 8, 0, at(16)), 10),
@@ -487,6 +505,15 @@ describe("a paced exam's line for today", () => {
     const hard = { open: true, bites: 12, budget: 60, impossible: true };
     expect(todayLine(hard, plan(88), "Monday", { sayImpossible: true })).toBe("There are more cards than days: core cards first, about 60 a day");
     expect(todayLine(hard, plan(88), "Monday")).toBe("12 bites today. The plan gets you to about 88% by Monday");
+  });
+
+  it("on the exam's own day says today, without \"for today\" or \"by today\"", () => {
+    // An invented exam at 16:00 Helsinki on Thursday 10 Dec 2026, read at 09:00 that morning (pinned).
+    const day = byDay(new Date("2026-12-10T14:00:00Z"), new Date("2026-12-10T07:00:00Z"));
+    expect(todayLine(pace, plan(88), day)).toBe("3 bites today keeps you on track");
+    expect(todayLine(pace, plan(62), day)).toBe("3 bites today. The plan gets you to about 62% today");
+    expect(todayLine({ ...pace, bites: 7 }, plan(88), day, { minutes: 25 })).toBe("About 25 minutes today keeps you on track (7 bites)");
+    expect(todayLine({ ...pace, bites: 7 }, plan(62), day, { minutes: 25 })).toBe("About 25 minutes today (7 bites). The plan gets you to about 62% today");
   });
 
   it("is nothing when today has no new cards left", () => {

@@ -224,14 +224,24 @@ export function dayMonth(at: DateInput): string {
   return `${titleCase(weekdayOf(at))} ${day} ${titleCase(MONTHS[month - 1])}`;
 }
 
+/** What `byDay` gives on the day itself. */
+export const TODAY = "today";
+
 /**
- * The day in "by Friday": the weekday alone while `at` is within the next six calendar days
- * (today included), where a bare weekday is clear; further out, or already past, the date with
- * its month, `Mon 23 Nov`.
+ * The day in "by Friday": `today` on the day itself (Helsinki calendar days); the weekday alone
+ * while `at` is within the next six calendar days, where a bare weekday is clear; further out, or
+ * already past, the date with its month, `Mon 23 Nov`. Put it in a sentence with `onDay`, so the
+ * day itself reads "today", never "by today".
  */
 export function byDay(at: DateInput, now: DateInput): string {
   const days = daysBetween(now, at);
-  return days >= 0 && days <= 6 ? WEEKDAY_NAMES[WEEKDAYS.indexOf(weekdayOf(at))] : dayMonth(at);
+  if (days === 0) return TODAY;
+  return days > 0 && days <= 6 ? WEEKDAY_NAMES[WEEKDAYS.indexOf(weekdayOf(at))] : dayMonth(at);
+}
+
+/** A `byDay` day after its word: "by Monday", "on Mon 23 Nov"; on the day itself just "today". */
+export function onDay(word: "by" | "for" | "on", day: string): string {
+  return day === TODAY ? TODAY : `${word} ${day}`;
 }
 
 /** An exam before its study start, `day` as `dayMonth` gives it: "Starts Tue 24 Nov. Nothing to do here until then." */

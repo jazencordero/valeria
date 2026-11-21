@@ -26,6 +26,8 @@ export type ExamHeaderProps = {
   verdict: string;
   /** The old forecast, when coming back from a bite. The ring's number rolls from it. */
   rollFrom?: number;
+  /** The exam is over: the chip says only the verdict ("This exam is over."), no ring and no "right today". */
+  over?: boolean;
   /** Back to the exams list. */
   onBack?: () => void;
   /** Or a link back to the exams list. */
@@ -61,6 +63,7 @@ export function ExamHeader({
   forecast,
   verdict,
   rollFrom,
+  over = false,
   onBack,
   backHref,
   className = "",
@@ -93,6 +96,7 @@ export function ExamHeader({
         className="flex max-w-[340px] items-center gap-2.5 rounded-full border border-line bg-surface py-1.5 pl-1.5 pr-3.5"
       >
         {/* The ring has 36/48/76/92 sizes; the chip's is 44 px, so the 48 one is sized down. */}
+        {!over && (
         <Ring
           value={f}
           size={48}
@@ -101,8 +105,9 @@ export function ExamHeader({
           style={{ width: 44, height: 44 }}
           className="[&>svg]:!h-[44px] [&>svg]:!w-[44px]"
         />
-        <p className="text-[13px] leading-[1.35] text-ink-2">
-          {f}% right today. {sentence}
+        )}
+        <p className={`text-[13px] leading-[1.35] text-ink-2 ${over ? "py-1 pl-2" : ""}`}>
+          {over ? sentence : `${f}% right today. ${sentence}`}
         </p>
       </div>
     </div>

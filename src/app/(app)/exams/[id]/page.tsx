@@ -357,6 +357,7 @@ async function Exam({ params, searchParams }: { params: Params; searchParams: Se
       forecast={view.forecastShown}
       verdict={over ? OVER : starts ? `Starts ${starts}` : view.verdict.text}
       rollFrom={from !== undefined && from !== view.forecastShown ? from : undefined}
+      over={over}
       today={await todayOf(user, view, deck, course.aiStudy, now, quiet)}
       documents={await loadExamDocuments(db, user.id, exam.id)}
       lectures={tabs.lectures}

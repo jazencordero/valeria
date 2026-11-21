@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionDone, type SessionDoneProps } from "./done";
+import { byDay } from "@/lib/dates";
 import { freeSkipsLeft, weekOf, weeksInARow } from "@/lib/study/week";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: () => {}, back: () => {}, prefetch: () => {} }) }));
@@ -47,6 +48,16 @@ describe("SessionDone forecast", () => {
     expect(text).toContain("A 5");
     expect(text).not.toContain("A 4");
     expect(text).toContain("Keep a bite a day and you land around 43% on Mon 23 Nov.");
+  });
+
+  it("on the exam's own day says today, not on a weekday", () => {
+    // An invented exam at 15:00 Helsinki on Monday 16 Nov; NOW is 14:00 Helsinki that day.
+    const examDay = byDay(new Date("2026-11-16T13:00:00Z"), NOW);
+    render(<SessionDone {...props} examDay={examDay} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("Keep a bite a day and you land around 43% today.");
+    expect(text).not.toContain("on today");
+    expect(text).not.toContain("Monday");
   });
 
   it("says what is left of today, and offers it in one go, only when told", () => {

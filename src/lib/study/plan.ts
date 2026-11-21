@@ -79,7 +79,7 @@
  * - Cost, measured on a 400-card deck a week out: about 60 bites, well under
  *   0.1 s once warm. `dueNow` (one recall prediction a card) keeps it there.
  */
-import { daysBetween, startOfDay } from "../dates";
+import { daysBetween, onDay, startOfDay, TODAY } from "../dates";
 import {
   BITES_PER_DAY,
   biteSections,
@@ -382,7 +382,7 @@ export function verdictOf(forecastShown: number, target: number, plan: Plan, opt
     return {
       key: "not_reachable",
       text:
-        `At this point you won\u2019t reach ${target}% by ${day}. ` +
+        `At this point you won\u2019t reach ${target}% ${onDay("by", day)}. ` +
         `${capital(paceWords(pace))} ${getsWord(pace)} you to about ${plan.endShown}%.${core}`,
       ok: false,
     };
@@ -396,7 +396,7 @@ export function verdictOf(forecastShown: number, target: number, plan: Plan, opt
     return { key: "on_track", text, ok: true };
   }
   if (pace.perDay === 1) return VERDICTS.on_track;
-  return { key: "reachable", text: `${capital(paceWords(pace))} gets you to your ${target}% by ${day}`, ok: false };
+  return { key: "reachable", text: `${capital(paceWords(pace))} gets you to your ${target}% ${onDay("by", day)}`, ok: false };
 }
 
 /**
@@ -406,7 +406,7 @@ export function verdictOf(forecastShown: number, target: number, plan: Plan, opt
  * "Your reviews get you to about 91% by Monday."
  */
 export function planSentence(plan: Plan, day: string): string {
-  return `${capital(paceWords(plan.pace))} ${getsWord(plan.pace)} you to about ${plan.endShown}% by ${day}.`;
+  return `${capital(paceWords(plan.pace))} ${getsWord(plan.pace)} you to about ${plan.endShown}% ${onDay("by", day)}.`;
 }
 
 /** The done screen's lead-in, before "and you land around 62% on Monday": "Keep a bite a day", "Keep 8 bites a day". */
@@ -451,12 +451,12 @@ export function todayLine(
   const reaches = plan.reaches && !(pace.open && pace.impossible);
   if (time === null) {
     if (reaches) return onTrackLine(pace, day, options.more);
-    return `${bitesWord(pace.bites)} today. The plan gets you to about ${plan.endShown}% by ${day}`;
+    return `${bitesWord(pace.bites)} today. The plan gets you to about ${plan.endShown}% ${onDay("by", day)}`;
   }
   const what = pace.open ? "" : " of reviews";
   const about = `About ${options.more ? `${time} more minute${time === 1 ? "" : "s"}` : minutesWord(time)}${what} today`;
-  if (reaches) return `${about} keeps you on track for ${day} (${bitesWord(pace.bites)})`;
-  return `${about} (${bitesWord(pace.bites)}). The plan gets you to about ${plan.endShown}% by ${day}`;
+  if (reaches) return `${about} keeps you on track${day === TODAY ? "" : ` for ${day}`} (${bitesWord(pace.bites)})`;
+  return `${about} (${bitesWord(pace.bites)}). The plan gets you to about ${plan.endShown}% ${onDay("by", day)}`;
 }
 
 /** The done screen's line after a session when today's plan is not finished: "About 12 minutes of today's plan left". */
