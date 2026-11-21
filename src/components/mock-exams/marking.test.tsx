@@ -86,6 +86,8 @@ describe("marking a mock exam", () => {
     });
     expect(within(part).queryByText("Your own ticks always win.")).toBeNull();
     expect(setTicks).not.toHaveBeenCalled();
+    // The button goes: self-marking only, no error.
+    expect(screen.queryAllByRole("button", { name: "Check my answer" })).toHaveLength(0);
   });
 
   it("opens a past attempt read-only", () => {

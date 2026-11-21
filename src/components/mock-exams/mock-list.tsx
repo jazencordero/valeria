@@ -27,7 +27,7 @@ export function MockTrend({ attempts, max = 24, title = "Every attempt so far" }
           latest {num(last.score.total)} / {max}
         </span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 block h-[72px] w-full" role="img" aria-label={`Scores out of ${max}, oldest first. ${label}`}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 block h-auto w-full max-w-[520px]" role="img" aria-label={`Scores out of ${max}, oldest first. ${label}`}>
         {[0, 12, 24].map((v) => (
           <line key={v} x1={0} x2={W} y1={y(v)} y2={y(v)} style={{ stroke: "var(--line)", strokeWidth: 1 }} />
         ))}

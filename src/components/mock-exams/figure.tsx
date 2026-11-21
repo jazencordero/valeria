@@ -86,7 +86,7 @@ export function ExamFigure({ figure: fg }: { figure: Figure }) {
   ];
 
   return (
-    <figure className="mx-auto my-4 w-full" style={{ maxWidth: sq ? 420 : 560 }} data-testid="exam-figure">
+    <figure className="mx-auto my-4 w-full" style={{ maxWidth: sq ? 400 : 480 }} data-testid="exam-figure">
       <svg
         viewBox={`0 0 ${W} ${H}`}
         className="block h-auto w-full fill-ink-2 font-sans"

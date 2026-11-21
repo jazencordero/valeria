@@ -73,6 +73,8 @@ export function Marking({
   const [touched, setTouched] = useState<Record<string, number[]>>({});
   const [checks, setChecks] = useState<Record<string, Check>>({});
   const [failed, setFailed] = useState(false);
+  // Once the server says the check is unavailable, the button goes for this visit: self-marking.
+  const [checkOff, setCheckOff] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const seq = useRef(new Map<string, number>());
@@ -117,6 +119,7 @@ export function Marking({
     setChecks((c) => ({ ...c, [key]: { state: "loading" } }));
     const r = await suggestMockTicksAction(attempt.id, key);
     if (r.status !== "ok") {
+      setCheckOff(true);
       setChecks((c) => {
         const { [key]: _drop, ...rest } = c;
         void _drop;
@@ -201,7 +204,7 @@ export function Marking({
             question={question}
             attempt={attempt}
             readOnly={readOnly}
-            checkAllowed={checkAllowed && !readOnly}
+            checkAllowed={checkAllowed && !readOnly && !checkOff}
             checks={checks}
             touched={touched}
             onToggle={toggle}

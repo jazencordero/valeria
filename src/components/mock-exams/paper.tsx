@@ -45,7 +45,7 @@ export function PaperQuestion({ number, prompt, children }: { number: number; pr
       <h2 id={`q${number}-h`} className="font-[inherit] text-[inherit] font-normal">
         {number}.<span className="sr-only"> Question {number}</span>
       </h2>
-      <div className="min-w-0">
+      <div className="min-w-0 [--paper-indent:1.6em]">
         {prompt ? <p>{prompt}</p> : null}
         {children}
       </div>
@@ -133,13 +133,28 @@ export function PaperTable({ table }: { table: ExamTable }) {
   );
 }
 
+/**
+ * On a phone a figure or table takes the full width of the paper, out of the hanging indents
+ * (`--paper-indent`, set by the question and section columns), so its text stays readable.
+ */
+const BLEED =
+  "max-[699px]:-ml-[var(--paper-indent,0px)] max-[699px]:w-[calc(100%+var(--paper-indent,0px))]";
+
 export function SectionContext({ section }: { section: Omit<PaperSection, "parts"> }) {
   return (
     <>
       {section.stem ? <p className="whitespace-pre-line">{section.stem}</p> : null}
       {section.formula ? <Formula>{section.formula}</Formula> : null}
-      {section.figure ? <ExamFigure figure={section.figure} /> : null}
-      {section.table ? <PaperTable table={section.table} /> : null}
+      {section.figure ? (
+        <div className={BLEED}>
+          <ExamFigure figure={section.figure} />
+        </div>
+      ) : null}
+      {section.table ? (
+        <div className={BLEED}>
+          <PaperTable table={section.table} />
+        </div>
+      ) : null}
     </>
   );
 }
@@ -163,7 +178,7 @@ export function PaperSectionBlock({
   return (
     <div className="mt-3 grid grid-cols-[2.1em_1fr] gap-x-1">
       <span className="text-ink-2">{section.label}</span>
-      <div className="min-w-0">
+      <div className="min-w-0 [--paper-indent:calc(1.6em+2.1em+4px)]">
         <SectionContext section={section} />
         {children}
       </div>
