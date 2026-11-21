@@ -591,6 +591,8 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
 
   const path = pathname ?? "/";
   const inSession = path === "/study" || path.startsWith("/study/");
+  // A mock exam being sat or marked covers the screen like a session (M3-60).
+  const onPaper = path.startsWith("/exams/mock/attempt/");
   const onAssignment = attachFromPath(path).kind === "assignment";
 
   // The "Notes" word on the button: wide screens, first time on Home.
@@ -1020,7 +1022,7 @@ export function NotepadView({ pathname, actions, tutor = false, tutorApi, tutorP
     });
   };
 
-  const fabHidden = inSession || open || (!wide && keyboardUp);
+  const fabHidden = inSession || onPaper || open || (!wide && keyboardUp);
   const fabAway = useScrollAway(!wide && !fabHidden);
   const full = mode === "full";
   const instant = mode === "instant";

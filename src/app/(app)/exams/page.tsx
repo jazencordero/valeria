@@ -9,6 +9,10 @@
  * The heading ships in the static shell; her cards depend on the cookie and
  * the clock, so they stream inside Suspense.
  *
+ * Mock exams (M3-60): when her bundle has mock exams, the page gets two tabs, "Exams and
+ * quizzes" (the cards as before) and "Mock exams" (the trend and the five exams). The chosen tab
+ * is remembered for the visit, so coming back from a mock exam lands on it.
+ *
  * `AddExam` (a client component) holds the form sheet's open state; this page
  * hands it her courses and `saveExamAction`, which revalidates /exams, so the
  * new card is there when the sheet has closed.
@@ -17,9 +21,12 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { AddExam } from "@/components/exams/add-exam";
 import { ExamTabCard } from "@/components/exams/exam-tab-card";
+import { MockList } from "@/components/mock-exams/mock-list";
+import { Tabs } from "@/components/ui/tabs";
 import { lmsNameOf } from "@/lib/schools";
 import { currentUser, ensureSession, NotSignedIn, type User } from "@/server/auth/session";
 import { getExamsView } from "@/server/data/exams";
+import { listAttempts, listMockExams } from "@/server/mock-exams";
 import { saveExamAction } from "./actions";
 
 async function signedInUser(): Promise<User> {
@@ -35,9 +42,13 @@ async function signedInUser(): Promise<User> {
 async function ExamCards() {
   await connection();
   const user = await signedInUser();
-  const view = await getExamsView(user.id, { now: new Date() });
+  const [view, mocks, attempts] = await Promise.all([
+    getExamsView(user.id, { now: new Date() }),
+    listMockExams(user.id),
+    listAttempts(user.id),
+  ]);
 
-  return (
+  const cards = (
     <>
       {view.exams.length > 0 ? (
         <ul className="mt-5 grid list-none gap-3.5">
@@ -70,6 +81,19 @@ async function ExamCards() {
         <AddExam courses={view.courses} action={saveExamAction} />
       </div>
     </>
+  );
+
+  if (mocks.length === 0) return cards;
+  return (
+    <Tabs
+      className="mt-5"
+      label="Exams sections"
+      memoryKey="exams"
+      tabs={[
+        { id: "exams", label: "Exams and quizzes", content: cards },
+        { id: "mock", label: "Mock exams", count: mocks.length, content: <MockList exams={mocks} attempts={attempts} /> },
+      ]}
+    />
   );
 }
 
