@@ -32,7 +32,6 @@
  *   lecture numbers the import kept beside the content; they are never stored in it.
  */
 import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
-import { studyAllowed, type AiStudy } from "@/lib/ai-policy";
 import { findPart, scoreAttempt, toPaper, trueFalseOf } from "@/lib/mock-exams/score";
 import type {
   AnswerInput,
@@ -49,9 +48,11 @@ import type {
   TickSuggestion,
 } from "@/lib/mock-exams/types";
 import { db as defaultDb, type Db } from "@/server/db/client";
-import { courses } from "@/server/db/schema/courses";
 import { lectures } from "@/server/db/schema/learn";
 import { mockExamAttempts, mockExams } from "@/server/db/schema/study";
+import { users } from "@/server/db/schema/users";
+import { mayUseFiles } from "@/server/ai/consent";
+import { tutorEnabled } from "@/server/tutor/context";
 import { suggestTicksForPart } from "./suggest-ticks";
 
 export class MockExamNotFound extends Error {
@@ -123,14 +124,15 @@ async function attemptRowOf(database: Db, userId: string, attemptId: string, loc
   return exam ? { attempt, exam } : null;
 }
 
-/** True when "Check my answer" may be offered: the course's AI study rule allows it. */
+/**
+ * True when "Check my answer" may be offered: the same three conditions the checker itself
+ * requires (`suggestTicksForPart`), so the button is not shown when every click would come back
+ * unavailable: her tutor is on, the course's AI study rule allows it, and her files switch is on.
+ */
 async function checkAllowedFor(database: Db, userId: string, courseId: string): Promise<boolean> {
-  const [course] = await database
-    .select({ aiStudy: courses.aiStudy })
-    .from(courses)
-    .where(and(eq(courses.id, courseId), eq(courses.userId, userId)))
-    .limit(1);
-  return course ? studyAllowed({ aiStudy: course.aiStudy as AiStudy }) : false;
+  const [user] = await database.select({ settings: users.settings }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!user || !tutorEnabled(user.settings)) return false;
+  return mayUseFiles(userId, courseId, database);
 }
 
 /** The whole exam with each lecture link's `href` filled where she has that lecture. A copy: the row is not touched. */

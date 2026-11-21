@@ -122,7 +122,14 @@ describe("the list and the start screen", () => {
       const start = (await getMockExam(her, "bake-1", t.db))!;
       expect(JSON.stringify(start)).not.toContain("KEY-");
       expect(start.exam.questions).toHaveLength(4);
-      expect(start.checkAllowed).toBe(true);
+      // Her tutor is off: the checker would say unavailable, so the button is not offered.
+      expect(start.checkAllowed).toBe(false);
+      await t.db.update(users).set({ settings: { tutor: { enabled: true } } }).where(eq(users.id, her));
+      expect((await getMockExam(her, "bake-1", t.db))!.checkAllowed).toBe(true);
+      // Her files switch off: not offered either.
+      await t.db.update(users).set({ settings: { tutor: { enabled: true }, ai: { useFiles: false } } }).where(eq(users.id, her));
+      expect((await getMockExam(her, "bake-1", t.db))!.checkAllowed).toBe(false);
+      await t.db.update(users).set({ settings: { tutor: { enabled: true } } }).where(eq(users.id, her));
       // The other user's course has no AI study rule yet: not allowed.
       expect((await getMockExam(other, "bake-1", t.db))!.checkAllowed).toBe(false);
       await t.db.update(courses).set({ aiStudy: "not_allowed" }).where(eq(courses.id, herCourse));
