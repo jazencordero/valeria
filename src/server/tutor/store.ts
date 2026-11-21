@@ -217,6 +217,49 @@ export async function storeTurn(turn: TurnToStore, database: Db = defaultDb): Pr
   await database.insert(tutorMessages).values(rows);
 }
 
+/*
+ * Usage-only rows ("Check my answer" on a mock exam, src/server/ai/jobs/check-answer.ts).
+ *
+ * The usage meter and the monthly budget (src/server/tutor/budget.ts) sum the token counts of
+ * `tutor_messages` answers, so a tutor call made outside a chat still has to leave a row there.
+ * The schema's `anchor_kind` CHECK allows only lecture, exam, card and general, and the schema
+ * is not changed for this, so the row is made invisible within the existing columns:
+ * - `note_id` null: no note's chat (which selects by `note_id`) picks it up;
+ * - `anchor_kind` 'general' with `anchor_id` USAGE_ONLY_ANCHOR_ID (the nil UUID): the general
+ *   chat selects `anchor_id IS NULL`, and lecture, exam and card chats select their own row's
+ *   id, which the database generates (random v4) and is never the nil UUID;
+ * - `reply_to` null and no question row, so "Go deeper" on it finds no question (404).
+ * `role` is 'assistant' and `model` "provider:model", so `monthSpend` and `ownAverages` count it
+ * exactly like a chat answer. `body` is the fixed USAGE_ONLY_BODY and `quote` is null: never her
+ * answer, the model answer or the reply. It does show in her data export, as that label.
+ */
+export const USAGE_ONLY_ANCHOR_ID = "00000000-0000-0000-0000-000000000000";
+export const USAGE_ONLY_BODY = "[Check my answer: tokens only]";
+
+/** Stores the tokens of one tutor call that is not part of a chat (see the block above). */
+export async function storeUsageOnly(
+  userId: string,
+  use: { model: string; tokens: TokenCounts },
+  database: Db = defaultDb,
+): Promise<void> {
+  await database.insert(tutorMessages).values({
+    userId,
+    noteId: null,
+    anchorKind: "general",
+    anchorId: USAGE_ONLY_ANCHOR_ID,
+    role: "assistant",
+    body: USAGE_ONLY_BODY,
+    quote: null,
+    replyTo: null,
+    model: use.model,
+    tokensIn: use.tokens.input,
+    tokensOut: use.tokens.output,
+    cacheReadTokens: use.tokens.cacheRead,
+    cacheWriteTokens: use.tokens.cacheWrite,
+    tokensEstimated: use.tokens.estimated,
+  });
+}
+
 /** "Save to note": the answer appended to her note's body. Returns the new body, or null. */
 export async function appendAnswerToNote(userId: string, noteId: string, answerId: string, database: Db = defaultDb): Promise<string | null> {
   const note = await ownNote(userId, noteId, database);
