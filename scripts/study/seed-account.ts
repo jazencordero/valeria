@@ -361,6 +361,7 @@ const LABELS: Record<string, string> = {
   lectureConcepts: "Lecture-concept links",
   cards: "Cards",
   documents: "Exam documents",
+  mockExams: "Mock exams",
 };
 
 function countLines(counts: Record<string, Count>, indent = "  "): string[] {
@@ -510,7 +511,8 @@ function partHolds(p: UploadPart): string {
   const pages = `${p.pages.length} page${p.pages.length === 1 ? "" : "s"}`;
   if (p.kind === "studyOnly") return `study-only, ${pages}`;
   const cardCount = p.decks.reduce((s, d) => s + d.cards.length, 0);
-  return `${cardCount} cards, ${pages}, ${p.documents.length} exam document${p.documents.length === 1 ? "" : "s"}`;
+  const mock = p.mockExams.length ? `, ${some(p.mockExams.length, "mock exam")}` : "";
+  return `${cardCount} cards, ${pages}, ${p.documents.length} exam document${p.documents.length === 1 ? "" : "s"}${mock}`;
 }
 
 /** Whether a 200 answer is the answer to `part` (anything else is not this app's seed route). */
@@ -561,6 +563,12 @@ function printPlanned(plan: SeedPlan, parts: UploadPart[], args: CliArgs, io: Io
   });
   io.out(`  In all ${kB(total)}; one request may be ${kB(UPLOAD_PART_BYTES)} at most.`);
   io.out(`Planned from the files: ${some(plan.courses.length, "course")}, ${some(plan.exams.length, "exam")}, ${some(plan.bundles.length, "course folder")}.`);
+  for (const b of plan.bundles) {
+    if (b.kind !== "exam") continue;
+    if (b.mockExams?.length) io.out(`Mock exams of ${b.courseCode} (${b.mockExams.length}): ${b.mockExams.map((m) => m.exam.id).join(", ")}.`);
+    // A file of mock-exams/ that is not an exam is left out and said here; the rest is sent.
+    for (const p of b.plan.problems) if (p.file.startsWith("mock-exams/")) io.out(`  problem: ${problemLine(p)}`);
+  }
   for (const [title, lines] of [["Skipped", plan.skipped], ["Not stored", plan.notStored], ["Notes", plan.notes]] as const) {
     if (!lines.length) continue;
     io.out(`${title}:`);

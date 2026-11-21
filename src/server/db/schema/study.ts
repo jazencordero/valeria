@@ -8,8 +8,10 @@ import {
   pgTable,
   text,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { events } from "./calendar";
 import { courses } from "./courses";
 import { createdAt, id, oneOf, tstz, userId } from "./users";
@@ -205,5 +207,65 @@ export const reviews = pgTable(
     index("reviews_user_id_idx").on(t.userId),
     index("reviews_card_id_idx").on(t.cardId),
     index("reviews_session_id_idx").on(t.sessionId),
+  ],
+);
+
+/**
+ * Mock exams (M3-60): one whole exam file of her bundle per row, keys and model answers
+ * included. `import_id` is the file's own `id`; a new upload updates the row in place (never
+ * deletes it), so the attempts below stay.
+ */
+export const mockExams = pgTable(
+  "mock_exams",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    userId: userId(),
+    courseId: uuid("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    importId: text("import_id").notNull(),
+    position: integer("position").notNull().default(0),
+    /** The exam file as validated (src/lib/mock-exams/validate.ts). */
+    content: jsonb("content").notNull(),
+    /** Lecture page slug (the page's file name in the bundle) -> lecture number, for links. */
+    lecturePages: jsonb("lecture_pages").$type<Record<string, number>>().notNull().default({}),
+  },
+  (t) => [
+    index("mock_exams_user_id_idx").on(t.userId),
+    index("mock_exams_course_id_idx").on(t.courseId),
+    unique("mock_exams_user_import_id_key").on(t.userId, t.importId),
+  ],
+);
+
+/**
+ * One sitting of a mock exam. Open while `finished_at` is null (at most one open per exam);
+ * a finished one is never overwritten except for `ticks`, `edited`, `score` and `total`.
+ * Answers are keyed by item index, part key and tick index (src/lib/mock-exams/types.ts).
+ */
+export const mockExamAttempts = pgTable(
+  "mock_exam_attempts",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    userId: userId(),
+    mockExamId: uuid("mock_exam_id")
+      .notNull()
+      .references(() => mockExams.id, { onDelete: "cascade" }),
+    startedAt: tstz("started_at").notNull().defaultNow(),
+    finishedAt: tstz("finished_at"),
+    secondsUsed: integer("seconds_used").notNull().default(0),
+    tfOrder: jsonb("tf_order").$type<number[]>().notNull().default([]),
+    trueFalse: jsonb("true_false").$type<Record<string, boolean | null>>().notNull().default({}),
+    texts: jsonb("texts").$type<Record<string, string>>().notNull().default({}),
+    ticks: jsonb("ticks").$type<Record<string, { index: number; fromCheck: boolean }[]>>().notNull().default({}),
+    edited: boolean("edited").notNull().default(false),
+    score: jsonb("score"),
+    total: numeric("total", { mode: "number" }),
+  },
+  (t) => [
+    index("mock_exam_attempts_user_id_idx").on(t.userId),
+    index("mock_exam_attempts_mock_exam_id_idx").on(t.mockExamId),
+    uniqueIndex("mock_exam_attempts_one_open_key").on(t.mockExamId).where(sql`finished_at is null`),
   ],
 );

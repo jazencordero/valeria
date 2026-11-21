@@ -15,7 +15,16 @@
 
 export type MockExamKind = "teacher" | "mock" | "boss";
 
-export type LectureRef = { page: string; title: string; slides: number[] };
+export type LectureRef = {
+  page: string;
+  title: string;
+  slides: number[];
+  /**
+   * Where her lecture page for `page` is, e.g. "/courses/<id>/lectures/<n>". Filled by the
+   * server in finished views only, never stored; left out when the slug has no lecture page.
+   */
+  href?: string;
+};
 
 export type FigureAxis = { label: string; min: number; max: number; ticks: number[] };
 export type Figure = {

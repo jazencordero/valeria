@@ -103,6 +103,7 @@ import {
   type StudyOnlyPlan,
   type StudyOnlyResult,
 } from "@/server/study/import-bundle";
+import { applyMockExams, checkMockExamFiles, lecturePagesOf, loadMockExams, type MockExamFile } from "@/server/mock-exams/import";
 import { nextColor, type CourseColor } from "@/server/sync/courses";
 import { EXAM_TARGET_PCT, kindFor } from "@/server/sync/events";
 
@@ -344,7 +345,16 @@ export function seedKeyFor(raw: unknown, accountDirReal: string): string {
 // ---------------------------------------------------------------------------
 
 export type BundleCourse =
-  | { kind: "exam"; courseCode: string; folder: string; plan: ImportPlan; source?: CourseBundle }
+  | {
+      kind: "exam";
+      courseCode: string;
+      folder: string;
+      plan: ImportPlan;
+      source?: CourseBundle;
+      /** The folder's `mock-exams/` (M3-60), already checked, and the lecture page slugs their links name. */
+      mockExams?: MockExamFile[];
+      lecturePages?: Record<string, number>;
+    }
   | { kind: "studyOnly"; courseCode: string; folder: string; plan: StudyOnlyPlan; source?: StudyOnlyCourse };
 // `source` (M3-58): the validated files the plan was made from. `loadSeed` sets it; an upload sends it.
 
@@ -464,7 +474,21 @@ export async function loadSeed(accountDir: string, bundlesDir: string): Promise<
     }
     try {
       const bundle = await loadBundle(bundlesDir, { courses: [code] });
-      for (const c of bundle.courses) bundles.push({ kind: "exam", courseCode: normCode(c.seed.exam.courseCode), folder, plan: planImport(c), source: c });
+      for (const c of bundle.courses) {
+        const plan = planImport(c);
+        // `mock-exams/` (M3-60): a file that is not an exam is reported and left out; the rest goes in.
+        const mock = await loadMockExams(c.dir);
+        plan.problems.push(...mock.problems);
+        if (mock.exams.length) plan.notes.push(`Mock exams (${mock.exams.length}): ${mock.exams.map((e) => e.exam.id).join(", ")}.`);
+        bundles.push({
+          kind: "exam",
+          courseCode: normCode(c.seed.exam.courseCode),
+          folder,
+          plan,
+          source: c,
+          ...(mock.exams.length ? { mockExams: mock.exams, lecturePages: lecturePagesOf(c.seed.lectures) } : {}),
+        });
+      }
       for (const c of bundle.studyOnly) bundles.push({ kind: "studyOnly", courseCode: normCode(c.courseCode), folder, plan: planStudyOnly(c), source: c });
     } catch (err) {
       if (!(err instanceof BundleInvalid)) throw err;
@@ -798,7 +822,11 @@ const sameTime = (a: Date | null, b: Date | null) => (a?.getTime() ?? null) === 
  * Its own transaction, or a savepoint inside one.
  */
 export async function applyBundle(database: Db, userId: string, b: BundleCourse, now: Date): Promise<ImportResult | StudyOnlyResult> {
-  return b.kind === "exam" ? applyImport(database, userId, b.plan, { now }) : applyStudyOnly(database, userId, b.plan);
+  if (b.kind !== "exam") return applyStudyOnly(database, userId, b.plan);
+  const result = await applyImport(database, userId, b.plan, { now });
+  // Her mock exams (M3-60), onto the course the import found. Updated in place: attempts stay.
+  if (b.mockExams?.length) result.counts.mockExams = await applyMockExams(database, userId, result.courseId, b.mockExams, b.lecturePages ?? {});
+  return result;
 }
 
 /** The account an upload writes into (M3-58): its row, locked until the transaction ends. */
@@ -1273,6 +1301,8 @@ const ExamBundlePartSchema = z.object({
     )
     .default([]),
   documents: z.array(z.object({ file: relFile, text: z.string({ error: "text must be text." }) }), { error: "documents must be a list." }).default([]),
+  /** The folder's `mock-exams/` files (M3-60), in batch 1. Each is checked when applied: one that is not an exam is left out and reported. */
+  mockExams: z.array(z.object({ file: relFile, exam: z.unknown() }), { error: "mockExams must be a list." }).max(50, { error: "mockExams holds too many files." }).default([]),
 });
 export type ExamBundlePart = z.infer<typeof ExamBundlePartSchema>;
 
@@ -1352,15 +1382,16 @@ export function bundlePartsOf(b: BundleCourse, maxBytes: number = UPLOAD_PART_BY
   const course = source as CourseBundle;
   const base = { part: "bundle" as const, kind: "exam" as const, courseCode: b.courseCode, seed: course.seed, map: course.map, account: rule };
   const documents = course.examDocs.flatMap((d) => (d.text !== undefined ? [{ file: d.file, text: d.text }] : []));
-  const room = maxBytes - jsonBytes({ ...base, batch: widest, pages: [], decks: [], documents: [] });
+  const mockExams: ExamBundlePart["mockExams"] = (b.mockExams ?? []).map((m) => ({ file: m.file, exam: m.exam }));
+  const room = maxBytes - jsonBytes({ ...base, batch: widest, pages: [], decks: [], documents: [], mockExams: [] });
   if (room < 0) throw tooBig("its seed.json and map");
 
-  type Batch = { pages: BundlePage[]; decks: ExamBundlePart["decks"]; documents: ExamBundlePart["documents"] };
-  const batches: Batch[] = [{ pages: [], decks: [], documents }];
-  let used = documents.reduce((s, d) => s + jsonBytes(d) + 1, 0);
-  if (used > room) throw tooBig("its seed.json, map and exam documents together");
+  type Batch = { pages: BundlePage[]; decks: ExamBundlePart["decks"]; documents: ExamBundlePart["documents"]; mockExams: ExamBundlePart["mockExams"] };
+  const batches: Batch[] = [{ pages: [], decks: [], documents, mockExams }];
+  let used = documents.reduce((s, d) => s + jsonBytes(d) + 1, 0) + mockExams.reduce((s, m) => s + jsonBytes(m) + 1, 0);
+  if (used > room) throw tooBig("its seed.json, map, exam documents and mock exams together");
   const next = () => {
-    batches.push({ pages: [], decks: [], documents: [] });
+    batches.push({ pages: [], decks: [], documents: [], mockExams: [] });
     used = 0;
   };
   for (const page of course.pages) {
@@ -1521,10 +1552,17 @@ export async function applyBundlePart(database: Db, userId: string, part: Bundle
     });
     // A card's place in its deck file, not in this batch.
     for (const p of plan.cards) p.index = part.decks.find((d) => d.lecture === p.lecture && d.file === p.file)?.indexes[p.index - 1] ?? p.index;
-    const result = (await applyBundle(database, userId, { kind: "exam", courseCode: head.courseCode, folder: "", plan }, now)) as ImportResult;
-    later(result.counts, ["pages", "cards"]);
+    // Mock exams (M3-60) are checked again here: what a request carries is never taken on trust.
+    const mock = checkMockExamFiles(part.mockExams);
+    const result = (await applyBundle(
+      database,
+      userId,
+      { kind: "exam", courseCode: head.courseCode, folder: "", plan, mockExams: mock.exams, lecturePages: lecturePagesOf(part.seed.lectures) },
+      now,
+    )) as ImportResult;
+    later(result.counts, ["pages", "cards", "mockExams"]);
     // What was found while writing; the plan's own lines are the tool's to print.
-    return { ...head, kind: "exam", imported: true, counts: result.counts, problems: result.problems.slice(plan.problems.length) };
+    return { ...head, kind: "exam", imported: true, counts: result.counts, problems: [...result.problems.slice(plan.problems.length), ...mock.problems] };
   } catch (err) {
     if (!(err instanceof ImportFailed)) throw err;
     return { ...head, kind: part.kind, imported: false, reason: err.message };
@@ -1588,6 +1626,7 @@ export function combineAnswers(plan: SeedPlan, answers: SeedAnswer[]): UploadSum
       continue;
     }
     const sum: ImportCounts = { exam: zero(), concepts: zero(), lectures: zero(), pages: zero(), lectureConcepts: zero(), cards: zero(), documents: zero(), aiPolicy: zero() };
+    if (b.mockExams?.length) sum.mockExams = zero();
     const problems = [...b.plan.problems];
     const seen = new Set<string>();
     for (const a of mine) {

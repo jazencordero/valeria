@@ -1145,6 +1145,8 @@ export type ImportCounts = {
   cards: Count;
   documents: Count;
   aiPolicy: Count;
+  /** The folder's mock exams (M3-60); only set when it holds any. Written by the seed (seed-account.ts), not by `applyImport`. */
+  mockExams?: Count;
 };
 
 export type ImportResult = {
