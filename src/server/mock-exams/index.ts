@@ -52,6 +52,7 @@ import { db as defaultDb, type Db } from "@/server/db/client";
 import { courses } from "@/server/db/schema/courses";
 import { lectures } from "@/server/db/schema/learn";
 import { mockExamAttempts, mockExams } from "@/server/db/schema/study";
+import { suggestTicksForPart } from "./suggest-ticks";
 
 export class MockExamNotFound extends Error {
   constructor() {
@@ -413,12 +414,28 @@ export async function getAttempt(userId: string, attemptId: string, database: Db
  * was missing. "unavailable" when the course's AI study rule does not allow it, the budget is
  * spent or the model is down; the screen then offers self-marking only and shows no error.
  * Suggests only: nothing is stored until the screen calls `setTicks`.
- *
- * A stub here: the real one is written beside this file and wired in later.
+ * The checking itself (tutor switch, course rule, budget, the model) is `suggestTicksForPart`.
  */
-export async function suggestTicks(userId: string, attemptId: string, part: PartKey): Promise<TickSuggestion> {
-  void userId;
-  void attemptId;
-  void part;
-  return { status: "unavailable" };
+export async function suggestTicks(
+  userId: string,
+  attemptId: string,
+  part: PartKey,
+  database: Db = defaultDb,
+): Promise<TickSuggestion> {
+  try {
+    const found = await attemptRowOf(database, userId, attemptId);
+    if (!found || found.attempt.finishedAt === null) return { status: "unavailable" };
+    const exam = found.exam.content as MockExam;
+    const written = findPart(exam, part);
+    if (!written) return { status: "unavailable" };
+    const [q, s] = part.split(".").map(Number);
+    const question = exam.questions.find((x) => x.number === q);
+    const stem = question?.type === "written" ? question.sections[s]?.stem : undefined;
+    const texts = (found.attempt.texts ?? {}) as Record<string, string>;
+    const result = await suggestTicksForPart(userId, found.exam.courseId, written, texts[part] ?? "", { stem, db: database });
+    if (result.status !== "ok") return { status: "unavailable" };
+    return { status: "ok", part, ticks: result.ticks, missing: result.missing };
+  } catch {
+    return { status: "unavailable" };
+  }
 }
