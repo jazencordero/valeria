@@ -17,6 +17,8 @@ import {
   examDocuments,
   exams,
   reviews,
+  mockExamAttempts,
+  mockExams,
   studySessions,
 } from "@/server/db/schema/study";
 import { aiCache, aiCalls, jobs, providerCooldowns, usageEvents } from "@/server/db/schema/system";
@@ -163,6 +165,11 @@ async function seedEverything(userId: string, tag: string) {
   await db.insert(cardStates).values({ cardId: card.id, fsrs: {} });
   const [session] = await db.insert(studySessions).values({ userId, examId: exam.id, mode: "bite" }).returning();
   await db.insert(reviews).values({ userId, cardId: card.id, sessionId: session.id, grade: 3, firstTry: true });
+  const [mock] = await db
+    .insert(mockExams)
+    .values({ userId, courseId: course.id, importId: "sample", content: {} })
+    .returning();
+  await db.insert(mockExamAttempts).values({ userId, mockExamId: mock.id });
   const [lecture] = await db
     .insert(lectures)
     .values({ userId, courseId: course.id, n: 1, title: "Lecture 1", fileId: file.id })

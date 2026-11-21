@@ -30,6 +30,8 @@ import {
   concepts,
   examDocuments,
   exams,
+  mockExamAttempts,
+  mockExams,
   reviews,
   studySessions,
 } from "@/server/db/schema/study";
@@ -110,6 +112,8 @@ export const EXPORT_PLAN: PlanEntry[] = [
   child(cardStates, cardStates.cardId, cards),
   own(studySessions),
   own(reviews),
+  own(mockExams),
+  own(mockExamAttempts),
 
   // Lecture pages and notes.
   own(lectures),
