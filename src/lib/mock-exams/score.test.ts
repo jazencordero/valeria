@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SAMPLE_ALL_RIGHT, sampleExam } from "./sample-exam";
+import { SAMPLE_ALL_RIGHT, sampleDrill, sampleExam } from "./sample-exam";
 import { findPart, partsOf, scoreAttempt, scorePart, scoreTrueFalse, toPaper, trueFalseOf } from "./score";
 import type { GivenTick, MockExam, TrueFalseAnswer, WrittenPart } from "./types";
 import { checkMockExam } from "./validate";
@@ -108,6 +108,42 @@ describe("the whole attempt", () => {
   });
 });
 
+describe("a set with no true/false question and another total (a drill)", () => {
+  const drill = sampleDrill();
+
+  it("has no true/false question, and its parts are keyed by its own question numbers", () => {
+    expect(trueFalseOf(drill)).toBeNull();
+    expect(partsOf(drill).map((p) => p.key)).toEqual(["1.0.0", "1.0.1", "2.0.0", "2.0.1", "3.0.0", "3.0.1"]);
+  });
+
+  it("scores one entry per question out of the file's own total", () => {
+    const none = scoreAttempt(drill, { trueFalse: {}, ticks: {} });
+    expect(none).toEqual({
+      total: 0,
+      max: 18,
+      questions: [1, 2, 3].map((number) => ({ number, score: 0, max: 6, parts: [{ key: `${number}.0.0`, score: 0, max: 2.5 }, { key: `${number}.0.1`, score: 0, max: 3.5 }] })),
+    });
+    const some = scoreAttempt(drill, { trueFalse: SAMPLE_ALL_RIGHT, ticks: { "1.0.0": tick(0, 1), "1.0.1": tick(1), "3.0.1": tick(0, 1) } });
+    // Answers to a true/false question the set does not have count for nothing.
+    expect(some.questions.map((q) => q.score)).toEqual([4, 0, 3.5]);
+    expect(some.questions.every((q) => q.trueFalse === undefined)).toBe(true);
+    expect(some.total).toBe(7.5);
+    const all = Object.fromEntries(partsOf(drill).map((p) => [p.key, tick(...p.part.ticks.map((_, i) => i))]));
+    expect(scoreAttempt(drill, { trueFalse: {}, ticks: all }).total).toBe(18);
+  });
+
+  it("gives a paper with no key, and passes the check", () => {
+    const text = JSON.stringify(toPaper(drill));
+    expect(text).not.toContain("KEY-");
+    expect(toPaper(drill).questions).toHaveLength(3);
+    expect(toPaper(drill).kind).toBe("drill-figure");
+    const checked = checkMockExam(JSON.parse(JSON.stringify(drill)));
+    expect(checked.ok && checked.exam).toEqual(drill);
+    const math = checkMockExam(JSON.parse(JSON.stringify(sampleDrill({ kind: "drill-math" }))));
+    expect(math.ok && math.exam.kind).toBe("drill-math");
+  });
+});
+
 describe("the paper", () => {
   const paper = toPaper(exam);
   const text = JSON.stringify(paper);
@@ -210,6 +246,9 @@ describe("checking an exam file", () => {
     ["a question number used twice", (raw: Record<string, unknown>) => (questions(raw)[3].number = 2), "questions.3.number"],
     ["two true/false questions", (raw: Record<string, unknown>) => questions(raw).push({ ...questions(raw)[0], number: 5 }), "questions.4.type"],
     ["no questions", (raw: Record<string, unknown>) => (raw.questions = []), "questions"],
+    ["a total the questions do not add up to", (raw: Record<string, unknown>) => (raw.totalPoints = 20), "totalPoints"],
+    ["a question whose parts do not add up to it", (raw: Record<string, unknown>) => (((questions(raw)[2].sections as Record<string, unknown>[])[0].parts as Record<string, unknown>[])[1].points = 2.5), "questions.2.points"],
+    ["a true/false question dropped without lowering the total", (raw: Record<string, unknown>) => questions(raw).shift(), "totalPoints"],
   ])("refuses %s", (_name, change, path) => {
     const checked = broken(change);
     expect(checked.ok).toBe(false);

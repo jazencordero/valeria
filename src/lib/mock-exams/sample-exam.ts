@@ -177,5 +177,72 @@ export function sampleExam(over: Partial<MockExam> = {}): MockExam {
   };
 }
 
+/**
+ * An invented drill set (baking again): three written problems, 18 points, no true/false
+ * question. The shape of a "figures and tables" set, none of a real one's content.
+ */
+export function sampleDrill(over: Partial<MockExam> = {}): MockExam {
+  const problem = (number: number, label: string) => ({
+    number,
+    type: "written" as const,
+    points: 6,
+    sections: [
+      {
+        stem: `Tray ${label} was baked at three heats.`,
+        figure: {
+          kind: "plot" as const,
+          x: { label: "Heat", min: 150, max: 250, ticks: [150, 200, 250] },
+          y: { label: "Minutes", min: 0, max: 60, ticks: [0, 30, 60] },
+          points: [{ series: `Tray ${label}`, marker: "dot" as const, data: [[150, 50], [200, 35], [250, 20]] }],
+          alt: "Three dots that fall from left to right.",
+        },
+        table: { columns: ["Heat", "Minutes"], rows: [[150, 50], [200, 35], [250, 20]] },
+        parts: [
+          {
+            label: "(a)",
+            text: `What does the figure say about tray ${label}?`,
+            points: 2.5,
+            modelAnswer: "KEY-MODEL hotter is faster.",
+            ticks: [
+              { text: "KEY-TICK reads the trend", points: 1.5 },
+              { text: "KEY-TICK names the axis", points: 1 },
+            ],
+            commonWrong: { answer: "KEY-WRONG hotter is slower", why: "KEY-WRONG-WHY read the axis backwards." },
+            lectures: [oven],
+          },
+          {
+            label: "(b)",
+            text: "How long at 225?",
+            points: 3.5,
+            modelAnswer: "KEY-MODEL about 27 minutes.",
+            ticks: [
+              { text: "KEY-TICK reads between the dots", points: 2 },
+              { text: "KEY-TICK gives a number near 27", points: 1.5 },
+            ],
+            commonWrong: { answer: "KEY-WRONG 35", why: "KEY-WRONG-WHY took the nearest dot." },
+            lectures: [oven, essentials],
+          },
+        ],
+      },
+    ],
+  });
+  return {
+    id: "bake-figures-1",
+    course: "Baking for Beginners",
+    order: 12,
+    kind: "drill-figure",
+    title: "Figures and tables 1",
+    subtitle: "Three problems on reading a figure",
+    totalPoints: 18,
+    howToAnswer: "Answer every problem. Say what you read from the figure.",
+    calculator: true,
+    suggestedMinutes: 60,
+    answersLabel: "Model loaf",
+    paperHeader: { left: ["Baking for Beginners", "School of Ovens"], right: ["Figures and tables 1", "Autumn"] },
+    questions: [problem(1, "A"), problem(2, "B"), problem(3, "C")],
+    ...over,
+  };
+}
+
 /** Every item of the sample's true/false question answered right. */
 export const SAMPLE_ALL_RIGHT: Record<string, boolean> = { "0": true, "1": false, "2": true, "3": true, "4": false, "5": false };

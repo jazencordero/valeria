@@ -74,17 +74,46 @@ type AttemptRow = typeof mockExamAttempts.$inferSelect;
 
 const contentOf = (row: ExamRow) => row.content as MockExam;
 
-function toAttempt(row: AttemptRow, examId: string): Attempt {
+/**
+ * The order to show the true/false items in: the stored order, made to fit the set as it is now.
+ * An index the set no longer has is dropped, one given twice counts once, and an item the stored
+ * order does not know (the set gained one) goes at the end. No true/false question: empty.
+ */
+export function fittedOrder(stored: unknown, items: number): number[] {
+  const out: number[] = [];
+  for (const i of Array.isArray(stored) ? stored : []) {
+    if (Number.isInteger(i) && i >= 0 && i < items && !out.includes(i)) out.push(i);
+  }
+  for (let i = 0; i < items; i++) if (!out.includes(i)) out.push(i);
+  return out;
+}
+
+const asRecord = <V>(value: unknown): Record<string, V> => (typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, V>) : {});
+
+/** score.total of score.max in percent, one decimal; 0 when there is nothing to score. */
+export function percentOf(score: Pick<AttemptScore, "total" | "max">): number {
+  if (!(score.max > 0) || !Number.isFinite(score.total)) return 0;
+  return Math.round((score.total / score.max) * 1000) / 10;
+}
+
+/**
+ * An attempt as the screens get it. What is stored is given as stored (answers, ticks, score),
+ * also when the set has changed since: only the true/false order is fitted to the set.
+ */
+function toAttempt(row: AttemptRow, examRow: ExamRow): Attempt {
+  const exam = contentOf(examRow);
   return {
     id: row.id,
-    examId,
+    examId: examRow.importId,
+    kind: exam.kind,
+    totalPoints: exam.totalPoints,
     startedAt: row.startedAt.toISOString(),
     finishedAt: row.finishedAt ? row.finishedAt.toISOString() : null,
     secondsUsed: row.secondsUsed,
-    tfOrder: row.tfOrder,
-    trueFalse: row.trueFalse,
-    texts: row.texts,
-    ticks: row.ticks,
+    tfOrder: fittedOrder(row.tfOrder, trueFalseOf(exam)?.items.length ?? 0),
+    trueFalse: asRecord(row.trueFalse),
+    texts: asRecord(row.texts),
+    ticks: asRecord(row.ticks),
     edited: row.edited,
     score: (row.score as AttemptScore | null) ?? null,
   };
@@ -162,7 +191,7 @@ async function withLectureLinks(database: Db, userId: string, row: ExamRow): Pro
 
 async function viewOf(database: Db, userId: string, attempt: AttemptRow, exam: ExamRow): Promise<AttemptView> {
   const checkAllowed = await checkAllowedFor(database, userId, exam.courseId);
-  const mine = toAttempt(attempt, exam.importId);
+  const mine = toAttempt(attempt, exam);
   if (attempt.finishedAt) return { finished: true, attempt: mine, exam: await withLectureLinks(database, userId, exam), checkAllowed };
   return { finished: false, attempt: mine, exam: toPaper(contentOf(exam)), checkAllowed };
 }
@@ -176,7 +205,7 @@ function listingOf(row: ExamRow, attempts: AttemptRow[]): MockExamListing {
   const totals = finished.map((a) => a.total ?? (a.score as AttemptScore | null)?.total ?? 0);
   return {
     id: row.importId,
-    order: exam.order,
+    order: row.position,
     kind: exam.kind,
     title: exam.title,
     subtitle: exam.subtitle,
@@ -191,14 +220,21 @@ function listingOf(row: ExamRow, attempts: AttemptRow[]): MockExamListing {
   };
 }
 
-/** Her mock exams in paper order (boss last), each with status, best, latest and attempt count. */
+/** Where a kind sits in the list: full exams (the boss after the others), then the math sets, then the figure sets. */
+const KIND_RANK: Record<string, number> = { teacher: 0, mock: 0, boss: 1, "drill-math": 2, "drill-figure": 3 };
+const rankOf = (kind: string) => KIND_RANK[kind] ?? 9;
+
+/**
+ * Her mock exams, each with status, best, latest and attempt count: the full exams in paper
+ * order with the boss last, then the math sets, then the figure sets.
+ */
 export async function listMockExams(userId: string, database: Db = defaultDb): Promise<MockExamListing[]> {
   const rows = await database.select().from(mockExams).where(eq(mockExams.userId, userId));
   if (!rows.length) return [];
   const attempts = await database.select().from(mockExamAttempts).where(eq(mockExamAttempts.userId, userId));
   return rows
     .map((row) => listingOf(row, attempts.filter((a) => a.mockExamId === row.id)))
-    .sort((a, b) => Number(a.kind === "boss") - Number(b.kind === "boss") || a.order - b.order || a.id.localeCompare(b.id));
+    .sort((a, b) => rankOf(a.kind) - rankOf(b.kind) || a.order - b.order || a.id.localeCompare(b.id));
 }
 
 /** The start screen of one exam (the paper, no keys), or null when she has no such exam. */
@@ -311,7 +347,7 @@ export async function saveAnswer(
   return saved.length === 1;
 }
 
-/** Finishes an open attempt and scores it (question 1 only, until she ticks). Returns it with the keys. */
+/** Finishes an open attempt and scores it (the true/false question, if the set has one; written parts are 0 until she ticks). Returns it with the keys. */
 export async function finishAttempt(userId: string, attemptId: string, secondsUsed?: number, database: Db = defaultDb): Promise<AttemptView> {
   const done = await database.transaction(async (txRaw) => {
     const tx = txRaw as unknown as Db;
@@ -366,7 +402,7 @@ export async function setTicks(
       .set({ ticks: all, score, total: score.total, edited: found.attempt.edited || edit === true })
       .where(and(eq(mockExamAttempts.id, found.attempt.id), eq(mockExamAttempts.userId, userId)))
       .returning();
-    return toAttempt(attempt, found.exam.importId);
+    return toAttempt(attempt, found.exam);
   });
   if (!saved) throw new MockExamNotFound();
   return saved;
@@ -395,6 +431,9 @@ export async function listAttempts(userId: string, examId?: string, database: Db
         id: attempt.id,
         examId: importId,
         examTitle: (content as MockExam).title,
+        kind: (content as MockExam).kind,
+        totalPoints: (content as MockExam).totalPoints,
+        percent: percentOf(score),
         startedAt: attempt.startedAt.toISOString(),
         finishedAt: attempt.finishedAt.toISOString(),
         secondsUsed: attempt.secondsUsed,

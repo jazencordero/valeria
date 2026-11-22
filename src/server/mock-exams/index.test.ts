@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SAMPLE_ALL_RIGHT, sampleExam } from "@/lib/mock-exams/sample-exam";
+import { SAMPLE_ALL_RIGHT, sampleDrill, sampleExam } from "@/lib/mock-exams/sample-exam";
+import { checkMockExam } from "@/lib/mock-exams/validate";
 import type { AttemptView, MockExam } from "@/lib/mock-exams/types";
 import { courses } from "@/server/db/schema/courses";
 import { lectures } from "@/server/db/schema/learn";
@@ -11,12 +12,14 @@ import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { applyMockExams } from "./import";
 import {
   finishAttempt,
+  fittedOrder,
   getAttempt,
   getMockExam,
   getOpenAttempt,
   listAttempts,
   listMockExams,
   MockExamNotFound,
+  percentOf,
   saveAnswer,
   setTicks,
   shuffledOrder,
@@ -483,4 +486,256 @@ describe("two users", () => {
     },
     T,
   );
+});
+
+describe("a drill set: written problems only, 18 points", () => {
+  beforeEach(async () => {
+    await applyMockExams(
+      t.db,
+      her,
+      herCourse,
+      [file(sampleDrill()), file(sampleDrill({ id: "bake-math-1", kind: "drill-math", order: 11, title: "Math problems 1" }))],
+      PAGES,
+    );
+  }, T);
+
+  it(
+    "is listed after the full exams, math sets before figure sets, with its own total",
+    async () => {
+      const list = await listMockExams(her, t.db);
+      expect(list.map((e) => [e.id, e.kind, e.totalPoints, e.order])).toEqual([
+        ["bake-0", "teacher", 24, 1],
+        ["bake-1", "mock", 24, 2],
+        ["bake-boss", "boss", 24, 1],
+        ["bake-math-1", "drill-math", 18, 11],
+        ["bake-figures-1", "drill-figure", 18, 12],
+      ]);
+    },
+    T,
+  );
+
+  it(
+    "is sat, finished, marked and retaken like an exam, with no true/false anywhere",
+    async () => {
+      const started = await startAttempt(her, "bake-figures-1", t.db);
+      expect(started.finished).toBe(false);
+      expect(started.attempt).toMatchObject({ examId: "bake-figures-1", kind: "drill-figure", totalPoints: 18, tfOrder: [], trueFalse: {}, score: null });
+      expect(started.exam.questions.map((q) => q.type)).toEqual(["written", "written", "written"]);
+      expect(JSON.stringify(started)).not.toContain("KEY-");
+      const id = started.attempt.id;
+
+      // There is no item to answer; a text for a part of question 1 is saved.
+      expect(await saveAnswer(her, id, { kind: "trueFalse", item: 0, answer: true }, undefined, t.db)).toBe(false);
+      expect(await saveAnswer(her, id, { kind: "text", part: "1.0.1", text: "About 27 minutes." }, 40, t.db)).toBe(true);
+      expect(await saveAnswer(her, id, { kind: "text", part: "4.0.0", text: "No such question." }, 41, t.db)).toBe(false);
+      expect((await getOpenAttempt(her, "bake-figures-1", t.db))!.attempt.texts).toEqual({ "1.0.1": "About 27 minutes." });
+
+      const done = await finishAttempt(her, id, 55, t.db);
+      expect(done.finished).toBe(true);
+      expect(done.attempt.score).toMatchObject({ total: 0, max: 18 });
+      expect(done.attempt.score!.questions.map((q) => [q.number, q.score, q.max, q.trueFalse, q.parts!.length])).toEqual([
+        [1, 0, 6, undefined, 2],
+        [2, 0, 6, undefined, 2],
+        [3, 0, 6, undefined, 2],
+      ]);
+
+      const marked = await setTicks(her, id, "1.0.1", [{ index: 0, fromCheck: false }, { index: 1, fromCheck: true }], false, t.db);
+      expect(marked.score!.total).toBe(3.5);
+      expect((await setTicks(her, id, "3.0.0", [{ index: 0, fromCheck: false }], false, t.db)).score!.total).toBe(5);
+      await expect(setTicks(her, id, "4.0.0", [], false, t.db)).rejects.toBeInstanceOf(MockExamNotFound);
+
+      // A retake: a new attempt, again with no true/false order, and the first one stays.
+      const before = JSON.stringify(await rowOf(id));
+      const again = await startAttempt(her, "bake-figures-1", t.db);
+      expect(again.attempt.id).not.toBe(id);
+      expect(again.attempt.tfOrder).toEqual([]);
+      await finishAttempt(her, again.attempt.id, 5, t.db);
+      expect(JSON.stringify(await rowOf(id))).toBe(before);
+
+      const figures = (await listMockExams(her, t.db)).find((e) => e.id === "bake-figures-1")!;
+      expect([figures.status, figures.best, figures.latest, figures.attempts, figures.totalPoints]).toEqual(["done", 5, 0, 2, 18]);
+    },
+    T,
+  );
+
+  it(
+    "history carries kind, total and percent, so sets of different size can be compared",
+    async () => {
+      const exam = await sit(her, "bake-1"); // 6 of 24
+      const drill = await startAttempt(her, "bake-figures-1", t.db);
+      await finishAttempt(her, drill.attempt.id, 9, t.db);
+      await setTicks(her, drill.attempt.id, "2.0.0", [{ index: 0, fromCheck: false }, { index: 1, fromCheck: false }], false, t.db); // 2.5 of 18
+      const all = await listAttempts(her, undefined, t.db);
+      expect(all.map((s) => [s.id, s.kind, s.totalPoints, s.score.total, s.score.max, s.percent])).toEqual([
+        [exam.attempt.id, "mock", 24, 6, 24, 25],
+        [drill.attempt.id, "drill-figure", 18, 2.5, 18, 13.9],
+      ]);
+      expect((await listAttempts(her, "bake-figures-1", t.db)).map((s) => s.percent)).toEqual([13.9]);
+      expect((await getAttempt(her, exam.attempt.id, t.db))!.attempt).toMatchObject({ kind: "mock", totalPoints: 24 });
+    },
+    T,
+  );
+
+  it("works out a percent with one decimal, and 0 when there is nothing to score", () => {
+    expect(percentOf({ total: 7.5, max: 18 })).toBe(41.7);
+    expect(percentOf({ total: 24, max: 24 })).toBe(100);
+    expect(percentOf({ total: 0, max: 0 })).toBe(0);
+    expect(percentOf({ total: Number.NaN, max: 24 })).toBe(0);
+  });
+});
+
+describe("a set whose key, ticks or points change after she sat it", () => {
+  /** A changed bake-1 that still passes the check. */
+  function changed(change: (exam: MockExam) => void): MockExam {
+    const exam = sampleExam();
+    change(exam);
+    expect(checkMockExam(JSON.parse(JSON.stringify(exam))).ok).toBe(true);
+    return exam;
+  }
+  const reupload = async (exam: MockExam) => expect(await applyMockExams(t.db, her, herCourse, [file(exam)], PAGES)).toEqual({ created: 0, skipped: 0, updated: 1 });
+
+  /** One finished and marked attempt (6 + 2 + 1 = 9 of 24) and one open one with answers. */
+  async function sitBoth() {
+    const done = await sit(her, "bake-1");
+    await setTicks(her, done.attempt.id, "2.0.0", [{ index: 0, fromCheck: false }, { index: 1, fromCheck: true }, { index: 2, fromCheck: false }], false, t.db);
+    await setTicks(her, done.attempt.id, "4.0.0", [{ index: 3, fromCheck: false }], false, t.db);
+    const open = await startAttempt(her, "bake-1", t.db);
+    await saveAnswer(her, open.attempt.id, { kind: "trueFalse", item: 5, answer: true }, 20, t.db);
+    await saveAnswer(her, open.attempt.id, { kind: "text", part: "4.0.0", text: "Four eggs." }, 30, t.db);
+    return { done: done.attempt.id, open: open.attempt.id, rows: JSON.stringify([await rowOf(done.attempt.id), await rowOf(open.attempt.id)]) };
+  }
+  const rows = async (ids: { done: string; open: string }) => JSON.stringify([await rowOf(ids.done), await rowOf(ids.open)]);
+
+  it(
+    "keeps stored attempts as they were and readable when the set loses its true/false question",
+    async () => {
+      const ids = await sitBoth();
+      await reupload(
+        changed((exam) => {
+          exam.questions.shift();
+          exam.totalPoints = 18;
+        }),
+      );
+      expect(await rows(ids)).toBe(ids.rows);
+
+      // The finished one: stored score, answers and ticks as they were; no true/false order to show.
+      const done = (await getAttempt(her, ids.done, t.db))!;
+      expect(done.finished).toBe(true);
+      expect(done.exam.questions).toHaveLength(3);
+      expect(done.attempt.tfOrder).toEqual([]);
+      expect(done.attempt.trueFalse).toEqual(SAMPLE_ALL_RIGHT);
+      expect(done.attempt.score).toMatchObject({ total: 9, max: 24 });
+      expect(done.attempt.score!.questions).toHaveLength(4);
+      expect(done.attempt.totalPoints).toBe(18);
+      // The lists still read: the stored total against the stored maximum.
+      expect((await listAttempts(her, "bake-1", t.db)).map((s) => [s.score.total, s.score.max, s.percent, s.totalPoints])).toEqual([[9, 24, 37.5, 18]]);
+      const listing = (await listMockExams(her, t.db)).find((e) => e.id === "bake-1")!;
+      expect([listing.status, listing.best, listing.latest, listing.totalPoints]).toEqual(["open", 9, 9, 18]);
+
+      // The open one goes on: no item to answer any more, texts still saved, and it is scored as the set is now.
+      const open = (await getOpenAttempt(her, "bake-1", t.db))!;
+      expect(open.attempt.id).toBe(ids.open);
+      expect(open.attempt.tfOrder).toEqual([]);
+      expect(open.attempt.texts).toEqual({ "4.0.0": "Four eggs." });
+      expect(await saveAnswer(her, ids.open, { kind: "trueFalse", item: 0, answer: true }, undefined, t.db)).toBe(false);
+      expect(await saveAnswer(her, ids.open, { kind: "text", part: "3.0.0", text: "It relaxes." }, undefined, t.db)).toBe(true);
+      const finished = await finishAttempt(her, ids.open, 60, t.db);
+      expect(finished.attempt.score).toMatchObject({ total: 0, max: 18 });
+      expect(finished.attempt.score!.questions.map((q) => q.number)).toEqual([2, 3, 4]);
+
+      // Only a new marking of the old attempt scores it again, as the set is now: 2 + 1, no question 1.
+      const remarked = await setTicks(her, ids.done, "3.0.0", [], true, t.db);
+      expect(remarked.score).toMatchObject({ total: 3, max: 18 });
+      expect(remarked.score!.questions).toHaveLength(3);
+      expect(remarked.edited).toBe(true);
+    },
+    T,
+  );
+
+  it(
+    "reads an attempt whose ticks and parts the set no longer has, and whose true/false question got shorter",
+    async () => {
+      const ids = await sitBoth();
+      await reupload(
+        changed((exam) => {
+          const [q1, q2] = exam.questions;
+          if (q1.type !== "truefalse" || q2.type !== "written") throw new Error("the sample's first two questions");
+          q1.items = q1.items.slice(0, 4).map((item, i) => (i === 0 ? { ...item, answer: false } : item)); // two items gone, one key turned
+          q1.points = 4;
+          q2.sections[0].parts[0].ticks = [{ text: "KEY-TICK the only tick now", points: 2 }]; // ticks 1 and 2 are gone
+          exam.questions.pop(); // question 4 and its part are gone
+          exam.totalPoints = 16;
+        }),
+      );
+      expect(await rows(ids)).toBe(ids.rows);
+
+      const done = (await getAttempt(her, ids.done, t.db))!;
+      // Each item the set has now, once, in the order she had them; the two that are gone are left out.
+      expect([...done.attempt.tfOrder].sort()).toEqual([0, 1, 2, 3]);
+      const stored = (await rowOf(ids.done)).tfOrder;
+      expect(done.attempt.tfOrder).toEqual(stored.filter((i) => i < 4));
+      // Her ticks and answers come back as stored, also the ones that point at nothing now.
+      expect(done.attempt.ticks).toEqual({
+        "2.0.0": [{ index: 0, fromCheck: false }, { index: 1, fromCheck: true }, { index: 2, fromCheck: false }],
+        "4.0.0": [{ index: 3, fromCheck: false }],
+      });
+      expect(done.attempt.score).toMatchObject({ total: 9, max: 24 });
+      expect((await listAttempts(her, undefined, t.db)).map((s) => s.score.total)).toEqual([9]);
+      expect((await getMockExam(her, "bake-1", t.db))!.listing).toMatchObject({ best: 9, latest: 9, totalPoints: 16 });
+
+      // The part that is gone cannot be ticked; a part that stayed is marked against its ticks of now.
+      await expect(setTicks(her, ids.done, "4.0.0", [{ index: 0, fromCheck: false }], true, t.db)).rejects.toBeInstanceOf(MockExamNotFound);
+      const remarked = await setTicks(her, ids.done, "2.0.0", [{ index: 0, fromCheck: false }, { index: 1, fromCheck: true }, { index: 2, fromCheck: false }], true, t.db);
+      expect(remarked.ticks["2.0.0"]).toEqual([{ index: 0, fromCheck: false }]);
+      // Question 1 by the new key: items 1 to 3 right, item 0 wrong now, 4 and 5 gone: 2. Question 2: 2. Her old tick on the gone part counts for nothing.
+      expect(remarked.score!.questions.map((q) => [q.number, q.score])).toEqual([[1, 2], [2, 2], [3, 0]]);
+      expect(remarked.score).toMatchObject({ total: 4, max: 16 });
+      expect(remarked.ticks["4.0.0"]).toEqual([{ index: 3, fromCheck: false }]);
+
+      // The open attempt: its answer to an item that is gone is refused from now on, the rest goes on.
+      expect(await saveAnswer(her, ids.open, { kind: "trueFalse", item: 5, answer: false }, undefined, t.db)).toBe(false);
+      expect(await saveAnswer(her, ids.open, { kind: "trueFalse", item: 3, answer: true }, undefined, t.db)).toBe(true);
+      expect(await saveAnswer(her, ids.open, { kind: "text", part: "4.0.0", text: "Later." }, undefined, t.db)).toBe(false);
+      const finished = await finishAttempt(her, ids.open, undefined, t.db);
+      expect(finished.attempt.score).toMatchObject({ total: 1, max: 16 });
+    },
+    T,
+  );
+
+  it(
+    "shows every item when the true/false question got longer",
+    async () => {
+      const ids = await sitBoth();
+      await reupload(
+        changed((exam) => {
+          const q1 = exam.questions[0];
+          if (q1.type !== "truefalse") throw new Error("the sample's first question");
+          q1.items = [...q1.items, { ...q1.items[0], text: "A seventh invented item." }, { ...q1.items[1], text: "An eighth invented item." }];
+          q1.points = 8;
+          exam.totalPoints = 26;
+        }),
+      );
+      const stored = (await rowOf(ids.done)).tfOrder;
+      const done = (await getAttempt(her, ids.done, t.db))!;
+      expect(done.attempt.tfOrder).toEqual([...stored, 6, 7]);
+      expect(done.attempt.score).toMatchObject({ total: 9, max: 24 });
+      const open = (await getOpenAttempt(her, "bake-1", t.db))!;
+      expect([...open.attempt.tfOrder].sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+      expect(await saveAnswer(her, ids.open, { kind: "trueFalse", item: 7, answer: false }, undefined, t.db)).toBe(true);
+      // A new attempt shuffles all eight.
+      await finishAttempt(her, ids.open, undefined, t.db);
+      expect([...(await startAttempt(her, "bake-1", t.db)).attempt.tfOrder].sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    },
+    T,
+  );
+
+  it("fits a stored order to the items there are", () => {
+    expect(fittedOrder([3, 1, 0, 2], 4)).toEqual([3, 1, 0, 2]);
+    expect(fittedOrder([5, 3, 1, 4, 0, 2], 4)).toEqual([3, 1, 0, 2]);
+    expect(fittedOrder([1, 0], 4)).toEqual([1, 0, 2, 3]);
+    expect(fittedOrder([2, 2, -1, 1.5, "0", null, 9], 3)).toEqual([2, 0, 1]);
+    expect(fittedOrder([4, 2, 0], 0)).toEqual([]);
+    expect(fittedOrder(null, 2)).toEqual([0, 1]);
+    expect(fittedOrder(undefined, 0)).toEqual([]);
+  });
 });

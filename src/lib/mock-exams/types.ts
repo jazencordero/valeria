@@ -8,12 +8,16 @@
  *                   answer, tick, usual wrong answer and lecture link removed.
  *
  * Keys used in an attempt:
- *   a true/false item   its index in the exam file, 0..5 (`tfOrder` is the order shown this attempt)
+ *   a true/false item   its index in the set's true/false question, from 0 (`tfOrder` is the order shown this attempt)
  *   a written part      PartKey "<question number>.<section index>.<part index>", e.g. "2.0.1"
  *   a tick              its index in the part's `ticks`
  */
 
-export type MockExamKind = "teacher" | "mock" | "boss";
+/**
+ * "teacher", "mock" and "boss" are full exams; "drill-math" and "drill-figure" are shorter sets of
+ * written problems only (no true/false question, and a total that need not be a full exam's).
+ */
+export type MockExamKind = "teacher" | "mock" | "boss" | "drill-math" | "drill-figure";
 
 export type LectureRef = {
   page: string;
@@ -122,7 +126,7 @@ export type QuestionScore = {
   number: number;
   score: number;
   max: number;
-  /** Question 1 only. */
+  /** A true/false question only. */
   trueFalse?: { right: number; wrong: number; blank: number };
   /** Written questions only. */
   parts?: PartScore[];
@@ -133,12 +137,21 @@ export type Attempt = {
   id: string;
   /** The exam's bundle id. */
   examId: string;
+  /**
+   * The set's kind and total as they are now (from the set, not stored with the attempt). The
+   * server always fills both; optional only so that hand-made attempts (samples, tests) still fit.
+   */
+  kind?: MockExamKind;
+  totalPoints?: number;
   startedAt: string;
   /** Null while she is sitting it. */
   finishedAt: string | null;
   /** Seconds on the timer, as the screen last reported them. */
   secondsUsed: number;
-  /** True/false item indexes in the order shown in this attempt. */
+  /**
+   * True/false item indexes in the order shown in this attempt: each item of the set as it is
+   * now exactly once (empty for a set with no true/false question).
+   */
   tfOrder: number[];
   /** Keyed by item index (as a string); a missing key is unanswered, the same as blank. */
   trueFalse: Record<string, TrueFalseAnswer>;
@@ -155,6 +168,11 @@ export type AttemptSummary = {
   id: string;
   examId: string;
   examTitle: string;
+  /** The set's kind and total as they are now. The server always fills these three (optional as on `Attempt`). */
+  kind?: MockExamKind;
+  totalPoints?: number;
+  /** score.total of score.max, in percent with one decimal (0 when max is 0): comparable across kinds. */
+  percent?: number;
   startedAt: string;
   finishedAt: string;
   secondsUsed: number;

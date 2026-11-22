@@ -86,7 +86,7 @@ export const MockExamSchema = z
     id: z.string().regex(MOCK_EXAM_ID, { error: "id must be lower-case letters, digits, - or _ (64 at most)." }),
     course: text(500),
     order: z.number().min(0).max(10_000),
-    kind: z.enum(["teacher", "mock", "boss"]),
+    kind: z.enum(["teacher", "mock", "boss", "drill-math", "drill-figure"]),
     title: filled(500),
     subtitle: text(1000),
     intro: text().optional(),
@@ -104,6 +104,16 @@ export const MockExamSchema = z
     const numbers = exam.questions.map((q) => q.number);
     numbers.forEach((n, i) => {
       if (numbers.indexOf(n) !== i) ctx.addIssue({ code: "custom", path: ["questions", i, "number"], message: "this question number is used twice." });
+    });
+    // The arithmetic of the paper, whatever its size: questions add up to the total, parts to their question.
+    const hundredths = (n: number) => Math.round(n * 100);
+    if (exam.questions.reduce((sum, q) => sum + hundredths(q.points), 0) !== hundredths(exam.totalPoints)) {
+      ctx.addIssue({ code: "custom", path: ["totalPoints"], message: "the questions' points do not add up to totalPoints." });
+    }
+    exam.questions.forEach((q, i) => {
+      if (q.type !== "written") return;
+      const parts = q.sections.reduce((sum, s) => sum + s.parts.reduce((inner, p) => inner + hundredths(p.points), 0), 0);
+      if (parts !== hundredths(q.points)) ctx.addIssue({ code: "custom", path: ["questions", i, "points"], message: "the parts' points do not add up to the question's points." });
     });
     // Her true/false answers are kept by item index alone, so a file may hold one such question.
     exam.questions.forEach((q, i) => {

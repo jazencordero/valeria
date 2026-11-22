@@ -1301,8 +1301,11 @@ const ExamBundlePartSchema = z.object({
     )
     .default([]),
   documents: z.array(z.object({ file: relFile, text: z.string({ error: "text must be text." }) }), { error: "documents must be a list." }).default([]),
-  /** The folder's `mock-exams/` files (M3-60), in batch 1. Each is checked when applied: one that is not an exam is left out and reported. */
-  mockExams: z.array(z.object({ file: relFile, exam: z.unknown() }), { error: "mockExams must be a list." }).max(50, { error: "mockExams holds too many files." }).default([]),
+  /** The folder's `mock-exams/` files (M3-60), from batch 1 on, as many as fit. Each is checked when applied: one that is not an exam is left out and reported. */
+  mockExams: z
+    .array(z.object({ file: relFile, exam: z.unknown(), position: wholeNumber("position").min(0).max(100_000).optional() }), { error: "mockExams must be a list." })
+    .max(200, { error: "mockExams holds too many files." })
+    .default([]),
 });
 export type ExamBundlePart = z.infer<typeof ExamBundlePartSchema>;
 
@@ -1382,18 +1385,26 @@ export function bundlePartsOf(b: BundleCourse, maxBytes: number = UPLOAD_PART_BY
   const course = source as CourseBundle;
   const base = { part: "bundle" as const, kind: "exam" as const, courseCode: b.courseCode, seed: course.seed, map: course.map, account: rule };
   const documents = course.examDocs.flatMap((d) => (d.text !== undefined ? [{ file: d.file, text: d.text }] : []));
-  const mockExams: ExamBundlePart["mockExams"] = (b.mockExams ?? []).map((m) => ({ file: m.file, exam: m.exam }));
+  const mockExams: ExamBundlePart["mockExams"] = (b.mockExams ?? []).map((m) => ({ file: m.file, exam: m.exam, ...(m.position !== undefined ? { position: m.position } : {}) }));
   const room = maxBytes - jsonBytes({ ...base, batch: widest, pages: [], decks: [], documents: [], mockExams: [] });
   if (room < 0) throw tooBig("its seed.json and map");
 
   type Batch = { pages: BundlePage[]; decks: ExamBundlePart["decks"]; documents: ExamBundlePart["documents"]; mockExams: ExamBundlePart["mockExams"] };
-  const batches: Batch[] = [{ pages: [], decks: [], documents, mockExams }];
-  let used = documents.reduce((s, d) => s + jsonBytes(d) + 1, 0) + mockExams.reduce((s, m) => s + jsonBytes(m) + 1, 0);
-  if (used > room) throw tooBig("its seed.json, map, exam documents and mock exams together");
+  const batches: Batch[] = [{ pages: [], decks: [], documents, mockExams: [] }];
+  let used = documents.reduce((s, d) => s + jsonBytes(d) + 1, 0);
+  if (used > room) throw tooBig("its seed.json, map and exam documents together");
   const next = () => {
     batches.push({ pages: [], decks: [], documents: [], mockExams: [] });
     used = 0;
   };
+  // The mock exams fill batches like pages do: each whole, a new request when one is full.
+  for (const m of mockExams) {
+    const cost = jsonBytes(m) + 1;
+    if (cost > room) throw tooBig(m.file);
+    if (used + cost > room) next();
+    batches[batches.length - 1].mockExams.push(m);
+    used += cost;
+  }
   for (const page of course.pages) {
     const cost = jsonBytes(page) + 1;
     if (cost > room) throw tooBig(page.file);
