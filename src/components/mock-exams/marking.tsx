@@ -170,7 +170,7 @@ export function Marking({
             </span>
           ) : null}
           <span className="rounded-full bg-surface px-3 py-1 font-mono text-[13px]" aria-live="polite" data-testid="mark-total">
-            <b className="font-medium text-ink">{num(total)}</b> <span className="text-ink-3">/ {exam.totalPoints}</span>
+            <b className="font-medium text-ink">{num(total)}</b> <span className="text-ink-3">/ {attempt.score?.max ?? exam.totalPoints}</span>
           </span>
         </div>
         <div className="mx-auto flex max-w-[860px] gap-1 px-[var(--pad)] pb-1.5" aria-hidden="true">
@@ -250,7 +250,7 @@ function TrueFalseMarks({ question, attempt }: { question: TrueFalseQuestion; at
         Right +1 · Wrong {MINUS}1 · Blank 0. Question 1 never goes below 0.
       </p>
       <div className="mt-3 grid gap-3">
-        {order.map((item, k) => {
+        {order.filter((item) => question.items[item]).map((item, k) => {
           const it = question.items[item];
           const a = attempt.trueFalse[String(item)];
           const d = a === null || a === undefined ? 0 : a === it.answer ? 1 : -1;
