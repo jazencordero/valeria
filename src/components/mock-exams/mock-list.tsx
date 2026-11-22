@@ -79,7 +79,7 @@ export function MockTrend({
   const d = attempts.map((a, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(value(a)).toFixed(1)}`).join("");
   const last = attempts[n - 1];
   const show = (a: AttemptSummary) => (percent ? `${Math.round(value(a))}%` : `${num(a.score.total)} / ${a.score.max}`);
-  const groups = new Set(attempts.map((a) => groupOf(kinds[a.examId] ?? "")));
+  const groups = new Set(attempts.map((a) => groupOf(kinds[a.examId] ?? a.kind ?? "")));
   const label = attempts.map((a) => `${a.examTitle} ${shortDay(a.finishedAt)}: ${show(a)}`).join("; ");
   return (
     <div className="rounded-2xl border border-line bg-surface p-4" data-testid="mock-trend">
@@ -98,7 +98,7 @@ export function MockTrend({
         ))}
         {n > 1 ? <path d={d} style={{ fill: "none", stroke: "var(--ink-3)", strokeWidth: 1.4, strokeLinejoin: "round" }} /> : null}
         {attempts.map((a, i) => (
-          <Mark key={a.id} group={groupOf(kinds[a.examId] ?? "")} x={x(i)} y={y(value(a))} last={i === n - 1} />
+          <Mark key={a.id} group={groupOf(kinds[a.examId] ?? a.kind ?? "")} x={x(i)} y={y(value(a))} last={i === n - 1} />
         ))}
       </svg>
       <p className="mt-1 flex flex-wrap gap-x-3 font-mono text-[12px] text-ink-3">
@@ -148,7 +148,7 @@ export function MockExamRow({ exam }: { exam: MockExamListing }) {
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="font-display text-[17px] leading-tight text-ink">{exam.title}</span>
           {boss ? <Chip tone="boss">Boss</Chip> : null}
-          {exam.kind === "teacher" ? <Chip tone="teacher">From your teacher</Chip> : null}
+          {exam.kind === "teacher" && !/teacher/i.test(exam.title) ? <Chip tone="teacher">From your teacher</Chip> : null}
           {exam.status === "open" ? <Chip tone="open">In progress</Chip> : null}
         </span>
         <span className="mt-0.5 block font-mono text-[12.5px] text-ink-2" data-testid="mock-card-scores">
