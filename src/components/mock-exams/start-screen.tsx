@@ -16,7 +16,8 @@ import { TimerSwitch } from "./timer-switch";
 export function StartScreen({ start, history }: { start: MockExamStart; history: AttemptSummary[] }) {
   const { exam, listing } = start;
   const boss = exam.kind === "boss" && exam.expectedScore;
-  const per = Math.round((exam.totalPoints / exam.questions.length) * 100) / 100;
+  const per = exam.questions[0]?.points ?? 0;
+  const uniform = exam.questions.every((q) => q.points === per);
   const label =
     listing.status === "open" ? "Resume" : listing.attempts > 0 ? "Retake" : "Start";
   return (
@@ -52,8 +53,8 @@ export function StartScreen({ start, history }: { start: MockExamStart; history:
         {exam.intro ? <p className="text-[15px]">{exam.intro}</p> : null}
         {exam.source ? <p className="text-[13px] text-ink-3">Source: {exam.source}</p> : null}
         <p className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-[13px] text-ink-2">
-          <span>4 questions</span>
-          <span>{num(per)} points each</span>
+          <span>{exam.questions.length} questions</span>
+          {uniform ? <span>{num(per)} points each</span> : null}
           <span>{exam.totalPoints} total</span>
           {exam.calculator ? <span>calculator allowed</span> : null}
         </p>
@@ -81,7 +82,7 @@ export function StartScreen({ start, history }: { start: MockExamStart; history:
             Your attempts
           </h2>
           <div className="mt-3">
-            <MockTrend attempts={history} max={exam.totalPoints} title="This exam so far" />
+            <MockTrend attempts={history} kinds={{ [exam.id]: exam.kind }} title="This exam so far" />
           </div>
           <ul className="mt-3 grid list-none gap-2.5">
             {[...history].reverse().map((a) => (

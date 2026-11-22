@@ -1,5 +1,5 @@
 /*
- * Mock exams (M3-60): the result of a finished attempt. The total out of 24 (the server's score),
+ * Mock exams (M3-60): the result of a finished attempt. The total out of the exam's points (the server's score),
  * the boss line when it is the boss exam, each question's score with a small bar, then "Where
  * you lost points": every point not earned, grouped by the lecture to reread, biggest first,
  * each group linking to that lecture page. Then Review answers, Retake, Back to mock exams.

@@ -155,3 +155,28 @@ export function sampleAttempt(over: Partial<Attempt> = {}): Attempt {
     ...over,
   };
 }
+
+/** An invented figure drill: three written questions, 18 points, no true/false. */
+export const sampleDrill: MockExam = (() => {
+  const q4 = sampleExam.questions[3];
+  if (q4.type !== "written") throw new Error("sample");
+  return {
+    ...sampleExam,
+    id: "sample-drill",
+    order: 16,
+    kind: "drill-figure" as MockExam["kind"],
+    title: "Sample figures",
+    totalPoints: 18,
+    paperHeader: { left: ["SAMPLE101 Sample course", "Sample School"], right: ["Sample figures", "Ready"] },
+    questions: [1, 2, 3].map((number) => ({ ...q4, number })),
+  };
+})();
+
+export const sampleDrillPaper: MockExamPaper = {
+  ...sampleDrill,
+  questions: sampleDrill.questions.map((q) =>
+    q.type === "truefalse"
+      ? { number: q.number, type: q.type, points: q.points, prompt: q.prompt, items: q.items.map((i) => ({ text: i.text })) }
+      : { ...q, sections: q.sections.map((s) => ({ ...s, parts: s.parts.map((p) => ({ label: p.label, text: p.text, points: p.points })) })) },
+  ),
+};

@@ -2,6 +2,8 @@
 /*
  * Mock exams (M3-60): sitting an exam, one question per screen, on a page that reads like the
  * teacher's paper. Around it only a thin bar: leave, "2 of 4", Saved, the timer, progress.
+ * Any number of questions, of either type: a drill set has only written ones (no true/false
+ * rule, no "Leave blank").
  *
  * - Every answer is saved on the server as she types (one save per field, 450 ms after the last
  *   key; a choice saves at once). "Saving" / "Saved" says where it is; a failed save says
@@ -14,7 +16,7 @@
  *   used ride along with every save.
  * - The question she is on is kept in the URL (?q=) and in this browser, so leaving and coming
  *   back resumes there.
- * - Finishing on question 4 asks first when written parts are empty, then marks.
+ * - Finishing on the last question asks first when written parts are empty, then marks.
  */
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -41,7 +43,8 @@ export function Sitting({
   const router = useRouter();
   const remembered = useLastQuestion(attempt.id);
   const [chosen, setQ] = useState<number | null>(initialQ);
-  const q = chosen ?? remembered ?? 1;
+  const count = exam.questions.length;
+  const q = Math.min(count, chosen ?? remembered ?? 1);
   const [tf, setTf] = useState<Record<string, TrueFalseAnswer>>(attempt.trueFalse);
   const [texts, setTexts] = useState<Record<string, string>>(attempt.texts);
   const [save, setSave] = useState<SaveState>("saved");
@@ -201,7 +204,7 @@ export function Sitting({
               <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
             </svg>
           </Button>
-          <span className="font-mono text-[13px] text-ink-2">{q} of 4</span>
+          <span className="font-mono text-[13px] text-ink-2">{q} of {count}</span>
           <span
             className={`font-mono text-[12px] ${save === "failed" ? "text-due" : "text-ink-3"}`}
             aria-live="polite"
@@ -239,7 +242,7 @@ export function Sitting({
           ) : null}
         </div>
         <div className="mx-auto flex max-w-[760px] gap-1 px-[var(--pad)] pb-1.5" aria-hidden="true">
-          {[1, 2, 3, 4].map((i) => (
+          {exam.questions.map((_, k) => k + 1).map((i) => (
             <i key={i} className={`h-1 flex-1 rounded-full ${i <= q ? "bg-ink" : "bg-line"}`} />
           ))}
         </div>
@@ -269,7 +272,7 @@ export function Sitting({
       <main className="mx-auto max-w-[760px] px-[var(--pad)] pt-4 pb-40">
         <PaperHeader header={exam.paperHeader} />
         <h1 ref={headingRef} tabIndex={-1} className="sr-only">
-          {exam.title}, question {q} of 4
+          {exam.title}, question {q} of {count}
         </h1>
         <div className="mt-5">
           {question.type === "truefalse" ? (
@@ -303,7 +306,7 @@ export function Sitting({
                 Back
               </Button>
             ) : null}
-            {q < 4 ? (
+            {q < count ? (
               <Button block onClick={() => goTo(q + 1)}>
                 Next
               </Button>

@@ -59,7 +59,7 @@ export function writeTimer(examId: string, prefs: TimerPrefs): void {
 export function useLastQuestion(attemptId: string): number | null {
   const raw = useSyncExternalStore(subscribe, () => read(lastQKey(attemptId)), () => "");
   const n = Number(raw);
-  return n >= 1 && n <= 4 ? n : null;
+  return Number.isInteger(n) && n >= 1 ? n : null;
 }
 
 export function writeLastQuestion(attemptId: string, q: number): void {

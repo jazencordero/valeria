@@ -29,7 +29,7 @@ async function signedInUser(): Promise<User> {
 
 function questionOf(v: string | undefined): number | null {
   const n = Number(v);
-  return Number.isInteger(n) && n >= 1 && n <= 4 ? n : null;
+  return Number.isInteger(n) && n >= 1 && n <= 50 ? n : null;
 }
 
 async function AttemptScreen({ params, searchParams }: { params: Params; searchParams: Search }) {

@@ -4,7 +4,7 @@
  *
  * - Question 1 is marked for her: per item her choice, the answer, +1 / −1 / 0, why, the note
  *   on a less certain key (practice 1(f)), and the lecture to reread.
- * - Questions 2 to 4: per part her answer beside the model answer (labelled with the exam's
+ * - Written questions (all of a drill set): per part her answer beside the model answer (labelled with the exam's
  *   `answersLabel`), the ticks she gives herself, the part's score, the usual wrong answer and
  *   the lectures. Each tick is saved on the server at once; the score shown is the server's as
  *   soon as it answers (an instant local sum until then).
@@ -68,7 +68,7 @@ export function Marking({
   readOnly: boolean;
 }) {
   const router = useRouter();
-  const [q, setQ] = useState(initialQ);
+  const [q, setQ] = useState(() => Math.max(1, Math.min(initialQ, exam.questions.length)));
   const [attempt, setAttempt] = useState(initial);
   const [touched, setTouched] = useState<Record<string, number[]>>({});
   const [checks, setChecks] = useState<Record<string, Check>>({});
@@ -161,7 +161,7 @@ export function Marking({
             </svg>
           </Button>
           <span className="font-mono text-[13px] text-ink-2">
-            {readOnly ? "Past attempt" : "Marking"} · {q} of 4
+            {readOnly ? "Past attempt" : "Marking"} · {q} of {exam.questions.length}
           </span>
           <span className="grow" />
           {failed ? (
@@ -174,7 +174,7 @@ export function Marking({
           </span>
         </div>
         <div className="mx-auto flex max-w-[860px] gap-1 px-[var(--pad)] pb-1.5" aria-hidden="true">
-          {[1, 2, 3, 4].map((i) => (
+          {exam.questions.map((_, k) => k + 1).map((i) => (
             <i key={i} className={`h-1 flex-1 rounded-full ${i <= q ? "bg-ink" : "bg-line"}`} />
           ))}
         </div>
@@ -220,7 +220,7 @@ export function Marking({
               Back
             </Button>
           ) : null}
-          {q < 4 ? (
+          {q < exam.questions.length ? (
             <Button block onClick={() => goTo(q + 1)}>
               Next
             </Button>
